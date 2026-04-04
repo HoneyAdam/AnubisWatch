@@ -80,14 +80,19 @@ AnubisWatch/
 
 ## 📊 Comparison
 
-| Feature | UptimeRobot | Pingdom | Uptime Kuma | Checkly | **AnubisWatch** |
-|---------|-------------|---------|-------------|---------|-----------------|
-| Self-hosted | ❌ SaaS | ❌ SaaS | ✅ | ❌ SaaS | ✅ |
-| Multi-Protocol | ❌ HTTP | ⚠️ Limited | ⚠️ Some | ⚠️ HTTP+API | ✅ **8 protocols** |
-| Distributed | ❌ | ❌ | ❌ | ⚠️ SaaS only | ✅ **Raft cluster** |
-| Synthetic | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Single Binary | ❌ N/A | ❌ N/A | ❌ Node.js | ❌ N/A | ✅ **Zero deps** |
-| MCP Server | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Feature | AnubisWatch | Uptime Kuma | UptimeRobot | Checkly |
+|---------|-------------|-------------|-------------|---------|
+| **Self-Hosted** | ✅ Yes | ✅ Yes | ❌ SaaS only | ❌ SaaS only |
+| **Single Binary** | ✅ Go (zero deps) | ❌ Node.js + npm | ❌ N/A | ❌ N/A |
+| **Protocol Support** | ✅ 8 protocols | ⚠️ 5 protocols | ❌ 1-2 protocols | ⚠️ 2 protocols |
+| **Distributed Probes** | ✅ Raft consensus | ❌ Single node | ❌ Cloud only | ⚠️ SaaS multi-location |
+| **Synthetic Monitoring** | ✅ Multi-step journeys | ❌ No | ❌ No | ✅ Yes (SaaS) |
+| **Embedded Dashboard** | ✅ React 19 (compiled) | ⚠️ Vue.js (separate) | ❌ Web UI | ✅ Web UI |
+| **Embedded Storage** | ✅ CobaltDB (encrypted) | ⚠️ SQLite (plaintext) | ❌ Cloud DB | ❌ Cloud DB |
+| **Multi-Tenant** | ✅ Workspace isolation | ❌ Single tenant | ❌ Single tenant | ❌ Teams add-on |
+| **MCP Integration** | ✅ Native | ❌ No | ❌ No | ❌ No |
+| **Cluster Mode** | ✅ Built-in Raft | ❌ No clustering | ❌ Cloud only | ❌ Cloud only |
+| **Cost** | ✅ 100% Free (Apache 2.0) | ✅ Free (GPL) | ⚠️ Freemium | ❌ $29+/mo |
 
 ---
 
@@ -111,12 +116,15 @@ brew install anubiswatch/tap/anubis
 ### Docker
 
 ```bash
+# Pull from GHCR (GitHub Container Registry)
+docker pull ghcr.io/anubiswatch/anubiswatch:latest
+
 # Single node
 docker run -d \
   --name anubis \
   -p 8443:8443 \
   -v anubis-data:/var/lib/anubis \
-  anubiswatch/anubis:latest
+  ghcr.io/anubiswatch/anubiswatch:latest
 
 # With custom config
 docker run -d \
@@ -124,7 +132,7 @@ docker run -d \
   -p 8443:8443 \
   -v $(pwd)/anubis.yaml:/etc/anubis/anubis.yaml \
   -v anubis-data:/var/lib/anubis \
-  anubiswatch/anubis:latest
+  ghcr.io/anubiswatch/anubiswatch:latest
 ```
 
 ### Initialize & Run

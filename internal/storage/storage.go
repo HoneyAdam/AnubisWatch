@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -585,4 +586,382 @@ func (db *CobaltDB) GetRaftLogEntry(ctx context.Context, index uint64) (term uin
 	}
 
 	return term, data, nil
+}
+
+// Alert storage methods for alert manager
+
+// SaveAlertChannel saves an alert channel
+func (db *CobaltDB) SaveAlertChannel(ch *core.AlertChannel) error {
+	key := fmt.Sprintf("default/alerts/channels/%s", ch.ID)
+	data, err := json.Marshal(ch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal channel: %w", err)
+	}
+	return db.Put(key, data)
+}
+
+// GetAlertChannel retrieves an alert channel by ID
+func (db *CobaltDB) GetAlertChannel(id string) (*core.AlertChannel, error) {
+	key := fmt.Sprintf("default/alerts/channels/%s", id)
+	data, err := db.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	var ch core.AlertChannel
+	if err := json.Unmarshal(data, &ch); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal channel: %w", err)
+	}
+	return &ch, nil
+}
+
+// ListAlertChannels returns all alert channels
+func (db *CobaltDB) ListAlertChannels() ([]*core.AlertChannel, error) {
+	prefix := "default/alerts/channels/"
+	results, err := db.PrefixScan(prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	channels := make([]*core.AlertChannel, 0, len(results))
+	for _, data := range results {
+		if data == nil {
+			continue
+		}
+		var ch core.AlertChannel
+		if err := json.Unmarshal(data, &ch); err != nil {
+			db.logger.Warn("failed to unmarshal channel", "err", err)
+			continue
+		}
+		channels = append(channels, &ch)
+	}
+	return channels, nil
+}
+
+// DeleteAlertChannel removes an alert channel
+func (db *CobaltDB) DeleteAlertChannel(id string) error {
+	return db.Delete(fmt.Sprintf("default/alerts/channels/%s", id))
+}
+
+// SaveAlertRule saves an alert rule
+func (db *CobaltDB) SaveAlertRule(rule *core.AlertRule) error {
+	key := fmt.Sprintf("default/alerts/rules/%s", rule.ID)
+	data, err := json.Marshal(rule)
+	if err != nil {
+		return fmt.Errorf("failed to marshal rule: %w", err)
+	}
+	return db.Put(key, data)
+}
+
+// GetAlertRule retrieves an alert rule by ID
+func (db *CobaltDB) GetAlertRule(id string) (*core.AlertRule, error) {
+	key := fmt.Sprintf("default/alerts/rules/%s", id)
+	data, err := db.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	var rule core.AlertRule
+	if err := json.Unmarshal(data, &rule); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal rule: %w", err)
+	}
+	return &rule, nil
+}
+
+// ListAlertRules returns all alert rules
+func (db *CobaltDB) ListAlertRules() ([]*core.AlertRule, error) {
+	prefix := "default/alerts/rules/"
+	results, err := db.PrefixScan(prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	rules := make([]*core.AlertRule, 0, len(results))
+	for _, data := range results {
+		if data == nil {
+			continue
+		}
+		var rule core.AlertRule
+		if err := json.Unmarshal(data, &rule); err != nil {
+			db.logger.Warn("failed to unmarshal rule", "err", err)
+			continue
+		}
+		rules = append(rules, &rule)
+	}
+	return rules, nil
+}
+
+// DeleteAlertRule removes an alert rule
+func (db *CobaltDB) DeleteAlertRule(id string) error {
+	return db.Delete(fmt.Sprintf("default/alerts/rules/%s", id))
+}
+
+// SaveAlertEvent saves an alert event
+func (db *CobaltDB) SaveAlertEvent(event *core.AlertEvent) error {
+	if event.ID == "" {
+		event.ID = core.GenerateID()
+	}
+	key := fmt.Sprintf("default/alerts/events/%s/%d", event.SoulID, event.Timestamp.UnixNano())
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %w", err)
+	}
+	return db.Put(key, data)
+}
+
+// ListAlertEvents returns alert events for a soul
+func (db *CobaltDB) ListAlertEvents(soulID string, limit int) ([]*core.AlertEvent, error) {
+	prefix := fmt.Sprintf("default/alerts/events/%s/", soulID)
+	results, err := db.PrefixScan(prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	events := make([]*core.AlertEvent, 0, len(results))
+	for _, data := range results {
+		if data == nil {
+			continue
+		}
+		var event core.AlertEvent
+		if err := json.Unmarshal(data, &event); err != nil {
+			db.logger.Warn("failed to unmarshal event", "err", err)
+			continue
+		}
+		events = append(events, &event)
+	}
+
+	// Sort by timestamp descending
+	for i := 0; i < len(events)-1; i++ {
+		for j := i + 1; j < len(events); j++ {
+			if events[i].Timestamp.Before(events[j].Timestamp) {
+				events[i], events[j] = events[j], events[i]
+			}
+		}
+	}
+
+	if limit > 0 && len(events) > limit {
+		events = events[:limit]
+	}
+	return events, nil
+}
+
+// SaveIncident saves an incident
+func (db *CobaltDB) SaveIncident(incident *core.Incident) error {
+	key := fmt.Sprintf("default/alerts/incidents/%s", incident.ID)
+	data, err := json.Marshal(incident)
+	if err != nil {
+		return fmt.Errorf("failed to marshal incident: %w", err)
+	}
+	return db.Put(key, data)
+}
+
+// GetIncident retrieves an incident by ID
+func (db *CobaltDB) GetIncident(id string) (*core.Incident, error) {
+	key := fmt.Sprintf("default/alerts/incidents/%s", id)
+	data, err := db.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	var incident core.Incident
+	if err := json.Unmarshal(data, &incident); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal incident: %w", err)
+	}
+	return &incident, nil
+}
+
+// ListActiveIncidents returns all non-resolved incidents
+func (db *CobaltDB) ListActiveIncidents() ([]*core.Incident, error) {
+	prefix := "default/alerts/incidents/"
+	results, err := db.PrefixScan(prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	incidents := make([]*core.Incident, 0, len(results))
+	for _, data := range results {
+		if data == nil {
+			continue
+		}
+		var incident core.Incident
+		if err := json.Unmarshal(data, &incident); err != nil {
+			db.logger.Warn("failed to unmarshal incident", "err", err)
+			continue
+		}
+		if incident.Status != core.IncidentResolved {
+			incidents = append(incidents, &incident)
+		}
+	}
+	return incidents, nil
+}
+
+// StatusPage repository methods
+
+func (db *CobaltDB) SaveStatusPage(page *core.StatusPage) error {
+	key := fmt.Sprintf("default/statuspages/%s", page.ID)
+	data, err := json.Marshal(page)
+	if err != nil {
+		return err
+	}
+	return db.Put(key, data)
+}
+
+func (db *CobaltDB) GetStatusPage(id string) (*core.StatusPage, error) {
+	key := fmt.Sprintf("default/statuspages/%s", id)
+	data, err := db.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	var page core.StatusPage
+	if err := json.Unmarshal(data, &page); err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+func (db *CobaltDB) GetStatusPageByDomain(domain string) (*core.StatusPage, error) {
+	pages, err := db.ListStatusPages()
+	if err != nil {
+		return nil, err
+	}
+	for _, page := range pages {
+		if page.CustomDomain == domain && page.Enabled {
+			return page, nil
+		}
+	}
+	return nil, &core.NotFoundError{Entity: "statuspage", ID: domain}
+}
+
+func (db *CobaltDB) GetStatusPageBySlug(slug string) (*core.StatusPage, error) {
+	pages, err := db.ListStatusPages()
+	if err != nil {
+		return nil, err
+	}
+	for _, page := range pages {
+		if page.Slug == slug && page.Enabled {
+			return page, nil
+		}
+	}
+	return nil, &core.NotFoundError{Entity: "statuspage", ID: slug}
+}
+
+func (db *CobaltDB) ListStatusPages() ([]*core.StatusPage, error) {
+	results, err := db.PrefixScan("default/statuspages/")
+	if err != nil {
+		return nil, err
+	}
+	pages := make([]*core.StatusPage, 0, len(results))
+	for _, data := range results {
+		var page core.StatusPage
+		if err := json.Unmarshal(data, &page); err != nil {
+			db.logger.Warn("failed to unmarshal status page", "err", err)
+			continue
+		}
+		pages = append(pages, &page)
+	}
+	return pages, nil
+}
+
+func (db *CobaltDB) DeleteStatusPage(id string) error {
+	key := fmt.Sprintf("default/statuspages/%s", id)
+	return db.Delete(key)
+}
+
+func (db *CobaltDB) SaveStatusPageSubscription(sub *core.StatusPageSubscription) error {
+	key := fmt.Sprintf("default/statuspages/subscriptions/%s", sub.ID)
+	data, err := json.Marshal(sub)
+	if err != nil {
+		return err
+	}
+	return db.Put(key, data)
+}
+
+func (db *CobaltDB) GetSubscriptionsByPage(pageID string) ([]*core.StatusPageSubscription, error) {
+	keyPrefix := fmt.Sprintf("default/statuspages/subscriptions/")
+	results, err := db.PrefixScan(keyPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	var subscriptions []*core.StatusPageSubscription
+	for _, data := range results {
+		var sub core.StatusPageSubscription
+		if err := json.Unmarshal(data, &sub); err != nil {
+			continue
+		}
+		if sub.PageID == pageID {
+			subscriptions = append(subscriptions, &sub)
+		}
+	}
+	return subscriptions, nil
+}
+
+func (db *CobaltDB) DeleteStatusPageSubscription(subscriptionID string) error {
+	key := fmt.Sprintf("default/statuspages/subscriptions/%s", subscriptionID)
+	return db.Delete(key)
+}
+
+func (db *CobaltDB) GetUptimeHistory(soulID string, days int) ([]core.UptimeDay, error) {
+	// Get judgments for the soul
+	keyPrefix := fmt.Sprintf("default/judgments/%s/", soulID)
+	results, err := db.PrefixScan(keyPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	// Collect judgments by date
+	dayStats := make(map[string]struct {
+		up   int
+		total int
+	})
+
+	now := time.Now().UTC()
+	for i := 0; i < days; i++ {
+		day := now.AddDate(0, 0, -i).Format("2006-01-02")
+		dayStats[day] = struct {
+			up   int
+			total int
+		}{0, 0}
+	}
+
+	for _, data := range results {
+		var judgment core.Judgment
+		if err := json.Unmarshal(data, &judgment); err != nil {
+			continue
+		}
+		day := judgment.Timestamp.Format("2006-01-02")
+		if _, ok := dayStats[day]; ok {
+			stats := dayStats[day]
+			stats.total++
+			if judgment.Status == core.SoulAlive {
+				stats.up++
+			}
+			dayStats[day] = stats
+		}
+	}
+
+	// Convert to UptimeDay slice
+	uptimeDays := make([]core.UptimeDay, 0, len(dayStats))
+	for date, stats := range dayStats {
+		uptime := 0.0
+		status := "operational"
+		if stats.total > 0 {
+			uptime = float64(stats.up) / float64(stats.total) * 100
+			if uptime < 99 {
+				status = "degraded"
+			}
+			if uptime < 95 {
+				status = "down"
+			}
+		}
+		uptimeDays = append(uptimeDays, core.UptimeDay{
+			Date:   date,
+			Status: status,
+			Uptime: uptime,
+		})
+	}
+
+	// Sort by date
+	sort.Slice(uptimeDays, func(i, j int) bool {
+		return uptimeDays[i].Date < uptimeDays[j].Date
+	})
+
+	return uptimeDays, nil
 }

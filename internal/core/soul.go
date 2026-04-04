@@ -208,6 +208,11 @@ func (s RaftState) IsCandidate() bool {
 	return s == StateCandidate
 }
 
+// String returns the string representation of the state
+func (s RaftState) String() string {
+	return string(s)
+}
+
 // RaftLogEntry represents a single entry in the Raft log
 type RaftLogEntry struct {
 	Index uint64       `json:"index"`

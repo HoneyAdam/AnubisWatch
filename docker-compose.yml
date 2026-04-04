@@ -9,6 +9,9 @@
 #
 # View logs:
 #   docker-compose logs -f
+#
+# Container Registry: GHCR (GitHub Container Registry)
+#   ghcr.io/anubiswatch/anubiswatch:latest
 
 version: '3.8'
 
@@ -18,7 +21,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: anubiswatch/anubis:latest
+    image: ghcr.io/anubiswatch/anubiswatch:latest
     container_name: anubis
     hostname: anubis
     restart: unless-stopped
@@ -48,7 +51,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: anubiswatch/anubis:latest
+    image: ghcr.io/anubiswatch/anubiswatch:latest
     container_name: anubis-1
     hostname: anubis-1
     restart: unless-stopped
@@ -75,7 +78,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: anubiswatch/anubis:latest
+    image: ghcr.io/anubiswatch/anubiswatch:latest
     container_name: anubis-2
     hostname: anubis-2
     restart: unless-stopped
@@ -104,7 +107,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: anubiswatch/anubis:latest
+    image: ghcr.io/anubiswatch/anubiswatch:latest
     container_name: anubis-3
     hostname: anubis-3
     restart: unless-stopped

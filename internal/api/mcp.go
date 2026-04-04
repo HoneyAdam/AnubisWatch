@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -468,7 +469,7 @@ func (s *MCPServer) handleListSouls(args json.RawMessage) (interface{}, error) {
 	}
 	json.Unmarshal(args, &params)
 
-	souls, err := s.store.ListSouls(params.Workspace, 0, 100)
+	souls, err := s.store.ListSoulsNoCtx(params.Workspace, 0, 100)
 	if err != nil {
 		return nil, err
 	}
@@ -494,7 +495,7 @@ func (s *MCPServer) handleGetSoul(args json.RawMessage) (interface{}, error) {
 		return nil, err
 	}
 
-	return s.store.GetSoul(params.SoulID)
+	return s.store.GetSoulNoCtx(params.SoulID)
 }
 
 func (s *MCPServer) handleForceCheck(args json.RawMessage) (interface{}, error) {
@@ -520,7 +521,7 @@ func (s *MCPServer) handleGetJudgments(args json.RawMessage) (interface{}, error
 
 	end := time.Now()
 	start := end.Add(-24 * time.Hour)
-	return s.store.ListJudgments(params.SoulID, start, end, params.Limit)
+	return s.store.ListJudgmentsNoCtx(params.SoulID, start, end, params.Limit)
 }
 
 func (s *MCPServer) handleListIncidents(args json.RawMessage) (interface{}, error) {
@@ -536,7 +537,7 @@ func (s *MCPServer) handleGetStats(args json.RawMessage) (interface{}, error) {
 
 	end := time.Now()
 	start := end.Add(-24 * time.Hour)
-	return s.store.GetStats(params.Workspace, start, end)
+	return s.store.GetStatsNoCtx(params.Workspace, start, end)
 }
 
 func (s *MCPServer) handleAcknowledgeIncident(args json.RawMessage) (interface{}, error) {
@@ -574,7 +575,7 @@ func (s *MCPServer) handleCreateSoul(args json.RawMessage) (interface{}, error) 
 		soul.Weight = core.Duration{d}
 	}
 
-	return soul, s.store.SaveSoul(soul)
+	return soul, s.store.SaveSoul(context.Background(), soul)
 }
 
 // Resource handlers

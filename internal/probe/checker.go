@@ -66,6 +66,23 @@ func (r *CheckerRegistry) List() []core.CheckType {
 	return types
 }
 
+// Global registry instance
+var globalRegistry = NewCheckerRegistry()
+
+// GetChecker returns a checker by type from the global registry
+func GetChecker(t core.CheckType) Checker {
+	c, ok := globalRegistry.Get(t)
+	if !ok {
+		return nil
+	}
+	return c
+}
+
+// RegisterChecker registers a checker with the global registry
+func RegisterChecker(c Checker) {
+	globalRegistry.Register(c)
+}
+
 // baseChecker provides common utilities for all checkers
 type baseChecker struct {
 	checkType core.CheckType

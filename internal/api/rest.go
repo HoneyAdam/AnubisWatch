@@ -28,12 +28,17 @@ type RESTServer struct {
 	probe    ProbeEngine
 	alert    AlertManager
 	auth     Authenticator
+	cluster  ClusterManager
+	dashboard http.Handler
+	statusPage http.Handler
 }
 
 // Router handles HTTP routing
 type Router struct {
 	routes  map[string]map[string]Handler // path -> method -> handler
 	middleware []Middleware
+	dashboard http.Handler
+	statusPage http.Handler
 }
 
 // Handler is an HTTP handler function
@@ -54,30 +59,35 @@ type Context struct {
 
 // Storage interface for data access
 type Storage interface {
-	GetSoul(id string) (*core.Soul, error)
-	ListSouls(workspace string, offset, limit int) ([]*core.Soul, error)
-	SaveSoul(soul *core.Soul) error
-	DeleteSoul(id string) error
+	GetSoulNoCtx(id string) (*core.Soul, error)
+	ListSoulsNoCtx(workspace string, offset, limit int) ([]*core.Soul, error)
+	SaveSoul(ctx context.Context, soul *core.Soul) error
+	DeleteSoul(ctx context.Context, id string) error
 
-	GetJudgment(id string) (*core.Judgment, error)
-	ListJudgments(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error)
+	GetJudgmentNoCtx(id string) (*core.Judgment, error)
+	ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error)
 
-	GetChannel(id string) (*core.AlertChannel, error)
-	ListChannels(workspace string) ([]*core.AlertChannel, error)
-	SaveChannel(channel *core.AlertChannel) error
-	DeleteChannel(id string) error
+	GetChannelNoCtx(id string) (*core.AlertChannel, error)
+	ListChannelsNoCtx(workspace string) ([]*core.AlertChannel, error)
+	SaveChannelNoCtx(channel *core.AlertChannel) error
+	DeleteChannelNoCtx(id string) error
 
-	GetRule(id string) (*core.AlertRule, error)
-	ListRules(workspace string) ([]*core.AlertRule, error)
-	SaveRule(rule *core.AlertRule) error
-	DeleteRule(id string) error
+	GetRuleNoCtx(id string) (*core.AlertRule, error)
+	ListRulesNoCtx(workspace string) ([]*core.AlertRule, error)
+	SaveRuleNoCtx(rule *core.AlertRule) error
+	DeleteRuleNoCtx(id string) error
 
-	GetWorkspace(id string) (*core.Workspace, error)
-	ListWorkspaces() ([]*core.Workspace, error)
-	SaveWorkspace(ws *core.Workspace) error
-	DeleteWorkspace(id string) error
+	GetWorkspaceNoCtx(id string) (*core.Workspace, error)
+	ListWorkspacesNoCtx() ([]*core.Workspace, error)
+	SaveWorkspaceNoCtx(ws *core.Workspace) error
+	DeleteWorkspaceNoCtx(id string) error
 
-	GetStats(workspace string, start, end time.Time) (*core.Stats, error)
+	GetStatsNoCtx(workspace string, start, end time.Time) (*core.Stats, error)
+
+	GetStatusPageNoCtx(id string) (*core.StatusPage, error)
+	ListStatusPagesNoCtx() ([]*core.StatusPage, error)
+	SaveStatusPageNoCtx(page *core.StatusPage) error
+	DeleteStatusPageNoCtx(id string) error
 }
 
 // ProbeEngine interface for probe operations
@@ -106,6 +116,24 @@ type Authenticator interface {
 	Logout(token string) error
 }
 
+// ClusterManager interface for cluster operations
+type ClusterManager interface {
+	IsLeader() bool
+	Leader() string
+	IsClustered() bool
+	GetStatus() *ClusterStatus
+}
+
+// ClusterStatus holds cluster status info
+type ClusterStatus struct {
+	IsClustered bool   `json:"is_clustered"`
+	NodeID      string `json:"node_id"`
+	State       string `json:"state,omitempty"`
+	Leader      string `json:"leader,omitempty"`
+	Term        uint64 `json:"term,omitempty"`
+	PeerCount   int    `json:"peer_count,omitempty"`
+}
+
 // User represents an authenticated user
 type User struct {
 	ID        string    `json:"id"`
@@ -117,17 +145,22 @@ type User struct {
 }
 
 // NewRESTServer creates a new REST server
-func NewRESTServer(config core.ServerConfig, store Storage, probe ProbeEngine, alert AlertManager, auth Authenticator, logger *slog.Logger) *RESTServer {
+func NewRESTServer(config core.ServerConfig, store Storage, probe ProbeEngine, alert AlertManager, auth Authenticator, cluster ClusterManager, dashboard http.Handler, statusPage http.Handler, logger *slog.Logger) *RESTServer {
 	s := &RESTServer{
-		config: config,
-		router: &Router{
+		config:  config,
+		router:  &Router{
 			routes: make(map[string]map[string]Handler),
+			dashboard: dashboard,
+			statusPage: statusPage,
 		},
-		logger: logger.With("component", "rest_server"),
-		store:  store,
-		probe:  probe,
-		alert:  alert,
-		auth:   auth,
+		logger:    logger.With("component", "rest_server"),
+		store:     store,
+		probe:     probe,
+		alert:     alert,
+		auth:      auth,
+		cluster:   cluster,
+		dashboard: dashboard,
+		statusPage: statusPage,
 	}
 
 	s.setupRoutes()
@@ -197,6 +230,13 @@ func (s *RESTServer) setupRoutes() {
 	s.router.Handle("GET", "/api/v1/incidents", s.requireAuth(s.handleListIncidents))
 	s.router.Handle("POST", "/api/v1/incidents/:id/acknowledge", s.requireAuth(s.handleAcknowledgeIncident))
 	s.router.Handle("POST", "/api/v1/incidents/:id/resolve", s.requireAuth(s.handleResolveIncident))
+
+	// Status Pages
+	s.router.Handle("GET", "/api/v1/status-pages", s.requireAuth(s.handleListStatusPages))
+	s.router.Handle("POST", "/api/v1/status-pages", s.requireAuth(s.handleCreateStatusPage))
+	s.router.Handle("GET", "/api/v1/status-pages/:id", s.requireAuth(s.handleGetStatusPage))
+	s.router.Handle("PUT", "/api/v1/status-pages/:id", s.requireAuth(s.handleUpdateStatusPage))
+	s.router.Handle("DELETE", "/api/v1/status-pages/:id", s.requireAuth(s.handleDeleteStatusPage))
 }
 
 // Start starts the REST server
@@ -293,7 +333,7 @@ func (s *RESTServer) handleListSouls(ctx *Context) error {
 		limit = 20
 	}
 
-	souls, err := s.store.ListSouls(workspace, offset, limit)
+	souls, err := s.store.ListSoulsNoCtx(workspace, offset, limit)
 	if err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
@@ -312,7 +352,7 @@ func (s *RESTServer) handleCreateSoul(ctx *Context) error {
 	soul.CreatedAt = time.Now()
 	soul.UpdatedAt = time.Now()
 
-	if err := s.store.SaveSoul(&soul); err != nil {
+	if err := s.store.SaveSoul(ctx.Request.Context(), &soul); err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
 
@@ -321,7 +361,7 @@ func (s *RESTServer) handleCreateSoul(ctx *Context) error {
 
 func (s *RESTServer) handleGetSoul(ctx *Context) error {
 	id := ctx.Params["id"]
-	soul, err := s.store.GetSoul(id)
+	soul, err := s.store.GetSoulNoCtx(id)
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "soul not found")
 	}
@@ -340,7 +380,7 @@ func (s *RESTServer) handleUpdateSoul(ctx *Context) error {
 	soul.WorkspaceID = ctx.Workspace
 	soul.UpdatedAt = time.Now()
 
-	if err := s.store.SaveSoul(&soul); err != nil {
+	if err := s.store.SaveSoul(ctx.Request.Context(), &soul); err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
 
@@ -349,7 +389,7 @@ func (s *RESTServer) handleUpdateSoul(ctx *Context) error {
 
 func (s *RESTServer) handleDeleteSoul(ctx *Context) error {
 	id := ctx.Params["id"]
-	if err := s.store.DeleteSoul(id); err != nil {
+	if err := s.store.DeleteSoul(ctx.Request.Context(), id); err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
 
@@ -371,7 +411,7 @@ func (s *RESTServer) handleListJudgments(ctx *Context) error {
 	start := time.Now().Add(-24 * time.Hour)
 	end := time.Now()
 
-	judgments, err := s.store.ListJudgments(soulID, start, end, 100)
+	judgments, err := s.store.ListJudgmentsNoCtx(soulID, start, end, 100)
 	if err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
@@ -381,7 +421,7 @@ func (s *RESTServer) handleListJudgments(ctx *Context) error {
 
 func (s *RESTServer) handleGetJudgment(ctx *Context) error {
 	id := ctx.Params["id"]
-	judgment, err := s.store.GetJudgment(id)
+	judgment, err := s.store.GetJudgmentNoCtx(id)
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "judgment not found")
 	}
@@ -420,7 +460,7 @@ func (s *RESTServer) handleCreateChannel(ctx *Context) error {
 
 func (s *RESTServer) handleGetChannel(ctx *Context) error {
 	id := ctx.Params["id"]
-	channel, err := s.store.GetChannel(id)
+	channel, err := s.store.GetChannelNoCtx(id)
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "channel not found")
 	}
@@ -485,7 +525,7 @@ func (s *RESTServer) handleCreateRule(ctx *Context) error {
 
 func (s *RESTServer) handleGetRule(ctx *Context) error {
 	id := ctx.Params["id"]
-	rule, err := s.store.GetRule(id)
+	rule, err := s.store.GetRuleNoCtx(id)
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "rule not found")
 	}
@@ -521,7 +561,7 @@ func (s *RESTServer) handleDeleteRule(ctx *Context) error {
 // Workspace handlers
 
 func (s *RESTServer) handleListWorkspaces(ctx *Context) error {
-	workspaces, err := s.store.ListWorkspaces()
+	workspaces, err := s.store.ListWorkspacesNoCtx()
 	if err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
@@ -539,7 +579,7 @@ func (s *RESTServer) handleCreateWorkspace(ctx *Context) error {
 	ws.CreatedAt = time.Now()
 	ws.UpdatedAt = time.Now()
 
-	if err := s.store.SaveWorkspace(&ws); err != nil {
+	if err := s.store.SaveWorkspaceNoCtx(&ws); err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
 
@@ -548,7 +588,7 @@ func (s *RESTServer) handleCreateWorkspace(ctx *Context) error {
 
 func (s *RESTServer) handleGetWorkspace(ctx *Context) error {
 	id := ctx.Params["id"]
-	ws, err := s.store.GetWorkspace(id)
+	ws, err := s.store.GetWorkspaceNoCtx(id)
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "workspace not found")
 	}
@@ -566,7 +606,7 @@ func (s *RESTServer) handleUpdateWorkspace(ctx *Context) error {
 	ws.ID = id
 	ws.UpdatedAt = time.Now()
 
-	if err := s.store.SaveWorkspace(&ws); err != nil {
+	if err := s.store.SaveWorkspaceNoCtx(&ws); err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
 
@@ -575,7 +615,7 @@ func (s *RESTServer) handleUpdateWorkspace(ctx *Context) error {
 
 func (s *RESTServer) handleDeleteWorkspace(ctx *Context) error {
 	id := ctx.Params["id"]
-	if err := s.store.DeleteWorkspace(id); err != nil {
+	if err := s.store.DeleteWorkspaceNoCtx(id); err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
 
@@ -589,7 +629,7 @@ func (s *RESTServer) handleStats(ctx *Context) error {
 	start := time.Now().Add(-24 * time.Hour)
 	end := time.Now()
 
-	stats, err := s.store.GetStats(workspace, start, end)
+	stats, err := s.store.GetStatsNoCtx(workspace, start, end)
 	if err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
@@ -619,14 +659,36 @@ func (s *RESTServer) handleStatsOverview(ctx *Context) error {
 // Cluster handlers
 
 func (s *RESTServer) handleClusterStatus(ctx *Context) error {
+	if s.cluster == nil {
+		return ctx.JSON(http.StatusOK, map[string]interface{}{
+			"is_clustered": false,
+			"node_id":      "standalone",
+			"state":        "standalone",
+		})
+	}
+
+	status := s.cluster.GetStatus()
 	return ctx.JSON(http.StatusOK, map[string]interface{}{
-		"status": "healthy",
-		"role":   "leader",
+		"is_clustered": status.IsClustered,
+		"node_id":      status.NodeID,
+		"state":        status.State,
+		"leader":       status.Leader,
+		"term":         status.Term,
+		"peer_count":   status.PeerCount,
 	})
 }
 
 func (s *RESTServer) handleClusterPeers(ctx *Context) error {
-	return ctx.JSON(http.StatusOK, []interface{}{})
+	if s.cluster == nil {
+		return ctx.JSON(http.StatusOK, []interface{}{})
+	}
+
+	// Return peer information from cluster status
+	status := s.cluster.GetStatus()
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
+		"peer_count": status.PeerCount,
+		"is_leader":  s.cluster.IsLeader(),
+	})
 }
 
 // Incident handlers
@@ -656,6 +718,69 @@ func (s *RESTServer) handleResolveIncident(ctx *Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"status": "resolved"})
+}
+
+// Status Page handlers
+
+func (s *RESTServer) handleListStatusPages(ctx *Context) error {
+	pages, err := s.store.ListStatusPagesNoCtx()
+	if err != nil {
+		return ctx.Error(http.StatusInternalServerError, err.Error())
+	}
+	return ctx.JSON(http.StatusOK, pages)
+}
+
+func (s *RESTServer) handleCreateStatusPage(ctx *Context) error {
+	var page core.StatusPage
+	if err := ctx.Bind(&page); err != nil {
+		return ctx.Error(http.StatusBadRequest, "invalid status page data")
+	}
+
+	page.ID = core.GenerateID()
+	page.WorkspaceID = ctx.Workspace
+	page.CreatedAt = time.Now()
+	page.UpdatedAt = time.Now()
+
+	if err := s.store.SaveStatusPageNoCtx(&page); err != nil {
+		return ctx.Error(http.StatusInternalServerError, err.Error())
+	}
+
+	return ctx.JSON(http.StatusCreated, page)
+}
+
+func (s *RESTServer) handleGetStatusPage(ctx *Context) error {
+	id := ctx.Params["id"]
+	page, err := s.store.GetStatusPageNoCtx(id)
+	if err != nil {
+		return ctx.Error(http.StatusNotFound, "status page not found")
+	}
+	return ctx.JSON(http.StatusOK, page)
+}
+
+func (s *RESTServer) handleUpdateStatusPage(ctx *Context) error {
+	id := ctx.Params["id"]
+	var page core.StatusPage
+	if err := ctx.Bind(&page); err != nil {
+		return ctx.Error(http.StatusBadRequest, "invalid status page data")
+	}
+
+	page.ID = id
+	page.WorkspaceID = ctx.Workspace
+	page.UpdatedAt = time.Now()
+
+	if err := s.store.SaveStatusPageNoCtx(&page); err != nil {
+		return ctx.Error(http.StatusInternalServerError, err.Error())
+	}
+
+	return ctx.JSON(http.StatusOK, page)
+}
+
+func (s *RESTServer) handleDeleteStatusPage(ctx *Context) error {
+	id := ctx.Params["id"]
+	if err := s.store.DeleteStatusPageNoCtx(id); err != nil {
+		return ctx.Error(http.StatusInternalServerError, err.Error())
+	}
+	return ctx.JSON(http.StatusNoContent, nil)
 }
 
 // Middleware
@@ -774,6 +899,24 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				return
 			}
 		}
+	}
+
+	// Status page routes (before dashboard fallback)
+	if r.statusPage != nil && strings.HasPrefix(path, "/status/") {
+		r.statusPage.ServeHTTP(w, req)
+		return
+	}
+
+	// ACME challenge routes for Let's Encrypt
+	if r.statusPage != nil && strings.HasPrefix(path, "/.well-known/acme-challenge/") {
+		r.statusPage.ServeHTTP(w, req)
+		return
+	}
+
+	// No route found - serve dashboard for non-API routes
+	if r.dashboard != nil && !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/health") && !strings.HasPrefix(path, "/ready") {
+		r.dashboard.ServeHTTP(w, req)
+		return
 	}
 
 	// No route found

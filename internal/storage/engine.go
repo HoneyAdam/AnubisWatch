@@ -197,6 +197,72 @@ func (db *CobaltDB) Delete(key string) error {
 	return db.data.insert(key, nil)
 }
 
+// Set stores a key-value pair (alias for Put to satisfy raft.Storage interface)
+func (db *CobaltDB) Set(key string, value []byte) error {
+	return db.Put(key, value)
+}
+
+// DeletePrefix removes all key-value pairs with the given prefix
+func (db *CobaltDB) DeletePrefix(prefix string) error {
+	db.closedMu.Lock()
+	if db.closed {
+		db.closedMu.Unlock()
+		return fmt.Errorf("database is closed")
+	}
+	db.closedMu.Unlock()
+
+	// Get all keys with prefix
+	keys, err := db.List(prefix)
+	if err != nil {
+		return err
+	}
+
+	// Delete each key
+	for _, key := range keys {
+		if err := db.Delete(key); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// List returns all keys with the given prefix
+func (db *CobaltDB) List(prefix string) ([]string, error) {
+	db.closedMu.Lock()
+	if db.closed {
+		db.closedMu.Unlock()
+		return nil, fmt.Errorf("database is closed")
+	}
+	db.closedMu.Unlock()
+
+	db.data.mu.RLock()
+	defer db.data.mu.RUnlock()
+
+	var keys []string
+
+	// Find leftmost leaf node
+	node := db.data.root
+	for !node.isLeaf {
+		if len(node.children) == 0 {
+			return keys, nil
+		}
+		node = node.children[0]
+	}
+
+	// Scan through leaf nodes
+	for node != nil {
+		for i, key := range node.keys {
+			if strings.HasPrefix(key, prefix) && node.values[i] != nil {
+				keys = append(keys, key)
+			}
+		}
+		node = node.next
+	}
+
+	return keys, nil
+}
+
 // PrefixScan returns all key-value pairs with the given prefix
 func (db *CobaltDB) PrefixScan(prefix string) (map[string][]byte, error) {
 	db.closedMu.Lock()
@@ -722,4 +788,172 @@ func (db *CobaltDB) SaveWorkspace(ctx context.Context, ws *core.Workspace) error
 // DeleteWorkspace removes a workspace
 func (db *CobaltDB) DeleteWorkspace(ctx context.Context, id string) error {
 	return db.Delete("workspaces/" + id)
+}
+
+// REST API Storage interface wrappers (without context for simpler interface)
+
+// GetSoulNoCtx retrieves a soul by ID (REST API compatible)
+func (db *CobaltDB) GetSoulNoCtx(id string) (*core.Soul, error) {
+	// Scan all workspaces to find soul by ID
+	prefixes := []string{"default/souls/"}
+	for _, prefix := range prefixes {
+		results, err := db.PrefixScan(prefix)
+		if err != nil {
+			continue
+		}
+		for key, data := range results {
+			if strings.HasSuffix(key, "/"+id) {
+				var soul core.Soul
+				if err := json.Unmarshal(data, &soul); err != nil {
+					continue
+				}
+				return &soul, nil
+			}
+		}
+	}
+	return nil, &core.NotFoundError{Entity: "soul", ID: id}
+}
+
+// ListSoulsNoCtx lists souls for REST API (no context)
+func (db *CobaltDB) ListSoulsNoCtx(workspace string, offset, limit int) ([]*core.Soul, error) {
+	return db.ListSouls(context.Background(), workspace, offset, limit)
+}
+
+// GetJudgmentNoCtx retrieves a judgment by ID
+func (db *CobaltDB) GetJudgmentNoCtx(id string) (*core.Judgment, error) {
+	results, err := db.PrefixScan("default/judgments/")
+	if err != nil {
+		return nil, err
+	}
+	for key, data := range results {
+		if strings.HasSuffix(key, "/"+id) {
+			var j core.Judgment
+			if err := json.Unmarshal(data, &j); err != nil {
+				continue
+			}
+			return &j, nil
+		}
+	}
+	return nil, &core.NotFoundError{Entity: "judgment", ID: id}
+}
+
+// ListJudgmentsNoCtx lists judgments in time range
+func (db *CobaltDB) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error) {
+	return db.ListJudgments(context.Background(), soulID, start, end, limit)
+}
+
+// GetChannelNoCtx retrieves a channel by ID
+func (db *CobaltDB) GetChannelNoCtx(id string) (*core.AlertChannel, error) {
+	key := "default/alerts/channels/" + id
+	data, err := db.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	var ch core.AlertChannel
+	if err := json.Unmarshal(data, &ch); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal channel: %w", err)
+	}
+	return &ch, nil
+}
+
+// ListChannelsNoCtx lists channels
+func (db *CobaltDB) ListChannelsNoCtx(workspace string) ([]*core.AlertChannel, error) {
+	return db.ListAlertChannels()
+}
+
+// SaveChannelNoCtx saves a channel without context
+func (db *CobaltDB) SaveChannelNoCtx(ch *core.AlertChannel) error {
+	return db.SaveAlertChannel(ch)
+}
+
+// DeleteChannelNoCtx deletes a channel
+func (db *CobaltDB) DeleteChannelNoCtx(id string) error {
+	return db.DeleteAlertChannel(id)
+}
+
+// GetRuleNoCtx retrieves a rule by ID
+func (db *CobaltDB) GetRuleNoCtx(id string) (*core.AlertRule, error) {
+	return db.GetAlertRule(id)
+}
+
+// ListRulesNoCtx lists rules
+func (db *CobaltDB) ListRulesNoCtx(workspace string) ([]*core.AlertRule, error) {
+	return db.ListAlertRules()
+}
+
+// SaveRuleNoCtx saves a rule without context
+func (db *CobaltDB) SaveRuleNoCtx(rule *core.AlertRule) error {
+	return db.SaveAlertRule(rule)
+}
+
+// DeleteRuleNoCtx deletes a rule
+func (db *CobaltDB) DeleteRuleNoCtx(id string) error {
+	return db.DeleteAlertRule(id)
+}
+
+// GetWorkspaceNoCtx retrieves a workspace
+func (db *CobaltDB) GetWorkspaceNoCtx(id string) (*core.Workspace, error) {
+	return db.GetWorkspace(context.Background(), id)
+}
+
+// ListWorkspacesNoCtx lists workspaces
+func (db *CobaltDB) ListWorkspacesNoCtx() ([]*core.Workspace, error) {
+	return db.ListWorkspaces(context.Background())
+}
+
+// SaveWorkspaceNoCtx saves a workspace
+func (db *CobaltDB) SaveWorkspaceNoCtx(ws *core.Workspace) error {
+	return db.SaveWorkspace(context.Background(), ws)
+}
+
+// DeleteWorkspaceNoCtx deletes a workspace
+func (db *CobaltDB) DeleteWorkspaceNoCtx(id string) error {
+	return db.DeleteWorkspace(context.Background(), id)
+}
+
+// GetStatsNoCtx gets stats without context
+func (db *CobaltDB) GetStatsNoCtx(workspace string, start, end time.Time) (*core.Stats, error) {
+	return db.GetStats(context.Background(), workspace, start, end)
+}
+
+// GetSoulJudgments retrieves recent judgments for a soul (for status page)
+func (db *CobaltDB) GetSoulJudgments(soulID string, limit int) ([]core.Judgment, error) {
+	keyPrefix := fmt.Sprintf("default/judgments/%s/", soulID)
+	results, err := db.PrefixScan(keyPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	judgments := make([]core.Judgment, 0, limit)
+	for _, data := range results {
+		var judgment core.Judgment
+		if err := json.Unmarshal(data, &judgment); err != nil {
+			db.logger.Warn("failed to unmarshal judgment", "err", err)
+			continue
+		}
+		judgments = append(judgments, judgment)
+		if len(judgments) >= limit {
+			break
+		}
+	}
+
+	return judgments, nil
+}
+
+// StatusPage NoCtx wrappers
+
+func (db *CobaltDB) GetStatusPageNoCtx(id string) (*core.StatusPage, error) {
+	return db.GetStatusPage(id)
+}
+
+func (db *CobaltDB) ListStatusPagesNoCtx() ([]*core.StatusPage, error) {
+	return db.ListStatusPages()
+}
+
+func (db *CobaltDB) SaveStatusPageNoCtx(page *core.StatusPage) error {
+	return db.SaveStatusPage(page)
+}
+
+func (db *CobaltDB) DeleteStatusPageNoCtx(id string) error {
+	return db.DeleteStatusPage(id)
 }

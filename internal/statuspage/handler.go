@@ -31,6 +31,11 @@ type Repository interface {
 	GetSoulJudgments(soulID string, limit int) ([]core.Judgment, error)
 	GetIncidentsByPage(pageID string) ([]core.Incident, error)
 	GetUptimeHistory(soulID string, days int) ([]core.UptimeDay, error)
+
+	// Subscription management
+	SaveSubscription(sub *core.StatusPageSubscription) error
+	GetSubscriptionsByPage(pageID string) ([]*core.StatusPageSubscription, error)
+	DeleteSubscription(subscriptionID string) error
 }
 
 // Template represents a cached status page template
@@ -757,6 +762,7 @@ func (h *Handler) SubscribeHandler(w http.ResponseWriter, r *http.Request) {
 		PageID     string `json:"page_id"`
 		Email      string `json:"email"`
 		WebhookURL string `json:"webhook_url,omitempty"`
+		Type       string `json:"type"` // email, webhook, rss
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -765,8 +771,22 @@ func (h *Handler) SubscribeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate
-	if req.PageID == "" || (req.Email == "" && req.WebhookURL == "") {
-		http.Error(w, "Page ID and email or webhook required", http.StatusBadRequest)
+	if req.PageID == "" {
+		http.Error(w, "Page ID required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Type == "" {
+		req.Type = "email"
+	}
+
+	if req.Type == "email" && req.Email == "" {
+		http.Error(w, "Email required for email subscriptions", http.StatusBadRequest)
+		return
+	}
+
+	if req.Type == "webhook" && req.WebhookURL == "" {
+		http.Error(w, "Webhook URL required for webhook subscriptions", http.StatusBadRequest)
 		return
 	}
 
@@ -776,19 +796,192 @@ func (h *Handler) SubscribeHandler(w http.ResponseWriter, r *http.Request) {
 		PageID:       req.PageID,
 		Email:        req.Email,
 		WebhookURL:   req.WebhookURL,
+		Type:         req.Type,
 		SubscribedAt: time.Now().UTC(),
+		Confirmed:    false, // Require email confirmation
 	}
 
-	// Store subscription (implementation would save to repository)
-	// ...
+	// Store subscription
+	if h.repository != nil {
+		if err := h.repository.SaveSubscription(sub); err != nil {
+			http.Error(w, "Failed to save subscription", http.StatusInternalServerError)
+			return
+		}
+	}
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":       true,
-		"message":       "Subscription created",
+		"message":       "Subscription created. Please confirm your subscription.",
 		"subscription_id": sub.ID,
+		"confirmation_required": req.Type == "email",
 	})
+}
+
+// BadgeHandler serves embeddable status badge (SVG/PNG)
+func (h *Handler) BadgeHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract page ID from path
+	pageID := strings.TrimPrefix(r.URL.Path, "/badge/")
+	if pageID == "" {
+		http.Error(w, "Page ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Get page
+	page, err := h.repository.GetStatusPageBySlug(pageID)
+	if err != nil {
+		http.Error(w, "Status page not found", http.StatusNotFound)
+		return
+	}
+
+	// Get souls status
+	souls := make([]core.SoulStatusInfo, 0, len(page.Souls))
+	for _, soulID := range page.Souls {
+		soul, err := h.repository.GetSoul(soulID)
+		if err != nil {
+			continue
+		}
+
+		judgments, err := h.repository.GetSoulJudgments(soulID, 1)
+		var lastJudgment core.Judgment
+		if err == nil && len(judgments) > 0 {
+			lastJudgment = judgments[0]
+		}
+
+		status := "unknown"
+		if lastJudgment.ID != "" {
+			status = string(lastJudgment.Status)
+		}
+
+		souls = append(souls, core.SoulStatusInfo{
+			ID:     soul.ID,
+			Name:   soul.Name,
+			Status: status,
+		})
+	}
+
+	// Calculate overall status
+	overallStatus := core.CalculateOverallStatus(souls)
+
+	// Determine badge color
+	var color string
+	switch overallStatus.Status {
+	case "operational":
+		color = "22c55e" // Green
+	case "degraded":
+		color = "f59e0b" // Amber
+	case "down", "major_outage":
+		color = "ef4444" // Red
+	default:
+		color = "6b7280" // Gray
+	}
+
+	// Check format
+	format := r.URL.Query().Get("format")
+	if format == "json" {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": overallStatus.Status,
+			"color":  color,
+		})
+		return
+	}
+
+	// Serve SVG badge
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	badgeText := "AnubisWatch"
+	statusText := strings.Title(overallStatus.Status)
+
+	svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="140" height="20">
+  <linearGradient id="b" x2="0" y2="100%%">
+    <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+    <stop offset="1" stop-opacity=".1"/>
+  </linearGradient>
+  <mask id="a">
+    <rect width="140" height="20" rx="3" fill="#fff"/>
+  </mask>
+  <g mask="url(#a)">
+    <rect width="60" height="20" fill="#555"/>
+    <rect x="60" width="80" height="20" fill="#%s"/>
+    <rect width="140" height="20" fill="url(#b)"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
+    <text x="30" y="15" fill="#010101" fill-opacity=".3">
+      %s
+    </text>
+    <text x="30" y="14">
+      %s
+    </text>
+    <text x="100" y="15" fill="#010101" fill-opacity=".3">
+      %s
+    </text>
+    <text x="100" y="14">
+      %s
+    </text>
+  </g>
+</svg>`, color, badgeText, badgeText, statusText, statusText)
+
+	w.Write([]byte(svg))
+}
+
+// RSSFeedHandler serves RSS feed for status page updates
+func (h *Handler) RSSFeedHandler(w http.ResponseWriter, r *http.Request) {
+	pageID := strings.TrimPrefix(r.URL.Path, "/status/")
+	pageID = strings.TrimSuffix(pageID, "/feed.xml")
+
+	page, err := h.repository.GetStatusPageBySlug(pageID)
+	if err != nil {
+		http.Error(w, "Status page not found", http.StatusNotFound)
+		return
+	}
+
+	// Get incidents for feed
+	incidents, err := h.repository.GetIncidentsByPage(page.ID)
+	if err != nil {
+		incidents = []core.Incident{}
+	}
+
+	// Build RSS feed
+	rss := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>%s - Status Updates</title>
+    <description>Status updates for %s</description>
+    <link>https://%s</link>
+    <lastBuildDate>%s</lastBuildDate>
+    <generator>AnubisWatch</generator>
+`, page.Name, page.Name, page.CustomDomain, time.Now().UTC().Format(time.RFC1123Z))
+
+	for _, inc := range incidents {
+		// Get soul name for context
+		soulName := inc.SoulID
+		if soul, err := h.repository.GetSoul(inc.SoulID); err == nil && soul != nil {
+			soulName = soul.Name
+		}
+
+		rss += fmt.Sprintf(`    <item>
+      <title>%s - %s</title>
+      <description><![CDATA[Incident on %s: %s]]></description>
+      <pubDate>%s</pubDate>
+      <link>https://%s/incidents/%s</link>
+      <guid>%s</guid>
+    </item>
+`, soulName, inc.Status, soulName, inc.Status,
+			inc.StartedAt.Format(time.RFC1123Z),
+			page.CustomDomain, inc.ID, inc.ID)
+	}
+
+	rss += `  </channel>
+</rss>`
+
+	w.Header().Set("Content-Type", "application/rss+xml")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Write([]byte(rss))
 }
 
 // Router returns the status page router
@@ -802,10 +995,18 @@ func (h *Handler) Router() http.Handler {
 			h.SubscribeHandler(w, r)
 			return
 		}
+		// Check if this is an RSS feed request
+		if strings.HasSuffix(r.URL.Path, "/feed.xml") {
+			h.RSSFeedHandler(w, r)
+			return
+		}
 		h.ServeHTTP(w, r)
 	})
 
-	// ACME challenge handler
+	// Badge endpoint (embeddable status badge)
+	mux.HandleFunc("/badge/", h.BadgeHandler)
+
+	// ACME challenge handler for Let's Encrypt
 	mux.Handle("/.well-known/acme-challenge/", h.acmeManager.ChallengeHandler())
 
 	return mux

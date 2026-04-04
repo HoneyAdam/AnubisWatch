@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -38,8 +39,8 @@ func newMockStorage() *mockStorage {
 	}
 }
 
-func (m *mockStorage) GetSoul(id string) (*core.Soul, error)       { return m.souls[id], nil }
-func (m *mockStorage) ListSouls(ws string, offset, limit int) ([]*core.Soul, error) {
+func (m *mockStorage) GetSoulNoCtx(id string) (*core.Soul, error)       { return m.souls[id], nil }
+func (m *mockStorage) ListSoulsNoCtx(ws string, offset, limit int) ([]*core.Soul, error) {
 	souls := make([]*core.Soul, 0, len(m.souls))
 	for _, s := range m.souls {
 		souls = append(souls, s)
@@ -53,69 +54,75 @@ func (m *mockStorage) ListSouls(ws string, offset, limit int) ([]*core.Soul, err
 	}
 	return souls[offset:end], nil
 }
-func (m *mockStorage) SaveSoul(soul *core.Soul) error {
+func (m *mockStorage) SaveSoul(ctx context.Context, soul *core.Soul) error {
 	m.souls[soul.ID] = soul
 	return nil
 }
-func (m *mockStorage) DeleteSoul(id string) error {
+func (m *mockStorage) DeleteSoul(ctx context.Context, id string) error {
 	delete(m.souls, id)
 	return nil
 }
-func (m *mockStorage) GetJudgment(id string) (*core.Judgment, error) { return m.judgments[id], nil }
-func (m *mockStorage) ListJudgments(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error) {
+func (m *mockStorage) GetJudgmentNoCtx(id string) (*core.Judgment, error) { return m.judgments[id], nil }
+func (m *mockStorage) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error) {
 	return []*core.Judgment{}, nil
 }
-func (m *mockStorage) GetChannel(id string) (*core.AlertChannel, error) { return m.channels[id], nil }
-func (m *mockStorage) ListChannels(ws string) ([]*core.AlertChannel, error) {
+func (m *mockStorage) GetChannelNoCtx(id string) (*core.AlertChannel, error) { return m.channels[id], nil }
+func (m *mockStorage) ListChannelsNoCtx(ws string) ([]*core.AlertChannel, error) {
 	channels := make([]*core.AlertChannel, 0, len(m.channels))
 	for _, c := range m.channels {
 		channels = append(channels, c)
 	}
 	return channels, nil
 }
-func (m *mockStorage) SaveChannel(ch *core.AlertChannel) error {
+func (m *mockStorage) SaveChannelNoCtx(ch *core.AlertChannel) error {
 	m.channels[ch.ID] = ch
 	return nil
 }
-func (m *mockStorage) DeleteChannel(id string) error {
+func (m *mockStorage) DeleteChannelNoCtx(id string) error {
 	delete(m.channels, id)
 	return nil
 }
-func (m *mockStorage) GetRule(id string) (*core.AlertRule, error) { return m.rules[id], nil }
-func (m *mockStorage) ListRules(ws string) ([]*core.AlertRule, error) {
+func (m *mockStorage) GetRuleNoCtx(id string) (*core.AlertRule, error) { return m.rules[id], nil }
+func (m *mockStorage) ListRulesNoCtx(ws string) ([]*core.AlertRule, error) {
 	rules := make([]*core.AlertRule, 0, len(m.rules))
 	for _, r := range m.rules {
 		rules = append(rules, r)
 	}
 	return rules, nil
 }
-func (m *mockStorage) SaveRule(rule *core.AlertRule) error {
+func (m *mockStorage) SaveRuleNoCtx(rule *core.AlertRule) error {
 	m.rules[rule.ID] = rule
 	return nil
 }
-func (m *mockStorage) DeleteRule(id string) error {
+func (m *mockStorage) DeleteRuleNoCtx(id string) error {
 	delete(m.rules, id)
 	return nil
 }
-func (m *mockStorage) GetWorkspace(id string) (*core.Workspace, error) { return m.workspaces[id], nil }
-func (m *mockStorage) ListWorkspaces() ([]*core.Workspace, error) {
+func (m *mockStorage) GetWorkspaceNoCtx(id string) (*core.Workspace, error) { return m.workspaces[id], nil }
+func (m *mockStorage) ListWorkspacesNoCtx() ([]*core.Workspace, error) {
 	ws := make([]*core.Workspace, 0, len(m.workspaces))
 	for _, w := range m.workspaces {
 		ws = append(ws, w)
 	}
 	return ws, nil
 }
-func (m *mockStorage) SaveWorkspace(ws *core.Workspace) error {
+func (m *mockStorage) SaveWorkspaceNoCtx(ws *core.Workspace) error {
 	m.workspaces[ws.ID] = ws
 	return nil
 }
-func (m *mockStorage) DeleteWorkspace(id string) error {
+func (m *mockStorage) DeleteWorkspaceNoCtx(id string) error {
 	delete(m.workspaces, id)
 	return nil
 }
-func (m *mockStorage) GetStats(ws string, start, end time.Time) (*core.Stats, error) {
+func (m *mockStorage) GetStatsNoCtx(ws string, start, end time.Time) (*core.Stats, error) {
 	return &core.Stats{}, nil
 }
+
+// StatusPage methods
+func (m *mockStorage) GetStatusPageNoCtx(id string) (*core.StatusPage, error) { return nil, nil }
+func (m *mockStorage) ListStatusPagesNoCtx() ([]*core.StatusPage, error) { return []*core.StatusPage{}, nil }
+func (m *mockStorage) SaveStatusPageNoCtx(page *core.StatusPage) error { return nil }
+func (m *mockStorage) DeleteStatusPageNoCtx(id string) error { return nil }
 
 // mockProbeEngine implements ProbeEngine interface
 type mockProbeEngine struct{}
@@ -160,14 +167,23 @@ func (a *mockAuthenticator) Login(email, password string) (*User, string, error)
 }
 func (a *mockAuthenticator) Logout(token string) error { return nil }
 
+// mockClusterManager implements ClusterManager interface
+type mockClusterManager struct{}
+
+func (m *mockClusterManager) IsLeader() bool                           { return true }
+func (m *mockClusterManager) Leader() string                           { return "test-node" }
+func (m *mockClusterManager) IsClustered() bool                        { return false }
+func (m *mockClusterManager) GetStatus() *ClusterStatus                { return &ClusterStatus{IsClustered: false, NodeID: "test-node", State: "standalone"} }
+
 func TestHandleHealth(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 
 	server := &RESTServer{
-		store:  storage,
-		router: router,
-		logger: newTestLogger(),
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/health", server.handleHealth)
@@ -198,6 +214,7 @@ func TestHandleLogin_Success(t *testing.T) {
 		router: router,
 		auth:   auth,
 		logger: newTestLogger(),
+		cluster: &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/auth/login", server.handleLogin)
@@ -229,6 +246,7 @@ func TestHandleLogin_InvalidCredentials(t *testing.T) {
 		router: router,
 		auth:   auth,
 		logger: newTestLogger(),
+		cluster: &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/auth/login", server.handleLogin)
@@ -246,7 +264,7 @@ func TestHandleLogin_InvalidCredentials(t *testing.T) {
 
 func TestHandleListSouls(t *testing.T) {
 	storage := newMockStorage()
-	storage.SaveSoul(&core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP, Target: "https://example.com"})
+	storage.SaveSoul(context.Background(), &core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP, Target: "https://example.com"})
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
@@ -255,6 +273,7 @@ func TestHandleListSouls(t *testing.T) {
 		router: router,
 		auth:   &mockAuthenticator{},
 		logger: newTestLogger(),
+		cluster: &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/souls", server.requireAuth(server.handleListSouls))
@@ -285,6 +304,7 @@ func TestHandleCreateSoul(t *testing.T) {
 		router: router,
 		auth:   &mockAuthenticator{},
 		logger: newTestLogger(),
+		cluster: &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/souls", server.requireAuth(server.handleCreateSoul))
@@ -325,6 +345,7 @@ func TestHandleGetSoul_NotFound(t *testing.T) {
 		router: router,
 		auth:   &mockAuthenticator{},
 		logger: newTestLogger(),
+		cluster: &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/souls/:id", server.requireAuth(server.handleGetSoul))
@@ -343,7 +364,7 @@ func TestHandleGetSoul_NotFound(t *testing.T) {
 
 func TestHandleDeleteSoul(t *testing.T) {
 	storage := newMockStorage()
-	storage.SaveSoul(&core.Soul{ID: "to-delete", Name: "Delete Me", Type: core.CheckHTTP, Target: "https://example.com"})
+	storage.SaveSoul(context.Background(), &core.Soul{ID: "to-delete", Name: "Delete Me", Type: core.CheckHTTP, Target: "https://example.com"})
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
@@ -352,6 +373,7 @@ func TestHandleDeleteSoul(t *testing.T) {
 		router: router,
 		auth:   &mockAuthenticator{},
 		logger: newTestLogger(),
+		cluster: &mockClusterManager{},
 	}
 
 	router.Handle("DELETE", "/api/v1/souls/:id", server.requireAuth(server.handleDeleteSoul))
@@ -369,7 +391,7 @@ func TestHandleDeleteSoul(t *testing.T) {
 
 func TestHandleListChannels(t *testing.T) {
 	storage := newMockStorage()
-	storage.SaveChannel(&core.AlertChannel{ID: "ch-1", Name: "test-channel", Type: core.ChannelWebHook, Enabled: true})
+	storage.SaveChannelNoCtx(&core.AlertChannel{ID: "ch-1", Name: "test-channel", Type: core.ChannelWebHook, Enabled: true})
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
@@ -379,6 +401,7 @@ func TestHandleListChannels(t *testing.T) {
 		auth:   &mockAuthenticator{},
 		alert:  &mockAlertManager{},
 		logger: newTestLogger(),
+		cluster: &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/channels", server.requireAuth(server.handleListChannels))
@@ -396,7 +419,7 @@ func TestHandleListChannels(t *testing.T) {
 
 func TestHandleListRules(t *testing.T) {
 	storage := newMockStorage()
-	storage.SaveRule(&core.AlertRule{ID: "rule-1", Name: "Test Rule", Enabled: true})
+	storage.SaveRuleNoCtx(&core.AlertRule{ID: "rule-1", Name: "Test Rule", Enabled: true})
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
@@ -406,6 +429,7 @@ func TestHandleListRules(t *testing.T) {
 		auth:   &mockAuthenticator{},
 		alert:  &mockAlertManager{},
 		logger: newTestLogger(),
+		cluster: &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/rules", server.requireAuth(server.handleListRules))
@@ -423,7 +447,7 @@ func TestHandleListRules(t *testing.T) {
 
 func TestHandleListWorkspaces(t *testing.T) {
 	storage := newMockStorage()
-	storage.SaveWorkspace(&core.Workspace{ID: "ws-1", Name: "Test Workspace", Slug: "test"})
+	storage.SaveWorkspaceNoCtx(&core.Workspace{ID: "ws-1", Name: "Test Workspace", Slug: "test"})
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
@@ -433,6 +457,7 @@ func TestHandleListWorkspaces(t *testing.T) {
 		auth:   &mockAuthenticator{},
 		alert:  &mockAlertManager{},
 		logger: newTestLogger(),
+		cluster: &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/workspaces", server.requireAuth(server.handleListWorkspaces))

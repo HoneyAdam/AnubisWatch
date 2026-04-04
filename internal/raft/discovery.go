@@ -84,6 +84,7 @@ type MDNSServer struct {
 	ips      []net.IP
 	txt      []string
 	shutdown bool
+	conn     *net.UDPConn
 }
 
 // MDNSClient handles mDNS service discovery
@@ -92,6 +93,9 @@ type MDNSClient struct {
 	domain   string
 	results  chan *MDNSService
 	shutdown bool
+	conn     *net.UDPConn
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 // MDNSService represents a discovered mDNS service
@@ -440,14 +444,26 @@ func (d *Discovery) checkPeerHealth() {
 	d.peersMu.Unlock()
 }
 
-// MDNSServer implementation (placeholder)
+// MDNSServer implementation using UDP broadcast
 
 func (d *Discovery) newMDNSServer() *MDNSServer {
+	// Get all local IPs
+	ips, _ := net.InterfaceAddrs()
+	localIPs := make([]net.IP, 0)
+	for _, addr := range ips {
+		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+			if ipNet.IP.To4() != nil {
+				localIPs = append(localIPs, ipNet.IP)
+			}
+		}
+	}
+
 	return &MDNSServer{
 		instance: d.nodeID,
 		service:  "_anubiswatch._tcp",
 		domain:   "local",
-		port:     7946, // Default Raft port + offset
+		port:     7946, // Default Raft port
+		ips:      localIPs,
 		txt: []string{
 			fmt.Sprintf("id=%s", d.nodeID),
 			fmt.Sprintf("region=%s", d.region),
@@ -457,37 +473,206 @@ func (d *Discovery) newMDNSServer() *MDNSServer {
 }
 
 func (s *MDNSServer) Start() error {
-	// In a real implementation, this would use golang.org/x/net/mdns
-	// For now, just log
+	// Bind to UDP port for broadcast
+	addr, err := net.ResolveUDPAddr("udp4", ":7947")
+	if err != nil {
+		return err
+	}
+
+	conn, err := net.ListenUDP("udp4", addr)
+	if err != nil {
+		return err
+	}
+
+	s.conn = conn
+	s.shutdown = false
+
+	// Start listening
+	go s.listenAndServe()
+
+	// Broadcast our presence
+	go s.broadcastPresence()
+
 	return nil
+}
+
+func (s *MDNSServer) listenAndServe() {
+	buf := make([]byte, 1024)
+	for !s.shutdown {
+		s.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		n, addr, err := s.conn.ReadFromUDP(buf)
+		if err != nil {
+			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+				continue
+			}
+			return
+		}
+
+		// Parse incoming discovery message
+		msg := string(buf[:n])
+		if strings.Contains(msg, "_anubiswatch") {
+			// Respond with our info
+			response := fmt.Sprintf("%s|%d|%s", s.instance, s.port, strings.Join(s.txt, ";"))
+			s.conn.WriteToUDP([]byte(response), addr)
+		}
+	}
+}
+
+func (s *MDNSServer) broadcastPresence() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	msg := fmt.Sprintf("_anubiswatch_|%s|%d|%s", s.instance, s.port, strings.Join(s.txt, ";"))
+
+	for !s.shutdown {
+		// Broadcast to local network
+		broadcastAddr := &net.UDPAddr{
+			IP:   net.IPv4(255, 255, 255, 255),
+			Port: 7947,
+		}
+
+		if s.conn != nil {
+			s.conn.WriteToUDP([]byte(msg), broadcastAddr)
+		}
+
+		<-ticker.C
+	}
 }
 
 func (s *MDNSServer) Stop() {
 	s.shutdown = true
+	if s.conn != nil {
+		s.conn.Close()
+	}
 }
 
-// MDNSClient implementation (placeholder)
+// MDNSClient implementation using UDP broadcast
 
 func (d *Discovery) newMDNSClient() *MDNSClient {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &MDNSClient{
 		service: "_anubiswatch._tcp",
 		domain:  "local",
 		results: make(chan *MDNSService, 10),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 }
 
 func (c *MDNSClient) Start() error {
-	// In a real implementation, this would browse mDNS
+	// Bind to UDP port
+	addr, err := net.ResolveUDPAddr("udp4", ":7947")
+	if err != nil {
+		return err
+	}
+
+	conn, err := net.ListenUDP("udp4", addr)
+	if err != nil {
+		return err
+	}
+
+	c.conn = conn
+	c.shutdown = false
+
+	// Start listening for responses
+	go c.listenForResponses()
+
+	// Start querying
+	go c.queryPeriodically()
+
 	return nil
+}
+
+func (c *MDNSClient) listenForResponses() {
+	buf := make([]byte, 1024)
+	for !c.shutdown {
+		c.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		n, addr, err := c.conn.ReadFromUDP(buf)
+		if err != nil {
+			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+				continue
+			}
+			return
+		}
+
+		// Parse response
+		msg := string(buf[:n])
+		if svc := c.parseResponse(msg, addr); svc != nil {
+			select {
+			case c.results <- svc:
+			default:
+				// Channel full, skip
+			}
+		}
+	}
+}
+
+func (c *MDNSClient) parseResponse(msg string, addr *net.UDPAddr) *MDNSService {
+	// Format: _anubiswatch_|instance|port|txt1;txt2;txt3
+	parts := strings.Split(msg, "|")
+	if len(parts) < 4 || !strings.Contains(parts[0], "_anubiswatch") {
+		return nil
+	}
+
+	svc := &MDNSService{
+		Name: parts[1],
+		Host: addr.IP.String(),
+		Port: 0,
+		TXT:  strings.Split(parts[3], ";"),
+	}
+
+	// Parse port
+	fmt.Sscanf(parts[2], "%d", &svc.Port)
+	if svc.Port == 0 {
+		svc.Port = 7946
+	}
+
+	return svc
+}
+
+func (c *MDNSClient) queryPeriodically() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for !c.shutdown {
+		c.Query("_anubiswatch._tcp")
+		<-ticker.C
+	}
 }
 
 func (c *MDNSClient) Stop() {
 	c.shutdown = true
+	c.cancel()
+	if c.conn != nil {
+		c.conn.Close()
+	}
 }
 
 func (c *MDNSClient) Query(service string) []*MDNSService {
-	// Return empty list for now
-	return nil
+	// Send broadcast query
+	queryMsg := "_anubiswatch_"
+
+	broadcastAddr := &net.UDPAddr{
+		IP:   net.IPv4(255, 255, 255, 255),
+		Port: 7947,
+	}
+
+	if c.conn != nil {
+		c.conn.WriteToUDP([]byte(queryMsg), broadcastAddr)
+	}
+
+	// Collect responses
+	var services []*MDNSService
+	timeout := time.After(2 * time.Second)
+
+	for {
+		select {
+		case svc := <-c.results:
+			services = append(services, svc)
+		case <-timeout:
+			return services
+		}
+	}
 }
 
 // JSON helpers

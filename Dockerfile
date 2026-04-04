@@ -34,6 +34,8 @@ LABEL org.opencontainers.image.title="AnubisWatch"
 LABEL org.opencontainers.image.description="The Judgment Never Sleeps — Zero-dependency uptime monitoring"
 LABEL org.opencontainers.image.vendor="ECOSTACK TECHNOLOGY OÜ"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.source="https://github.com/AnubisWatch/anubiswatch"
+LABEL org.opencontainers.image.ref.name="ghcr.io/anubiswatch/anubiswatch"
 
 # Copy CA certificates for HTTPS checks
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/

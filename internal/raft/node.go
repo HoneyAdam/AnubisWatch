@@ -217,6 +217,11 @@ func NewNode(config core.RaftConfig, storage LogStore, snapshot SnapshotStore, f
 	return n, nil
 }
 
+// SetTransport sets the transport for the node
+func (n *Node) SetTransport(transport Transport) {
+	n.transport = transport
+}
+
 // Start starts the Raft node
 func (n *Node) Start() error {
 	if n.running.Load() {
@@ -297,6 +302,39 @@ func (n *Node) Leader() string {
 // Term returns the current term
 func (n *Node) Term() uint64 {
 	return atomic.LoadUint64(&n.currentTerm)
+}
+
+// LeaderID returns the current leader ID (public getter)
+func (n *Node) LeaderID() string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.leaderID
+}
+
+// CurrentTerm returns the current term (public getter)
+func (n *Node) CurrentTerm() uint64 {
+	return atomic.LoadUint64(&n.currentTerm)
+}
+
+// Peers returns a copy of the peers map
+func (n *Node) Peers() map[string]*Peer {
+	n.peerMu.RLock()
+	defer n.peerMu.RUnlock()
+	copy := make(map[string]*Peer, len(n.peers))
+	for k, v := range n.peers {
+		copy[k] = v
+	}
+	return copy
+}
+
+// Done returns the shutdown channel
+func (n *Node) Done() <-chan struct{} {
+	return n.doneCh
+}
+
+// Shutdown initiates graceful shutdown (alias for Stop)
+func (n *Node) Shutdown() {
+	n.Stop()
 }
 
 // Apply applies a command to the FSM through Raft

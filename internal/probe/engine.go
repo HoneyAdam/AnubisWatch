@@ -38,7 +38,7 @@ type Storage interface {
 
 // AlertDispatcher is the interface for firing alerts
 type AlertDispatcher interface {
-	Evaluate(ctx context.Context, soul *core.Soul, judgment *core.Judgment) error
+	ProcessJudgment(soul *core.Soul, prevStatus core.SoulStatus, judgment *core.Judgment)
 }
 
 // EngineOptions configures the probe engine
@@ -54,9 +54,10 @@ type AlertDispatcher interface {
 
 // soulRunner manages the ticker for a single soul
 type soulRunner struct {
-	soul   *core.Soul
-	ticker *time.Ticker
-	cancel context.CancelFunc
+	soul       *core.Soul
+	ticker     *time.Ticker
+	cancel     context.CancelFunc
+	lastStatus core.SoulStatus
 }
 
 // NewEngine creates a new probe engine
@@ -136,14 +137,14 @@ func (e *Engine) startSoul(soul *core.Soul) {
 		defer runner.ticker.Stop()
 
 		// Immediate first check
-		e.judgeSoul(ctx, soul)
+		e.judgeSoul(ctx, runner)
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-runner.ticker.C:
-				e.judgeSoul(ctx, runner.soul)
+				e.judgeSoul(ctx, runner)
 			}
 		}
 	}()
@@ -157,7 +158,9 @@ func (e *Engine) startSoul(soul *core.Soul) {
 }
 
 // judgeSoul executes a single check
-func (e *Engine) judgeSoul(ctx context.Context, soul *core.Soul) {
+func (e *Engine) judgeSoul(ctx context.Context, runner *soulRunner) {
+	soul := runner.soul
+
 	checker, ok := e.registry.Get(soul.Type)
 	if !ok {
 		e.logger.Error("unknown checker type", "type", soul.Type, "soul", soul.Name)
@@ -205,9 +208,9 @@ func (e *Engine) judgeSoul(ctx context.Context, soul *core.Soul) {
 
 	// Evaluate alert rules
 	if e.alerter != nil {
-		if err := e.alerter.Evaluate(ctx, soul, judgment); err != nil {
-			e.logger.Error("alert evaluation failed", "err", err, "soul", soul.Name)
-		}
+		prevStatus := runner.lastStatus
+		runner.lastStatus = judgment.Status
+		e.alerter.ProcessJudgment(soul, prevStatus, judgment)
 	}
 
 	e.logger.Debug("judgment complete",
@@ -240,6 +243,23 @@ func (e *Engine) TriggerImmediate(ctx context.Context, soulID string) (*core.Jud
 	judgment.JackalID = e.nodeID
 	judgment.Region = e.region
 	return judgment, nil
+}
+
+// ForceCheck triggers an immediate check (REST API compatible)
+func (e *Engine) ForceCheck(soulID string) (*core.Judgment, error) {
+	ctx := context.Background()
+	return e.TriggerImmediate(ctx, soulID)
+}
+
+// GetStatus returns probe engine status (REST API compatible)
+func (e *Engine) GetStatus() *core.ProbeStatus {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	return &core.ProbeStatus{
+		Running:      true,
+		ActiveChecks: len(e.souls),
+	}
 }
 
 // GetSoulStatus returns the current status of a soul

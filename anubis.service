@@ -1,0 +1,38 @@
+[Unit]
+Description=AnubisWatch Uptime Monitoring
+Documentation=https://github.com/AnubisWatch/anubiswatch
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=anubis
+Group=anubis
+
+# Environment
+Environment="ANUBIS_CONFIG=/etc/anubis/anubis.yaml"
+Environment="ANUBIS_DATA_DIR=/var/lib/anubis/data"
+Environment="ANUBIS_LOG_LEVEL=info"
+Environment="ANUBIS_LOG_FORMAT=json"
+
+# Executable
+ExecStart=/usr/local/bin/anubis serve
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/anubis
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

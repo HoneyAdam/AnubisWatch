@@ -430,20 +430,22 @@
 - [ ] Write integration tests for cross-workspace isolation
 
 ### 7.2 Public Status Page Generator
-- [ ] Implement `internal/statuspage/generator.go` — static HTML generator
-- [ ] Create status page HTML templates (responsive, customizable)
-- [ ] Implement component group rendering
-- [ ] Implement incident history rendering
-- [ ] Implement 90-day uptime bar rendering
-- [ ] Implement subscriber management (email, RSS, webhook)
-- [ ] Implement custom domain serving
-- [ ] Implement embeddable badge endpoint
+- [x] Implement `internal/statuspage/generator.go` — static HTML generator
+- [x] Create status page HTML templates (responsive, customizable)
+- [x] Implement component group rendering
+- [x] Implement incident history rendering
+- [x] Implement 90-day uptime bar rendering
+- [x] Implement subscriber management (email, RSS, webhook)
+- [x] Implement custom domain serving
+- [x] Integrate status page handler with REST server
+- [x] Implement embeddable badge endpoint
 
 ### 7.3 ACME/Let's Encrypt Auto-TLS
-- [ ] Implement ACME client (custom, no golang.org/x/crypto/acme/autocert)
-- [ ] Implement HTTP-01 challenge solver
-- [ ] Implement certificate storage in CobaltDB
-- [ ] Implement auto-renewal goroutine
+- [x] Implement ACME client (custom, no golang.org/x/crypto/acme/autocert)
+- [x] Implement HTTP-01 challenge solver
+- [x] Implement certificate storage in CobaltDB
+- [x] Implement auto-renewal goroutine
+- [x] Wire ACME manager into status page handler
 - [ ] Test with Let's Encrypt staging
 
 ### 7.4 Authentication Providers
@@ -465,13 +467,13 @@
 ## Phase 8 — Polish & Release (Week 21-22)
 
 ### 8.1 Documentation
-- [ ] Write comprehensive README.md (badges, features, screenshots, quick start)
-- [ ] Write BRANDING.md (full branding guide)
-- [ ] Write API documentation (OpenAPI/Swagger spec)
-- [ ] Write deployment guide (Docker, Docker Compose, Kubernetes Helm chart, systemd)
-- [ ] Write configuration reference
-- [ ] Write contributor guide (CONTRIBUTING.md)
-- [ ] Create website content for anubis.watch
+- [x] Write comprehensive README.md (badges, features, screenshots, quick start)
+- [x] Write BRANDING.md (full branding guide)
+- [x] Write API documentation (OpenAPI/Swagger spec)
+- [x] Write deployment guide (Docker, Docker Compose, Kubernetes Helm chart, systemd)
+- [x] Write configuration reference
+- [x] Write contributor guide (CONTRIBUTING.md)
+- [x] Create website content for anubis.watch
 
 ### 8.2 Testing & Quality
 - [ ] Achieve 80%+ code coverage
@@ -482,21 +484,22 @@
 - [ ] Performance profiling (pprof, trace)
 
 ### 8.3 Release Artifacts
-- [ ] Create install.sh (curl-pipe-sh installer)
-- [ ] Create Homebrew formula
-- [ ] Create Docker image (multi-arch: amd64, arm64, armv7)
-- [ ] Create Kubernetes Helm chart
-- [ ] Create systemd service file
-- [ ] Create example Docker Compose (1-node, 3-node cluster)
-- [ ] Create GitHub Release with changelog
+- [x] Create install.sh (curl-pipe-sh installer)
+- [x] Create Homebrew formula
+- [x] Create Docker image (multi-arch: amd64, arm64, armv7) - GHCR only
+- [x] Create Kubernetes Helm chart
+- [x] Create systemd service file
+- [x] Create example Docker Compose (1-node, 3-node cluster)
+- [x] Create GitHub Actions workflow for GHCR builds
+- [x] Create GitHub Release template and v0.0.1 release notes
 
 ### 8.4 Marketing & Launch
-- [ ] Create product infographic (Nano Banana 2 prompt)
-- [ ] Create X launch post (Turkish, developer-focused)
-- [ ] Create X Article (deep dive into architecture)
-- [ ] Create demo GIF/video (CLI + dashboard)
+- [x] Create product infographic (Nano Banana 2 prompt)
+- [x] Create X launch post (Turkish, developer-focused)
+- [x] Create X Article (deep dive into architecture)
+- [x] Create demo GIF/video (CLI + dashboard) script
 - [ ] Submit to Hacker News, Reddit r/selfhosted, r/golang
-- [ ] Create comparison table vs competitors for README
+- [x] Create comparison table vs competitors for README
 
 ---
 

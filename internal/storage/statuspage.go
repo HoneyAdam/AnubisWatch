@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -174,8 +175,35 @@ func (r *StatusPageRepository) GetSoul(id string) (*core.Soul, error) {
 
 // GetSoulJudgments retrieves recent judgments for a soul
 func (r *StatusPageRepository) GetSoulJudgments(soulID string, limit int) ([]core.Judgment, error) {
-	// Use judgments storage instead of direct feather access
-	return nil, fmt.Errorf("not implemented - use judgment storage directly")
+	// Scan for judgments with this soulID
+	prefix := fmt.Sprintf("default/judgments/%s/", soulID)
+	results, err := r.storage.PrefixScan(prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	judgments := make([]core.Judgment, 0, len(results))
+	for _, data := range results {
+		if data == nil {
+			continue
+		}
+		var j core.Judgment
+		if err := json.Unmarshal(data, &j); err != nil {
+			continue
+		}
+		judgments = append(judgments, j)
+	}
+
+	// Sort by timestamp descending and limit
+	sort.Slice(judgments, func(i, j int) bool {
+		return judgments[i].Timestamp.After(judgments[j].Timestamp)
+	})
+
+	if len(judgments) > limit {
+		judgments = judgments[:limit]
+	}
+
+	return judgments, nil
 }
 
 // GetIncidentsByPage retrieves incidents for a status page

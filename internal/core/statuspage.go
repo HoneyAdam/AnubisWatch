@@ -205,5 +205,7 @@ type StatusPageSubscription struct {
 	PageID      string    `json:"page_id"`
 	Email       string    `json:"email"`
 	WebhookURL  string    `json:"webhook_url"`
+	Type        string    `json:"type"` // email, webhook, rss
+	Confirmed   bool      `json:"confirmed"`
 	SubscribedAt time.Time `json:"subscribed_at"`
 }
