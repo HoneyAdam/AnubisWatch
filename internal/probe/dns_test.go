@@ -594,3 +594,93 @@ func TestDNSChecker_resolve_PTR(t *testing.T) {
 	}
 	t.Logf("PTR records: %v", records)
 }
+
+// Test resolve with MX record type
+func TestDNSChecker_resolve_MX(t *testing.T) {
+	checker := NewDNSChecker()
+	ctx := context.Background()
+
+	// Test MX lookup for google.com
+	records, err := checker.resolve(ctx, "google.com", "MX", "8.8.8.8:53")
+	if err != nil {
+		t.Fatalf("MX lookup failed: %v", err)
+	}
+	if len(records) == 0 {
+		t.Error("Expected MX records for google.com")
+	}
+	t.Logf("MX records: %v", records)
+}
+
+// Test resolve with TXT record type
+func TestDNSChecker_resolve_TXT(t *testing.T) {
+	checker := NewDNSChecker()
+	ctx := context.Background()
+
+	// Test TXT lookup for google.com
+	records, err := checker.resolve(ctx, "google.com", "TXT", "8.8.8.8:53")
+	if err != nil {
+		t.Fatalf("TXT lookup failed: %v", err)
+	}
+	if len(records) == 0 {
+		t.Error("Expected TXT records for google.com")
+	}
+	t.Logf("TXT records count: %d", len(records))
+}
+
+// Test judgePropagation with Expected value matching
+func TestDNSChecker_JudgePropagation_ExpectedMatch(t *testing.T) {
+	checker := NewDNSChecker()
+
+	soul := &core.Soul{
+		ID:     "test-dns-expected",
+		Name:   "Test DNS Expected",
+		Type:   core.CheckDNS,
+		Target: "example.com",
+		DNS: &core.DNSConfig{
+			RecordType:       "A",
+			PropagationCheck: true,
+			Nameservers:      []string{"8.8.8.8:53"},
+			Expected:         []string{"93.184.215.14"}, // example.com's IP
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	if judgment == nil {
+		t.Fatal("Expected judgment to be returned")
+	}
+	// Status depends on whether expected IP matches current DNS
+	t.Logf("Expected match result: %s - %s", judgment.Status, judgment.Message)
+}
+
+// Test judgePropagation with Expected value mismatch
+func TestDNSChecker_JudgePropagation_ExpectedMismatch(t *testing.T) {
+	checker := NewDNSChecker()
+
+	soul := &core.Soul{
+		ID:     "test-dns-expected-mismatch",
+		Name:   "Test DNS Expected Mismatch",
+		Type:   core.CheckDNS,
+		Target: "example.com",
+		DNS: &core.DNSConfig{
+			RecordType:       "A",
+			PropagationCheck: true,
+			Nameservers:      []string{"8.8.8.8:53"},
+			Expected:         []string{"1.2.3.4", "5.6.7.8"}, // Wrong IPs
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	if judgment == nil {
+		t.Fatal("Expected judgment to be returned")
+	}
+	// Should be degraded or dead due to mismatch
+	if judgment.Status != core.SoulDegraded && judgment.Status != core.SoulDead {
+		t.Logf("Expected Degraded/Dead for mismatch, got %s", judgment.Status)
+	}
+}

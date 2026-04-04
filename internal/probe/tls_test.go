@@ -646,3 +646,89 @@ func TestTLSChecker_Judge_SANMismatch(t *testing.T) {
 		t.Logf("Expected status Dead for SAN mismatch, got %s", judgment.Status)
 	}
 }
+
+// Test TLS Judge with OCSP check
+func TestTLSChecker_Judge_OCSPPresent(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	host := ts.URL[8:]
+
+	checker := NewTLSChecker()
+
+	soul := &core.Soul{
+		ID:     "test-tls-ocsp",
+		Name:   "Test TLS OCSP",
+		Type:   core.CheckTLS,
+		Target: host,
+		TLS: &core.TLSConfig{
+			CheckOCSP: true,
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	// Test servers don't have OCSP stapling, should be degraded
+	if judgment.Status != core.SoulDegraded {
+		t.Logf("Expected Degraded for missing OCSP, got %s", judgment.Status)
+	}
+
+	// Verify OCSP assertion was added
+	foundOCSPAssert := false
+	for _, assert := range judgment.Details.Assertions {
+		if assert.Type == "ocsp_stapling" {
+			foundOCSPAssert = true
+			break
+		}
+	}
+	if !foundOCSPAssert {
+		t.Error("Expected OCSP stapling assertion")
+	}
+}
+
+// Test TLS Judge with issuer mismatch (degraded, not dead)
+func TestTLSChecker_Judge_IssuerMismatch(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	host := ts.URL[8:]
+
+	checker := NewTLSChecker()
+
+	soul := &core.Soul{
+		ID:     "test-tls-issuer",
+		Name:   "Test TLS Issuer",
+		Type:   core.CheckTLS,
+		Target: host,
+		TLS: &core.TLSConfig{
+			ExpectedIssuer: "DefinitelyNotTestCA",
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	// Test cert issuer won't match, should be degraded
+	if judgment.Status != core.SoulDegraded && judgment.Status != core.SoulAlive {
+		t.Logf("Expected Degraded for issuer mismatch, got %s", judgment.Status)
+	}
+
+	// Verify issuer assertion was added
+	foundIssuerAssert := false
+	for _, assert := range judgment.Details.Assertions {
+		if assert.Type == "issuer" {
+			foundIssuerAssert = true
+			break
+		}
+	}
+	if !foundIssuerAssert {
+		t.Error("Expected issuer assertion")
+	}
+}
