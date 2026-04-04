@@ -298,6 +298,9 @@ func (c *HTTPChecker) Judge(ctx context.Context, soul *core.Soul) (*core.Judgmen
 
 // extractTLSInfo extracts TLS information from connection state
 func extractTLSInfo(state *tls.ConnectionState) *core.TLSInfo {
+	if state == nil {
+		return nil
+	}
 	info := &core.TLSInfo{
 		Protocol:    tlsVersionString(state.Version),
 		CipherSuite: tls.CipherSuiteName(state.CipherSuite),

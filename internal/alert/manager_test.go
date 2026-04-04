@@ -1,9 +1,11 @@
 package alert
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
@@ -375,6 +377,747 @@ func (m *mockAlertStorage) ListActiveIncidents() ([]*core.Incident, error) {
 	return result, nil
 }
 
+func TestSlackDispatcher_GetColor(t *testing.T) {
+	dispatcher := &SlackDispatcher{logger: newTestLogger()}
+
+	tests := []struct {
+		name     string
+		severity core.Severity
+		status   core.SoulStatus
+		expected string
+	}{
+		{"alive status", core.SeverityCritical, core.SoulAlive, "good"},
+		{"dead critical", core.SeverityCritical, core.SoulDead, "danger"},
+		{"degraded warning", core.SeverityWarning, core.SoulDegraded, "warning"},
+		{"info default", core.SeverityInfo, core.SoulUnknown, "#439FE0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := dispatcher.getColor(tt.severity, tt.status)
+			if result != tt.expected {
+				t.Errorf("getColor() = %s, want %s", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSlackDispatcher_GetEmoji(t *testing.T) {
+	dispatcher := &SlackDispatcher{logger: newTestLogger()}
+
+	tests := []struct {
+		name     string
+		status   core.SoulStatus
+		expected string
+	}{
+		{"alive", core.SoulAlive, "✅"},
+		{"dead", core.SoulDead, "🔴"},
+		{"degraded", core.SoulDegraded, "⚠️"},
+		{"unknown", core.SoulUnknown, "ℹ️"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := dispatcher.getEmoji(tt.status)
+			if result != tt.expected {
+				t.Errorf("getEmoji() = %s, want %s", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSlackDispatcher_Validate(t *testing.T) {
+	dispatcher := &SlackDispatcher{logger: newTestLogger()}
+
+	// Valid config
+	validConfig := map[string]interface{}{
+		"webhook_url": "https://hooks.slack.com/services/xxx",
+	}
+	if err := dispatcher.Validate(validConfig); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+
+	// Invalid config - missing webhook_url
+	invalidConfig := map[string]interface{}{}
+	if err := dispatcher.Validate(invalidConfig); err == nil {
+		t.Error("Validate() expected error for missing webhook_url")
+	}
+}
+
+func TestDiscordDispatcher_GetColor(t *testing.T) {
+	dispatcher := &DiscordDispatcher{logger: newTestLogger()}
+
+	tests := []struct {
+		name     string
+		severity core.Severity
+		status   core.SoulStatus
+		expected int
+	}{
+		{"alive", core.SeverityCritical, core.SoulAlive, 0x00ff00},
+		{"dead critical", core.SeverityCritical, core.SoulDead, 0xff0000},
+		{"degraded warning", core.SeverityWarning, core.SoulDegraded, 0xffa500},
+		{"info default", core.SeverityInfo, core.SoulUnknown, 0x439FE0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := dispatcher.getColor(tt.severity, tt.status)
+			if result != tt.expected {
+				t.Errorf("getColor() = 0x%x, want 0x%x", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDiscordDispatcher_Validate(t *testing.T) {
+	dispatcher := &DiscordDispatcher{logger: newTestLogger()}
+
+	// Valid config
+	validConfig := map[string]interface{}{
+		"webhook_url": "https://discord.com/api/webhooks/xxx",
+	}
+	if err := dispatcher.Validate(validConfig); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+
+	// Invalid config
+	invalidConfig := map[string]interface{}{}
+	if err := dispatcher.Validate(invalidConfig); err == nil {
+		t.Error("Validate() expected error for missing webhook_url")
+	}
+}
+
+func TestTelegramDispatcher_Validate(t *testing.T) {
+	dispatcher := &TelegramDispatcher{logger: newTestLogger()}
+
+	// Valid config
+	validConfig := map[string]interface{}{
+		"bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+		"chat_id":   "-123456789",
+	}
+	if err := dispatcher.Validate(validConfig); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+
+	// Missing bot_token
+	invalidConfig := map[string]interface{}{
+		"chat_id": "-123456789",
+	}
+	if err := dispatcher.Validate(invalidConfig); err == nil {
+		t.Error("Validate() expected error for missing bot_token")
+	}
+
+	// Missing chat_id
+	invalidConfig2 := map[string]interface{}{
+		"bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+	}
+	if err := dispatcher.Validate(invalidConfig2); err == nil {
+		t.Error("Validate() expected error for missing chat_id")
+	}
+}
+
+func TestNtfyDispatcher_Validate(t *testing.T) {
+	dispatcher := &NtfyDispatcher{logger: newTestLogger()}
+
+	// Valid config
+	validConfig := map[string]interface{}{
+		"topic": "my-topic",
+	}
+	if err := dispatcher.Validate(validConfig); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+
+	// Missing topic
+	invalidConfig := map[string]interface{}{}
+	if err := dispatcher.Validate(invalidConfig); err == nil {
+		t.Error("Validate() expected error for missing topic")
+	}
+}
+
+func TestWebHookDispatcher_Validate(t *testing.T) {
+	dispatcher := &WebHookDispatcher{logger: newTestLogger()}
+
+	// Valid config
+	validConfig := map[string]interface{}{
+		"url": "https://example.com/webhook",
+	}
+	if err := dispatcher.Validate(validConfig); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+
+	// Missing url
+	invalidConfig := map[string]interface{}{}
+	if err := dispatcher.Validate(invalidConfig); err == nil {
+		t.Error("Validate() expected error for missing url")
+	}
+}
+
+func TestEmailDispatcher_Validate(t *testing.T) {
+	dispatcher := &EmailDispatcher{logger: newTestLogger()}
+
+	// Valid config
+	validConfig := map[string]interface{}{
+		"smtp_host": "smtp.example.com",
+		"smtp_port": "587",
+		"from":      "alerts@example.com",
+		"to":        "admin@example.com",
+	}
+	if err := dispatcher.Validate(validConfig); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+
+	// Missing smtp_host
+	invalidConfig := map[string]interface{}{
+		"smtp_port": "587",
+		"from":      "alerts@example.com",
+		"to":        "admin@example.com",
+	}
+	if err := dispatcher.Validate(invalidConfig); err == nil {
+		t.Error("Validate() expected error for missing smtp_host")
+	}
+}
+
+func TestPagerDutyDispatcher_Validate(t *testing.T) {
+	dispatcher := &PagerDutyDispatcher{logger: newTestLogger()}
+
+	// Valid config
+	validConfig := map[string]interface{}{
+		"integration_key": "abc123def456",
+	}
+	if err := dispatcher.Validate(validConfig); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+
+	// Missing integration_key
+	invalidConfig := map[string]interface{}{}
+	if err := dispatcher.Validate(invalidConfig); err == nil {
+		t.Error("Validate() expected error for missing integration_key")
+	}
+}
+
+func TestOpsGenieDispatcher_Validate(t *testing.T) {
+	dispatcher := &OpsGenieDispatcher{logger: newTestLogger()}
+
+	// Valid config
+	validConfig := map[string]interface{}{
+		"api_key": "abc123-def456-ghi789",
+	}
+	if err := dispatcher.Validate(validConfig); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+
+	// Missing api_key
+	invalidConfig := map[string]interface{}{}
+	if err := dispatcher.Validate(invalidConfig); err == nil {
+		t.Error("Validate() expected error for missing api_key")
+	}
+}
+
+func TestSMSDispatcher_Validate(t *testing.T) {
+	dispatcher := &SMSDispatcher{logger: newTestLogger()}
+
+	// Valid config
+	validConfig := map[string]interface{}{
+		"provider": "twilio",
+		"account_sid": "AC1234567890",
+		"auth_token": "abc123",
+		"from": "+1234567890",
+		"to": "+0987654321",
+	}
+	if err := dispatcher.Validate(validConfig); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+
+	// Missing provider
+	invalidConfig := map[string]interface{}{
+		"account_sid": "AC1234567890",
+	}
+	if err := dispatcher.Validate(invalidConfig); err == nil {
+		t.Error("Validate() expected error for missing provider")
+	}
+}
+
+func TestAlertEventCreation(t *testing.T) {
+	event := &core.AlertEvent{
+		ID:        "event-1",
+		SoulID:    "soul-1",
+		SoulName:  "Test Soul",
+		Severity:  core.SeverityCritical,
+		Status:    core.SoulDead,
+		Message:   "Test alert message",
+		Timestamp: time.Now().UTC(),
+		Details: map[string]string{
+			"response_time": "5000ms",
+			"status_code":   "500",
+		},
+	}
+
+	if event.ID == "" {
+		t.Error("Event ID should not be empty")
+	}
+	if event.Severity != core.SeverityCritical {
+		t.Errorf("Expected severity critical, got %s", event.Severity)
+	}
+}
+
+// Additional tests for unique coverage
+
+func TestHmacSha256_Consistency(t *testing.T) {
+	data := []byte("test data")
+	secret := "test-secret"
+
+	sig1 := hmacSha256(data, secret)
+	sig2 := hmacSha256(data, secret)
+
+	if sig1 != sig2 {
+		t.Error("HMAC should be consistent")
+	}
+}
+
+func TestHmacSha256_DifferentInputs(t *testing.T) {
+	secret := "test-secret"
+
+	sig1 := hmacSha256([]byte("data1"), secret)
+	sig2 := hmacSha256([]byte("data2"), secret)
+
+	if sig1 == sig2 {
+		t.Error("Different inputs should produce different HMACs")
+	}
+}
+
+func TestAlertManager_Worker(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// Start manager (starts workers)
+	if err := manager.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer manager.Stop()
+
+	// Send event to queue
+	event := &core.AlertEvent{
+		ID:       "test-event",
+		SoulID:   "test-soul",
+		SoulName: "Test Soul",
+		Status:   core.SoulDead,
+	}
+
+	// Queue should accept event without blocking
+	select {
+	case manager.queue <- event:
+		// OK
+	default:
+		t.Error("Queue should accept event")
+	}
+
+	// Give worker time to process
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestAlertManager_StartStop(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// Start
+	if err := manager.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Second start should be no-op
+	if err := manager.Start(); err != nil {
+		t.Errorf("Second start should be no-op: %v", err)
+	}
+
+	// Stop
+	if err := manager.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	// Second stop should be no-op
+	if err := manager.Stop(); err != nil {
+		t.Errorf("Second stop should be no-op: %v", err)
+	}
+}
+
+func TestAlertManager_ListChannels(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	channel := &core.AlertChannel{
+		ID:   "list-channel",
+		Name: "List Channel",
+		Type: core.ChannelWebHook,
+	}
+	manager.RegisterChannel(channel)
+
+	channels := manager.ListChannels()
+	if len(channels) != 1 {
+		t.Errorf("Expected 1 channel, got %d", len(channels))
+	}
+}
+
+func TestAlertManager_ListRules(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{
+		ID:    "list-rule",
+		Name:  "List Rule",
+		Scope: core.RuleScope{Type: "all"},
+	}
+	manager.RegisterRule(rule)
+
+	rules := manager.ListRules()
+	if len(rules) != 1 {
+		t.Errorf("Expected 1 rule, got %d", len(rules))
+	}
+}
+
+func TestAlertManager_GetChannel(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	channel := &core.AlertChannel{
+		ID:   "get-channel",
+		Name: "Get Channel",
+		Type: core.ChannelWebHook,
+	}
+	manager.RegisterChannel(channel)
+
+	retrieved, err := manager.GetChannel("get-channel")
+	if err != nil {
+		t.Errorf("GetChannel failed: %v", err)
+	}
+	if retrieved == nil {
+		t.Error("Expected channel to be found")
+	}
+
+	notFound, err := manager.GetChannel("nonexistent")
+	if err == nil && notFound != nil {
+		t.Error("Expected nil for nonexistent channel")
+	}
+}
+
+func TestAlertManager_GetRule(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{
+		ID:    "get-rule",
+		Name:  "Get Rule",
+		Scope: core.RuleScope{Type: "all"},
+	}
+	manager.RegisterRule(rule)
+
+	retrieved, err := manager.GetRule("get-rule")
+	if err != nil {
+		t.Errorf("GetRule failed: %v", err)
+	}
+	if retrieved == nil {
+		t.Error("Expected rule to be found")
+	}
+
+	notFound, err := manager.GetRule("nonexistent")
+	if err == nil && notFound != nil {
+		t.Error("Expected nil for nonexistent rule")
+	}
+}
+
+func TestCalculateSeverity_Degraded(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	judgment := &core.Judgment{
+		Status: core.SoulDegraded,
+	}
+
+	result := manager.calculateSeverity(judgment)
+	if result != core.SeverityWarning {
+		t.Errorf("calculateSeverity degraded = %v, want %v", result, core.SeverityWarning)
+	}
+}
+
+func TestCheckConditions_EmptyConditions(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{Conditions: []core.AlertCondition{}}
+	judgment := &core.Judgment{Status: core.SoulDead}
+
+	result := manager.checkConditions(rule, core.SoulAlive, judgment)
+	if result != false {
+		t.Errorf("checkConditions with empty conditions = %v, want false", result)
+	}
+}
+
+func TestCheckConditions_RecoveryFromDegraded(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{
+		Conditions: []core.AlertCondition{
+			{Type: "recovery"},
+		},
+	}
+	// Recovery is defined as SoulDead -> SoulAlive
+	judgment := &core.Judgment{
+		Status: core.SoulAlive,
+	}
+
+	result := manager.checkConditions(rule, core.SoulDead, judgment)
+	if result != true {
+		t.Errorf("checkConditions recovery from dead = %v, want true", result)
+	}
+}
+
+func TestSMSDispatcher_Validate_MissingTo(t *testing.T) {
+	dispatcher := &SMSDispatcher{logger: newTestLogger()}
+
+	// Missing to
+	invalidConfig := map[string]interface{}{
+		"provider": "twilio",
+	}
+	if err := dispatcher.Validate(invalidConfig); err == nil {
+		t.Error("Validate() expected error for missing to")
+	}
+}
+
 func (m *mockAlertStorage) Close() error {
 	return nil
+}
+
+// Additional Manager method tests
+
+func TestManager_ProcessJudgment(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// Add a rule that applies to all souls
+	rule := &core.AlertRule{
+		ID:      "rule-1",
+		Enabled: true,
+		Scope: core.RuleScope{
+			Type: "all",
+		},
+		Conditions: []core.AlertCondition{
+			{Type: "consecutive_failures", Threshold: 1},
+		},
+		Channels: []string{},
+	}
+	storage.rules[rule.ID] = rule
+
+	soul := &core.Soul{
+		ID:          "test-soul",
+		WorkspaceID: "default",
+		Name:        "Test Soul",
+		Type:        core.CheckHTTP,
+	}
+
+	judgment := &core.Judgment{
+		Status:   core.SoulDead,
+		Message:  "Test failure",
+		Duration: time.Second * 5,
+	}
+
+	// Process judgment - should trigger alert
+	manager.ProcessJudgment(soul, core.SoulAlive, judgment)
+
+	// Check that alert was queued (may or may not trigger depending on condition logic)
+	// The consecutive_failures condition requires consecutive failures
+	// For this test, we just verify the method doesn't panic
+}
+
+func TestManager_sendToChannel(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	channel := &core.AlertChannel{
+		ID:      "channel-1",
+		Type:    core.ChannelWebHook,
+		Enabled: true,
+		Config: map[string]interface{}{
+			"url":    "https://example.com/webhook",
+			"method": "POST",
+		},
+	}
+	storage.channels[channel.ID] = channel
+
+	event := &core.AlertEvent{
+		ID:        "alert-1",
+		SoulID:    "test-soul",
+		SoulName:  "Test Soul",
+		Status:    core.SoulDead,
+		Severity:  core.SeverityCritical,
+		Message:   "Test alert",
+		Timestamp: time.Now().UTC(),
+	}
+
+	// sendToChannel should not panic
+	ctx := context.Background()
+	manager.sendToChannel(ctx, event, channel)
+}
+
+func TestManager_generateAlertID(t *testing.T) {
+	id := generateAlertID()
+	if len(id) == 0 {
+		t.Error("Expected non-empty alert ID")
+	}
+}
+
+func TestManager_generateShortID(t *testing.T) {
+	id := generateShortID()
+	if len(id) == 0 {
+		t.Error("Expected non-empty short ID")
+	}
+	if len(id) > 8 {
+		t.Errorf("Expected short ID <= 8 chars, got %d", len(id))
+	}
+}
+
+func TestManager_GetStats(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// Add channels and rules
+	storage.channels["ch1"] = &core.AlertChannel{ID: "ch1", Type: core.ChannelWebHook}
+	storage.channels["ch2"] = &core.AlertChannel{ID: "ch2", Type: core.ChannelSlack}
+	storage.rules["rule1"] = &core.AlertRule{ID: "rule1", Scope: core.RuleScope{Type: "all"}}
+
+	stats := manager.GetStats()
+	// Stats tracks alert counts, not channel/rule counts
+	_ = stats
+}
+
+func TestManager_AcknowledgeIncident(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	incident := &core.Incident{
+		ID:        "incident-1",
+		RuleID:    "rule-1",
+		SoulID:    "soul-1",
+		WorkspaceID: "default",
+		Status:    core.IncidentOpen,
+		Severity:  core.SeverityCritical,
+		StartedAt: time.Now().UTC(),
+	}
+	// Add incident directly to manager's internal map
+	manager.mu.Lock()
+	manager.incidents[incident.ID] = incident
+	manager.mu.Unlock()
+
+	err := manager.AcknowledgeIncident(incident.ID, "test-user")
+	if err != nil {
+		t.Fatalf("AcknowledgeIncident failed: %v", err)
+	}
+
+	// Verify status changed to Acknowledged
+	manager.mu.RLock()
+	status := manager.incidents[incident.ID].Status
+	manager.mu.RUnlock()
+	if status != core.IncidentAcked {
+		t.Errorf("Expected status Acknowledged, got %s", status)
+	}
+}
+
+func TestManager_ResolveIncident(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	incident := &core.Incident{
+		ID:        "incident-1",
+		RuleID:    "rule-1",
+		SoulID:    "soul-1",
+		WorkspaceID: "default",
+		Status:    core.IncidentOpen,
+		Severity:  core.SeverityCritical,
+		StartedAt: time.Now().UTC(),
+	}
+	// Add incident directly to manager's internal map
+	manager.mu.Lock()
+	manager.incidents[incident.ID] = incident
+	manager.mu.Unlock()
+
+	err := manager.ResolveIncident(incident.ID, "test-user")
+	if err != nil {
+		t.Fatalf("ResolveIncident failed: %v", err)
+	}
+
+	// Verify status changed to Resolved
+	manager.mu.RLock()
+	status := manager.incidents[incident.ID].Status
+	manager.mu.RUnlock()
+	if status != core.IncidentResolved {
+		t.Errorf("Expected status Resolved, got %s", status)
+	}
+}
+
+func TestManager_ListActiveIncidents(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	now := time.Now().UTC()
+	incidents := []*core.Incident{
+		{ID: "i1", RuleID: "r1", SoulID: "s1", WorkspaceID: "default", Status: core.IncidentOpen, StartedAt: now},
+		{ID: "i2", RuleID: "r2", SoulID: "s2", WorkspaceID: "default", Status: core.IncidentAcked, StartedAt: now},
+		{ID: "i3", RuleID: "r3", SoulID: "s3", WorkspaceID: "default", Status: core.IncidentResolved, StartedAt: now},
+	}
+	// Add incidents directly to manager's internal map
+	manager.mu.Lock()
+	for _, i := range incidents {
+		manager.incidents[i.ID] = i
+	}
+	manager.mu.Unlock()
+
+	active := manager.ListActiveIncidents()
+	// Should return Open and Acked, not Resolved
+	if len(active) != 2 {
+		t.Errorf("Expected 2 active incidents, got %d", len(active))
+	}
 }

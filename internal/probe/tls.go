@@ -296,10 +296,15 @@ func matchesSAN(san, expected string) bool {
 	if expected == san {
 		return true
 	}
-	// Simple wildcard matching
+	// Simple wildcard matching - *.example.com matches only one level
 	if strings.HasPrefix(expected, "*.") {
 		suffix := expected[1:] // Remove *
-		return strings.HasSuffix(san, suffix)
+		if !strings.HasSuffix(san, suffix) {
+			return false
+		}
+		// Ensure only one level matches (e.g., *.example.com matches api.example.com but not api.sub.example.com)
+		prefix := strings.TrimSuffix(san, suffix)
+		return !strings.Contains(prefix, ".")
 	}
 	return false
 }

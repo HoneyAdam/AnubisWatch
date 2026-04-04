@@ -187,3 +187,92 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		t.Errorf("Loaded Server.Port = %d, want %d", loaded.Server.Port, 9090)
 	}
 }
+
+func TestGenerateDefaultConfig(t *testing.T) {
+	config := GenerateDefaultConfig()
+
+	if config == nil {
+		t.Fatal("Expected non-nil config")
+	}
+
+	if config.Server.Host != "0.0.0.0" {
+		t.Errorf("Expected Server.Host = 0.0.0.0, got %q", config.Server.Host)
+	}
+
+	if config.Server.Port != 8443 {
+		t.Errorf("Expected Server.Port = 8443, got %d", config.Server.Port)
+	}
+
+	if !config.Server.TLS.Enabled {
+		t.Error("Expected Server.TLS.Enabled to be true")
+	}
+
+	if config.Storage.Path == "" {
+		t.Error("Expected Storage.Path to be set")
+	}
+}
+
+func TestParseInt(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int
+		hasError bool
+	}{
+		{"42", 42, false},
+		{"0", 0, false},
+		{"123456", 123456, false},
+		{"", 0, false},
+		{"abc", 0, true},
+		{"12a34", 0, true},
+	}
+
+	for _, tt := range tests {
+		result, err := parseInt(tt.input)
+		if (err != nil) != tt.hasError {
+			t.Errorf("parseInt(%q) error = %v, hasError = %v", tt.input, err, tt.hasError)
+		}
+		if !tt.hasError && result != tt.expected {
+			t.Errorf("parseInt(%q) = %d, want %d", tt.input, result, tt.expected)
+		}
+	}
+}
+
+func TestRaftConfig_Validate(t *testing.T) {
+	// Valid config
+	cfg := &RaftConfig{
+		NodeID:        "node-1",
+		BindAddr:      "127.0.0.1:7000",
+		AdvertiseAddr: "127.0.0.1:7000",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+
+	// Missing NodeID
+	cfg = &RaftConfig{
+		BindAddr: "127.0.0.1:7000",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Error("Expected error for missing NodeID")
+	}
+
+	// Missing BindAddr
+	cfg = &RaftConfig{
+		NodeID: "node-1",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Error("Expected error for missing BindAddr")
+	}
+
+	// Empty AdvertiseAddr should default to BindAddr
+	cfg = &RaftConfig{
+		NodeID:   "node-1",
+		BindAddr: "127.0.0.1:7000",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() unexpected error: %v", err)
+	}
+	if cfg.AdvertiseAddr != "127.0.0.1:7000" {
+		t.Errorf("Expected AdvertiseAddr to default to BindAddr")
+	}
+}

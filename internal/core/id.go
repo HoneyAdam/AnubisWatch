@@ -3,7 +3,6 @@ package core
 import (
 	"crypto/rand"
 	"encoding/base32"
-	"encoding/binary"
 	"errors"
 	"io"
 	"strings"
@@ -25,7 +24,8 @@ func (u ULID) String() string {
 
 // Time returns the timestamp component as time.Time.
 func (u ULID) Time() time.Time {
-	ms := binary.BigEndian.Uint64(append([]byte{0, 0}, u[:6]...))
+	// First 6 bytes are the timestamp in milliseconds (big-endian)
+	ms := uint64(u[0])<<40 | uint64(u[1])<<32 | uint64(u[2])<<24 | uint64(u[3])<<16 | uint64(u[4])<<8 | uint64(u[5])
 	return time.Unix(0, int64(ms)*1e6).UTC()
 }
 
@@ -83,10 +83,15 @@ func GenerateULID() (ULID, error) {
 // GenerateULIDAt creates a new ULID with the specified timestamp.
 func GenerateULIDAt(t time.Time) (ULID, error) {
 	var u ULID
-	ms := uint64(t.UnixNano()) / 1e6
+	ms := uint64(t.UnixMilli())
 
-	// Encode timestamp (48 bits)
-	binary.BigEndian.PutUint64(u[:8], ms)
+	// Encode timestamp (48 bits) in big-endian order
+	u[0] = byte(ms >> 40)
+	u[1] = byte(ms >> 32)
+	u[2] = byte(ms >> 24)
+	u[3] = byte(ms >> 16)
+	u[4] = byte(ms >> 8)
+	u[5] = byte(ms)
 
 	// Encode randomness (80 bits)
 	if _, err := io.ReadFull(rand.Reader, u[6:]); err != nil {

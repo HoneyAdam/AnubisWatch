@@ -143,3 +143,75 @@ func TestDurationConversion(t *testing.T) {
 		}
 	}
 }
+
+// Tests for uncovered methods
+
+func TestRaftRole_Values(t *testing.T) {
+	if RoleVoter != "voter" {
+		t.Errorf("Expected RoleVoter = voter, got %s", RoleVoter)
+	}
+	if RoleNonVoter != "nonvoter" {
+		t.Errorf("Expected RoleNonVoter = nonvoter, got %s", RoleNonVoter)
+	}
+	if RoleSpare != "spare" {
+		t.Errorf("Expected RoleSpare = spare, got %s", RoleSpare)
+	}
+}
+
+func TestRaftState_Values(t *testing.T) {
+	if StateFollower != "follower" {
+		t.Errorf("Expected StateFollower = follower, got %s", StateFollower)
+	}
+	if StateLeader != "leader" {
+		t.Errorf("Expected StateLeader = leader, got %s", StateLeader)
+	}
+	if StateCandidate != "candidate" {
+		t.Errorf("Expected StateCandidate = candidate, got %s", StateCandidate)
+	}
+}
+
+func TestCalculateOverallStatus(t *testing.T) {
+	// All operational
+	souls := []SoulStatusInfo{
+		{ID: "1", Name: "Soul 1", Status: "alive"},
+		{ID: "2", Name: "Soul 2", Status: "alive"},
+	}
+	status := CalculateOverallStatus(souls)
+	if status.Status != "operational" {
+		t.Errorf("Expected operational, got %s", status.Status)
+	}
+
+	// Some degraded
+	souls = []SoulStatusInfo{
+		{ID: "1", Name: "Soul 1", Status: "alive"},
+		{ID: "2", Name: "Soul 2", Status: "degraded"},
+	}
+	status = CalculateOverallStatus(souls)
+	if status.Status != "degraded" {
+		t.Errorf("Expected degraded, got %s", status.Status)
+	}
+
+	// Some dead
+	souls = []SoulStatusInfo{
+		{ID: "1", Name: "Soul 1", Status: "alive"},
+		{ID: "2", Name: "Soul 2", Status: "dead"},
+	}
+	status = CalculateOverallStatus(souls)
+	if status.Status != "major_outage" {
+		t.Errorf("Expected major_outage, got %s", status.Status)
+	}
+
+	// Empty
+	souls = []SoulStatusInfo{}
+	status = CalculateOverallStatus(souls)
+	if status.Status != "operational" {
+		t.Errorf("Expected operational for empty, got %s", status.Status)
+	}
+}
+
+func TestGetDefaultTheme(t *testing.T) {
+	theme := GetDefaultTheme()
+	if theme.PrimaryColor == "" {
+		t.Error("Expected primary color to be set")
+	}
+}
