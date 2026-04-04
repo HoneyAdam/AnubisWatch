@@ -1738,3 +1738,135 @@ func TestManager_loadCertificates_InvalidCertData(t *testing.T) {
 		t.Errorf("loadCertificates should skip invalid certs: %v", err)
 	}
 }
+
+// Test ServeHTTP with dot token
+func TestChallengeHandler_ServeHTTP_DotToken(t *testing.T) {
+	handler := &ChallengeHandler{
+		tokens: make(map[string]string),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/acme-challenge/.", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", w.Code)
+	}
+}
+
+// Test RenewIfNeeded with no expiring certs
+func TestManager_RenewIfNeeded_NoExpiring(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	cfg := Config{
+		Enabled:   true,
+		Provider:  ProviderLetsEncryptStaging,
+		Email:     "test@example.com",
+		AcceptTOS: true,
+	}
+
+	m, err := NewManager(db, cfg)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	// Add non-expiring cert to cache
+	m.certCache["valid.com"] = &CachedCertificate{
+		Domain:      "valid.com",
+		ExpiresAt:   time.Now().Add(90 * 24 * time.Hour),
+		Certificate: []byte("cert"),
+		PrivateKey:  []byte("key"),
+	}
+
+	renewed, err := m.RenewIfNeeded()
+	if err != nil {
+		t.Errorf("RenewIfNeeded failed: %v", err)
+	}
+	if len(renewed) != 0 {
+		t.Errorf("Expected 0 renewed certs, got %d", len(renewed))
+	}
+}
+
+// Test RenewIfNeeded with expiring cert
+func TestManager_RenewIfNeeded_Expiring(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	cfg := Config{
+		Enabled:   true,
+		Provider:  ProviderLetsEncryptStaging,
+		Email:     "test@example.com",
+		AcceptTOS: true,
+	}
+
+	m, err := NewManager(db, cfg)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	// Add expiring cert to cache
+	m.certCache["expiring.com"] = &CachedCertificate{
+		Domain:      "expiring.com",
+		ExpiresAt:   time.Now().Add(5 * 24 * time.Hour),
+		Certificate: []byte("cert"),
+		PrivateKey:  []byte("key"),
+	}
+
+	// RenewIfNeeded will try to renew but fail (ACME not implemented)
+	_, err = m.RenewIfNeeded()
+	// Error is expected since ACME protocol fails
+	_ = err
+}
+
+// Test GetAllDomains
+func TestManager_GetAllDomains(t *testing.T) {
+	m := &Manager{
+		certCache: map[string]*CachedCertificate{
+			"domain1.com": {Domain: "domain1.com"},
+			"domain2.com": {Domain: "domain2.com"},
+		},
+	}
+
+	domains := m.GetAllDomains()
+	if len(domains) != 2 {
+		t.Errorf("Expected 2 domains, got %d", len(domains))
+	}
+}
+
+// Test CertificateInfo - found
+func TestManager_CertificateInfo_Found(t *testing.T) {
+	expectedCert := &CachedCertificate{
+		Domain:      "info.com",
+		ExpiresAt:   time.Now().Add(90 * 24 * time.Hour),
+		Certificate: []byte("cert"),
+		PrivateKey:  []byte("key"),
+	}
+
+	m := &Manager{
+		certCache: map[string]*CachedCertificate{
+			"info.com": expectedCert,
+		},
+	}
+
+	cert, err := m.CertificateInfo("info.com")
+	if err != nil {
+		t.Errorf("CertificateInfo failed: %v", err)
+	}
+	if cert.Domain != "info.com" {
+		t.Errorf("Expected domain info.com, got %s", cert.Domain)
+	}
+}
+
+// Test CertificateInfo - not found
+func TestManager_CertificateInfo_NotFound(t *testing.T) {
+	m := &Manager{
+		certCache: make(map[string]*CachedCertificate),
+	}
+
+	_, err := m.CertificateInfo("nonexistent.com")
+	if err == nil {
+		t.Error("Expected error for nonexistent domain")
+	}
+}
