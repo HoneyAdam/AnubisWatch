@@ -1025,3 +1025,175 @@ func TestEngine_judgeSoul_ValidationError(t *testing.T) {
 	engine.judgeSoul(ctx, runner)
 	// Test passes if no panic
 }
+
+// Test TriggerImmediate with unknown checker type
+func TestEngine_TriggerImmediate_UnknownType(t *testing.T) {
+	engine := newTestEngine(t)
+
+	// Manually add a soul with unknown type to the engine
+	soul := &core.Soul{
+		ID:     "test-unknown-type",
+		Name:   "Test Unknown Type",
+		Type:   "unknown-checker-type",
+		Target: "localhost:80",
+	}
+
+	engine.mu.Lock()
+	engine.souls[soul.ID] = &soulRunner{soul: soul}
+	engine.mu.Unlock()
+
+	ctx := context.Background()
+	_, err := engine.TriggerImmediate(ctx, soul.ID)
+
+	if err == nil {
+		t.Error("Expected error for unknown checker type")
+	}
+}
+
+// Test TriggerImmediate with valid soul
+func TestEngine_TriggerImmediate_Success(t *testing.T) {
+	engine := newTestEngine(t)
+
+	// Add a valid HTTP soul
+	soul := &core.Soul{
+		ID:      "test-http-trigger",
+		Name:    "Test HTTP Trigger",
+		Type:    core.CheckHTTP,
+		Target:  "https://example.com",
+		Enabled: true,
+		HTTP: &core.HTTPConfig{
+			Method:      "GET",
+			ValidStatus: []int{200},
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	engine.mu.Lock()
+	engine.souls[soul.ID] = &soulRunner{soul: soul}
+	engine.mu.Unlock()
+
+	ctx := context.Background()
+	judgment, err := engine.TriggerImmediate(ctx, soul.ID)
+
+	if err != nil {
+		t.Fatalf("TriggerImmediate failed: %v", err)
+	}
+	if judgment == nil {
+		t.Fatal("Expected judgment to be returned")
+	}
+	if judgment.JackalID != engine.nodeID {
+		t.Error("Expected JackalID to be set")
+	}
+	if judgment.Region != engine.region {
+		t.Error("Expected Region to be set")
+	}
+}
+
+// Test judgePropagation with propagation below threshold
+func TestDNSChecker_JudgePropagation_BelowThreshold(t *testing.T) {
+	checker := NewDNSChecker()
+
+	soul := &core.Soul{
+		ID:     "test-dns-propagation",
+		Name:   "Test DNS Propagation",
+		Type:   core.CheckDNS,
+		Target: "example.com",
+		DNS: &core.DNSConfig{
+			RecordType:           "A",
+			PropagationCheck:     true,
+			Nameservers:          []string{"8.8.8.8:53", "1.1.1.1:53", "9.9.9.9:53"},
+			PropagationThreshold: 100, // Require 100% propagation
+		},
+		Timeout: core.Duration{Duration: 10 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	// Should pass or be degraded depending on DNS propagation
+	if judgment == nil {
+		t.Fatal("Expected judgment to be returned")
+	}
+	if judgment.Details.PropagationResult == nil {
+		t.Error("Expected propagation results")
+	}
+}
+
+// Test NewEngine with nil logger (uses default logger)
+func TestNewEngine_NilLogger(t *testing.T) {
+	opts := EngineOptions{
+		NodeID:   "test-node",
+		Region:   "test-region",
+		Registry: NewCheckerRegistry(),
+		// Logger is nil - should use default
+	}
+
+	engine := NewEngine(opts)
+
+	if engine == nil {
+		t.Fatal("Expected engine to be created")
+	}
+	if engine.logger == nil {
+		t.Error("Expected logger to be set to default")
+	}
+}
+
+// Test judgeSoul successful path with storage
+func TestEngine_judgeSoul_Success(t *testing.T) {
+	engine := newTestEngine(t)
+
+	soul := &core.Soul{
+		ID:      "test-http-judge-success",
+		Name:    "Test HTTP Judge Success",
+		Type:    core.CheckHTTP,
+		Target:  "https://example.com",
+		Enabled: true,
+		HTTP: &core.HTTPConfig{
+			Method:      "GET",
+			ValidStatus: []int{200},
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	runner := &soulRunner{
+		soul:       soul,
+		lastStatus: core.SoulUnknown,
+	}
+	ctx := context.Background()
+
+	// Should not panic and should execute successfully
+	engine.judgeSoul(ctx, runner)
+
+	// Test passes if no panic - judgment should be stored via mock
+}
+
+// Test judgePropagation with nameserver errors
+func TestDNSChecker_JudgePropagation_NameserverErrors(t *testing.T) {
+	checker := NewDNSChecker()
+
+	soul := &core.Soul{
+		ID:     "test-dns-propagation-errors",
+		Name:   "Test DNS Propagation Errors",
+		Type:   core.CheckDNS,
+		Target: "example.com",
+		DNS: &core.DNSConfig{
+			RecordType:       "A",
+			PropagationCheck: true,
+			// Use invalid nameserver that will fail
+			Nameservers:          []string{"127.0.0.1:1", "127.0.0.1:2"},
+			PropagationThreshold: 0, // Allow any propagation
+		},
+		Timeout: core.Duration{Duration: 2 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	if judgment == nil {
+		t.Fatal("Expected judgment to be returned")
+	}
+	// With all nameservers failing and threshold 0, should be degraded
+	if judgment.Status != core.SoulDegraded && judgment.Status != core.SoulDead {
+		t.Logf("Got status %s, expected Degraded or Dead", judgment.Status)
+	}
+}

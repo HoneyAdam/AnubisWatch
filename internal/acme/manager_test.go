@@ -981,6 +981,28 @@ func TestTLSConfig_GetCertificate_NilManager(t *testing.T) {
 	_, _ = tlsConfig.GetCertificate(hello)
 }
 
+// Test TLSConfig.GetCertificate with invalid certificate data
+func TestTLSConfig_GetCertificate_InvalidCertData(t *testing.T) {
+	m := &Manager{
+		certCache: map[string]*CachedCertificate{
+			"invalid.com": {
+				Domain:      "invalid.com",
+				Certificate: []byte("invalid-cert-data"),
+				PrivateKey:  []byte("invalid-key-data"),
+			},
+		},
+	}
+
+	tlsConfig := &TLSConfig{manager: m}
+	hello := &ClientHelloInfo{ServerName: "invalid.com"}
+
+	// Should return error from parseTLSCertificate
+	_, err := tlsConfig.GetCertificate(hello)
+	if err == nil {
+		t.Error("Expected error for invalid certificate data")
+	}
+}
+
 func TestNewManager_ZeroSSL(t *testing.T) {
 	db := newTestDB(t)
 	defer db.Close()
@@ -1868,5 +1890,99 @@ func TestManager_CertificateInfo_NotFound(t *testing.T) {
 	_, err := m.CertificateInfo("nonexistent.com")
 	if err == nil {
 		t.Error("Expected error for nonexistent domain")
+	}
+}
+
+// Test loadCertificates with closed database (PrefixScan error path)
+func TestManager_loadCertificates_PrefixScanError(t *testing.T) {
+	db := newTestDB(t)
+
+	cfg := Config{
+		Enabled:   true,
+		Provider:  ProviderLetsEncryptStaging,
+		Email:     "test@example.com",
+		AcceptTOS: true,
+	}
+
+	m, err := NewManager(db, cfg)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	// Close the database to trigger PrefixScan error
+	db.Close()
+
+	// loadCertificates should return error when PrefixScan fails
+	err = m.loadCertificates()
+	if err == nil {
+		t.Error("Expected error from PrefixScan on closed database")
+	}
+}
+
+// Test TLSConfig.GetCertificate with valid cached certificate
+func TestTLSConfig_GetCertificate_ValidCert(t *testing.T) {
+	// Generate a valid EC key for testing
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate key: %v", err)
+	}
+
+	keyBytes, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("Failed to marshal key: %v", err)
+	}
+
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "EC PRIVATE KEY",
+		Bytes: keyBytes,
+	})
+
+	// Create a self-signed certificate for testing
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject: pkix.Name{
+			CommonName: "valid.com",
+		},
+		DNSNames:     []string{"valid.com"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(90 * 24 * time.Hour),
+	}
+
+	certBytes, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("Failed to create certificate: %v", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certBytes,
+	})
+
+	m := &Manager{
+		certCache: map[string]*CachedCertificate{
+			"valid.com": {
+				Domain:      "valid.com",
+				Certificate: certPEM,
+				PrivateKey:  keyPEM,
+				ExpiresAt:   template.NotAfter,
+			},
+		},
+	}
+
+	tlsConfig := &TLSConfig{manager: m}
+	hello := &ClientHelloInfo{ServerName: "valid.com"}
+
+	tlsCert, err := tlsConfig.GetCertificate(hello)
+	if err != nil {
+		t.Errorf("GetCertificate failed: %v", err)
+	}
+	if tlsCert == nil {
+		t.Fatal("Expected TLS certificate")
+	}
+	if len(tlsCert.Certificate) == 0 {
+		t.Error("Expected certificate chain")
+	}
+	if tlsCert.PrivateKey == nil {
+		t.Error("Expected private key")
 	}
 }

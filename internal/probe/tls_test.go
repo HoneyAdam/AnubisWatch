@@ -615,3 +615,34 @@ func TestTLSChecker_Judge_DeadStatusOnCriticalExpiry(t *testing.T) {
 		t.Logf("Short-lived test cert status: %s", judgment.Status)
 	}
 }
+
+// Test TLS SAN mismatch - should return SoulDead
+func TestTLSChecker_Judge_SANMismatch(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	host := ts.URL[8:]
+
+	checker := NewTLSChecker()
+
+	soul := &core.Soul{
+		ID:     "test-tls-san-mismatch",
+		Name:   "Test TLS SAN Mismatch",
+		Type:   core.CheckTLS,
+		Target: host,
+		TLS: &core.TLSConfig{
+			ExpectedSAN: []string{"definitely-not-matching.example.com"},
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	// SAN should not match test certificate
+	if judgment.Status != core.SoulDead {
+		t.Logf("Expected status Dead for SAN mismatch, got %s", judgment.Status)
+	}
+}

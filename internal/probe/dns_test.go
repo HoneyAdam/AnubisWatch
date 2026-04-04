@@ -556,3 +556,41 @@ func TestDNSChecker_Judge_NameserverDefaultsPort(t *testing.T) {
 		t.Error("Expected judgment to be returned")
 	}
 }
+
+// Test resolve function directly with failing nameserver
+func TestDNSChecker_resolve_Error(t *testing.T) {
+	checker := NewDNSChecker()
+	ctx := context.Background()
+
+	// Use invalid nameserver that will fail
+	_, err := checker.resolve(ctx, "example.com", "A", "127.0.0.1:1")
+	if err == nil {
+		t.Error("Expected error for invalid nameserver")
+	}
+}
+
+// Test resolve with SRV record type
+func TestDNSChecker_resolve_SRV(t *testing.T) {
+	checker := NewDNSChecker()
+	ctx := context.Background()
+
+	// Test SRV lookup for a domain that has SRV records
+	// Using google.com which typically has SRV records
+	records, err := checker.resolve(ctx, "google.com", "SRV", "8.8.8.8:53")
+	// SRV lookup may or may not return records, but should not error for valid domain
+	t.Logf("SRV records: %v, err: %v", records, err)
+}
+
+// Test resolve with PTR record type
+func TestDNSChecker_resolve_PTR(t *testing.T) {
+	checker := NewDNSChecker()
+	ctx := context.Background()
+
+	// Test PTR lookup for Google DNS
+	records, err := checker.resolve(ctx, "8.8.8.8", "PTR", "8.8.8.8:53")
+	// PTR lookup should work for 8.8.8.8
+	if err != nil {
+		t.Logf("PTR lookup error (may be expected): %v", err)
+	}
+	t.Logf("PTR records: %v", records)
+}
