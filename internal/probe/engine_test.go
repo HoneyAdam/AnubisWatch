@@ -1,6 +1,8 @@
 package probe
 
 import (
+	"context"
+	"crypto/tls"
 	"os"
 	"testing"
 	"time"
@@ -285,4 +287,648 @@ func TestEngine_RemoveSouls(t *testing.T) {
 
 	// Soul should be stopped (ticker cancelled)
 	// Note: Actual verification would require mocking
+}
+
+func TestGetChecker(t *testing.T) {
+	checker := GetChecker(core.CheckHTTP)
+	if checker == nil {
+		t.Error("Expected HTTP checker from global registry")
+	}
+
+	checker = GetChecker("invalid-type")
+	if checker != nil {
+		t.Error("Expected nil for invalid checker type")
+	}
+}
+
+func TestRegisterChecker(t *testing.T) {
+	// Test registering a custom checker
+	customChecker := &testChecker{}
+	RegisterChecker(customChecker)
+
+	checker := GetChecker(core.CheckType("test"))
+	if checker != customChecker {
+		t.Error("Expected custom checker to be registered")
+	}
+}
+
+type testChecker struct{}
+
+func (c *testChecker) Type() core.CheckType                    { return "test" }
+func (c *testChecker) Judge(ctx context.Context, soul *core.Soul) (*core.Judgment, error) {
+	return nil, nil
+}
+func (c *testChecker) Validate(soul *core.Soul) error { return nil }
+
+func TestHTTPChecker_Type(t *testing.T) {
+	checker := NewHTTPChecker()
+	if checker.Type() != core.CheckHTTP {
+		t.Errorf("Expected type %s, got %s", core.CheckHTTP, checker.Type())
+	}
+}
+
+func TestTCPChecker_Type(t *testing.T) {
+	checker := NewTCPChecker()
+	if checker.Type() != core.CheckTCP {
+		t.Errorf("Expected type %s, got %s", core.CheckTCP, checker.Type())
+	}
+}
+
+func TestDNSChecker_Type(t *testing.T) {
+	checker := NewDNSChecker()
+	if checker.Type() != core.CheckDNS {
+		t.Errorf("Expected type %s, got %s", core.CheckDNS, checker.Type())
+	}
+}
+
+func TestTLSChecker_Type(t *testing.T) {
+	checker := NewTLSChecker()
+	if checker.Type() != core.CheckTLS {
+		t.Errorf("Expected type %s, got %s", core.CheckTLS, checker.Type())
+	}
+}
+
+func TestGRPCChecker_Type(t *testing.T) {
+	checker := NewGRPCChecker()
+	if checker.Type() != core.CheckGRPC {
+		t.Errorf("Expected type %s, got %s", core.CheckGRPC, checker.Type())
+	}
+}
+
+func TestWebSocketChecker_Type(t *testing.T) {
+	checker := NewWebSocketChecker()
+	if checker.Type() != core.CheckWebSocket {
+		t.Errorf("Expected type %s, got %s", core.CheckWebSocket, checker.Type())
+	}
+}
+
+func TestSMTPChecker_Type(t *testing.T) {
+	checker := NewSMTPChecker()
+	if checker.Type() != core.CheckSMTP {
+		t.Errorf("Expected type %s, got %s", core.CheckSMTP, checker.Type())
+	}
+}
+
+func TestIMAPChecker_Type(t *testing.T) {
+	checker := NewIMAPChecker()
+	if checker.Type() != core.CheckIMAP {
+		t.Errorf("Expected type %s, got %s", core.CheckIMAP, checker.Type())
+	}
+}
+
+func TestICMPChecker_Type(t *testing.T) {
+	checker := NewICMPChecker()
+	if checker.Type() != core.CheckICMP {
+		t.Errorf("Expected type %s, got %s", core.CheckICMP, checker.Type())
+	}
+}
+
+func TestUDPChecker_Type(t *testing.T) {
+	checker := NewUDPChecker()
+	if checker.Type() != core.CheckUDP {
+		t.Errorf("Expected type %s, got %s", core.CheckUDP, checker.Type())
+	}
+}
+
+// Test validationError helper
+func TestValidationError(t *testing.T) {
+	err := validationError("target", "target is required")
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+	verr, ok := err.(*core.ValidationError)
+	if !ok {
+		t.Fatal("Expected ValidationError")
+	}
+	if verr.Field != "target" {
+		t.Errorf("Expected field 'target', got %s", verr.Field)
+	}
+	if verr.Message != "target is required" {
+		t.Errorf("Expected message 'target is required', got %s", verr.Message)
+	}
+}
+
+// Test configError helper
+func TestConfigError(t *testing.T) {
+	err := configError("method", "invalid method")
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+	cerr, ok := err.(*core.ConfigError)
+	if !ok {
+		t.Fatal("Expected ConfigError")
+	}
+	if cerr.Field != "method" {
+		t.Errorf("Expected field 'method', got %s", cerr.Field)
+	}
+	if cerr.Message != "invalid method" {
+		t.Errorf("Expected message 'invalid method', got %s", cerr.Message)
+	}
+}
+
+// mockStorage for probe tests
+type mockProbeStorage struct{}
+
+func (m *mockProbeStorage) SaveJudgment(ctx context.Context, j *core.Judgment) error {
+	return nil
+}
+func (m *mockProbeStorage) GetSoul(ctx context.Context, workspaceID, soulID string) (*core.Soul, error) {
+	return nil, &core.NotFoundError{Entity: "soul", ID: soulID}
+}
+func (m *mockProbeStorage) ListSouls(ctx context.Context, workspaceID string) ([]*core.Soul, error) {
+	return []*core.Soul{}, nil
+}
+
+// mockAlerter for probe tests
+type mockProbeAlerter struct{}
+
+func (m *mockProbeAlerter) ProcessJudgment(soul *core.Soul, prevStatus core.SoulStatus, judgment *core.Judgment) {
+}
+
+// Test Engine ForceCheck
+func TestEngine_ForceCheck(t *testing.T) {
+	opts := EngineOptions{
+		NodeID:  "test-node",
+		Region:  "test-region",
+		Store:   &mockProbeStorage{},
+		Alerter: &mockProbeAlerter{},
+		Logger:  newTestProbeLogger(),
+	}
+	engine := NewEngine(opts)
+
+	// ForceCheck on non-existent soul should fail
+	_, err := engine.ForceCheck("non-existent-soul")
+	if err == nil {
+		t.Error("Expected error for non-existent soul")
+	}
+}
+
+// Test Engine GetStatus
+func TestEngine_GetStatus(t *testing.T) {
+	opts := EngineOptions{
+		NodeID:  "test-node",
+		Region:  "test-region",
+		Store:   &mockProbeStorage{},
+		Alerter: &mockProbeAlerter{},
+		Logger:  newTestProbeLogger(),
+	}
+	engine := NewEngine(opts)
+
+	status := engine.GetStatus()
+	if status == nil {
+		t.Fatal("Expected non-nil status")
+	}
+	if !status.Running {
+		t.Error("Expected engine to be running")
+	}
+}
+
+// Test Engine ListActiveSouls
+func TestEngine_ListActiveSouls(t *testing.T) {
+	opts := EngineOptions{
+		NodeID:  "test-node",
+		Region:  "test-region",
+		Store:   &mockProbeStorage{},
+		Alerter: &mockProbeAlerter{},
+		Logger:  newTestProbeLogger(),
+	}
+	engine := NewEngine(opts)
+
+	souls := engine.ListActiveSouls()
+	if souls == nil {
+		t.Error("Expected non-nil souls slice")
+	}
+	if len(souls) != 0 {
+		t.Errorf("Expected 0 souls, got %d", len(souls))
+	}
+}
+
+// Test Engine Stop
+func TestEngine_Stop(t *testing.T) {
+	opts := EngineOptions{
+		NodeID:  "test-node",
+		Region:  "test-region",
+		Store:   &mockProbeStorage{},
+		Alerter: &mockProbeAlerter{},
+		Logger:  newTestProbeLogger(),
+	}
+	engine := NewEngine(opts)
+
+	// Stop should not panic
+	engine.Stop()
+}
+
+// Test Engine TriggerImmediate
+func TestEngine_TriggerImmediate(t *testing.T) {
+	opts := EngineOptions{
+		NodeID:  "test-node",
+		Region:  "test-region",
+		Store:   &mockProbeStorage{},
+		Alerter: &mockProbeAlerter{},
+		Logger:  newTestProbeLogger(),
+	}
+	engine := NewEngine(opts)
+
+	// TriggerImmediate on non-existent soul should fail
+	_, err := engine.TriggerImmediate(context.Background(), "non-existent")
+	if err == nil {
+		t.Error("Expected error for non-existent soul")
+	}
+}
+
+// Test Engine GetSoulStatus
+func TestEngine_GetSoulStatus(t *testing.T) {
+	opts := EngineOptions{
+		NodeID:  "test-node",
+		Region:  "test-region",
+		Store:   &mockProbeStorage{},
+		Alerter: &mockProbeAlerter{},
+		Logger:  newTestProbeLogger(),
+	}
+	engine := NewEngine(opts)
+
+	// GetSoulStatus on non-existent soul should fail
+	_, err := engine.GetSoulStatus("non-existent")
+	if err == nil {
+		t.Error("Expected error for non-existent soul")
+	}
+}
+
+// Test Engine Stats
+func TestEngine_Stats(t *testing.T) {
+	opts := EngineOptions{
+		NodeID:  "test-node",
+		Region:  "test-region",
+		Store:   &mockProbeStorage{},
+		Alerter: &mockProbeAlerter{},
+		Logger:  newTestProbeLogger(),
+	}
+	engine := NewEngine(opts)
+
+	stats := engine.Stats()
+	if stats == nil {
+		t.Error("Expected non-nil stats")
+	}
+}
+
+// Test TLS Checker Judge function
+func TestTLSChecker_Judge_Success(t *testing.T) {
+	checker := NewTLSChecker()
+	soul := &core.Soul{
+		ID:      "test-tls-judge",
+		Name:    "Test TLS Judge",
+		Type:    core.CheckTLS,
+		Target:  "google.com:443",
+		Timeout: core.Duration{Duration: 10 * time.Second},
+		TLS: &core.TLSConfig{
+			ExpiryWarnDays:     30,
+			ExpiryCriticalDays: 7,
+		},
+	}
+
+	judgment, err := checker.Judge(context.Background(), soul)
+	if err != nil {
+		t.Fatalf("Judge failed: %v", err)
+	}
+	// Connection should succeed, status depends on cert validity
+	if judgment.Status != core.SoulAlive && judgment.Status != core.SoulDegraded {
+		t.Errorf("Expected status alive or degraded, got %s", judgment.Status)
+	}
+	// TLS info should be populated
+	if judgment.TLSInfo == nil {
+		t.Error("Expected TLS info")
+	}
+}
+
+func TestTLSChecker_Judge_InvalidHost(t *testing.T) {
+	checker := NewTLSChecker()
+	soul := &core.Soul{
+		ID:      "test-tls-invalid",
+		Name:    "Test TLS Invalid",
+		Type:    core.CheckTLS,
+		Target:  "invalid.host.example:443",
+		Timeout: core.Duration{Duration: 2 * time.Second},
+		TLS:     &core.TLSConfig{},
+	}
+
+	judgment, err := checker.Judge(context.Background(), soul)
+	if err != nil {
+		t.Fatalf("Judge failed: %v", err)
+	}
+	if judgment.Status != core.SoulDead {
+		t.Errorf("Expected status dead, got %s", judgment.Status)
+	}
+}
+
+// Test DNS Checker resolve function
+func TestDNSChecker_Resolve_A(t *testing.T) {
+	checker := NewDNSChecker()
+	records, err := checker.resolve(context.Background(), "example.com", "A", "8.8.8.8")
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if len(records) == 0 {
+		t.Error("Expected at least one A record")
+	}
+}
+
+func TestDNSChecker_Resolve_AAAA(t *testing.T) {
+	checker := NewDNSChecker()
+	records, err := checker.resolve(context.Background(), "google.com", "AAAA", "8.8.8.8")
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if len(records) == 0 {
+		t.Error("Expected at least one AAAA record")
+	}
+}
+
+func TestDNSChecker_Resolve_CNAME(t *testing.T) {
+	checker := NewDNSChecker()
+	records, err := checker.resolve(context.Background(), "www.google.com", "CNAME", "8.8.8.8")
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if len(records) == 0 {
+		t.Error("Expected CNAME record")
+	}
+}
+
+func TestDNSChecker_Resolve_MX(t *testing.T) {
+	checker := NewDNSChecker()
+	records, err := checker.resolve(context.Background(), "google.com", "MX", "8.8.8.8")
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if len(records) == 0 {
+		t.Error("Expected MX records")
+	}
+}
+
+func TestDNSChecker_Resolve_TXT(t *testing.T) {
+	checker := NewDNSChecker()
+	records, err := checker.resolve(context.Background(), "google.com", "TXT", "8.8.8.8")
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if len(records) == 0 {
+		t.Error("Expected TXT records")
+	}
+}
+
+func TestDNSChecker_Resolve_NS(t *testing.T) {
+	checker := NewDNSChecker()
+	records, err := checker.resolve(context.Background(), "google.com", "NS", "8.8.8.8")
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+	if len(records) == 0 {
+		t.Error("Expected NS records")
+	}
+}
+
+func TestDNSChecker_Resolve_InvalidType(t *testing.T) {
+	checker := NewDNSChecker()
+	_, err := checker.resolve(context.Background(), "example.com", "INVALID", "8.8.8.8")
+	if err == nil {
+		t.Error("Expected error for invalid record type")
+	}
+}
+
+func TestDNSChecker_Resolve_InvalidNameserver(t *testing.T) {
+	checker := NewDNSChecker()
+	// Use a non-routable address that will timeout
+	records, err := checker.resolve(context.Background(), "example.com", "A", "192.0.2.1")
+	// May error or succeed via fallback - just verify function doesn't crash
+	_ = records
+	_ = err
+}
+
+// Test DNS Checker judgePropagation function
+func TestDNSChecker_JudgePropagation_Success(t *testing.T) {
+	checker := NewDNSChecker()
+	soul := &core.Soul{
+		ID:      "test-dns-prop",
+		Name:    "Test DNS Propagation",
+		Type:    core.CheckDNS,
+		Target:  "example.com",
+		Timeout: core.Duration{Duration: 10 * time.Second},
+		DNS: &core.DNSConfig{
+			RecordType:        "A",
+			PropagationCheck:  true,
+			Nameservers:       []string{"8.8.8.8", "1.1.1.1"},
+			PropagationThreshold: 50,
+		},
+	}
+
+	judgment, err := checker.Judge(context.Background(), soul)
+	if err != nil {
+		t.Fatalf("Judge failed: %v", err)
+	}
+	if judgment.Status != core.SoulAlive && judgment.Status != core.SoulDegraded {
+		t.Errorf("Expected status alive or degraded, got %s", judgment.Status)
+	}
+}
+
+// Test extractJSONPath function
+func TestExtractJSONPath(t *testing.T) {
+	jsonData := []byte(`{"user": {"name": "John", "age": 30, "active": true}}`)
+
+	tests := []struct {
+		path     string
+		expected string
+	}{
+		{"$.user.name", "John"},
+		{"user.name", "John"},
+		{"$.user.age", "30"},
+		{"user.active", "true"},
+		{"$.nonexistent", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		result := extractJSONPath(jsonData, tt.path)
+		if result != tt.expected {
+			t.Errorf("extractJSONPath(%q) = %q, want %q", tt.path, result, tt.expected)
+		}
+	}
+}
+
+// Test tlsVersionString function
+func TestTLSVersionString(t *testing.T) {
+	tests := []struct {
+		version  uint16
+		expected string
+	}{
+		{tls.VersionTLS10, "TLS1.0"},
+		{tls.VersionTLS11, "TLS1.1"},
+		{tls.VersionTLS12, "TLS1.2"},
+		{tls.VersionTLS13, "TLS1.3"},
+		{0x9999, "0x9999"}, // Unknown version
+	}
+
+	for _, tt := range tests {
+		result := tlsVersionString(tt.version)
+		if result != tt.expected {
+			t.Errorf("tlsVersionString(0x%04x) = %q, want %q", tt.version, result, tt.expected)
+		}
+	}
+}
+
+// Test validateJSONSchema and validateNode functions
+func TestValidateJSONSchema(t *testing.T) {
+	schema := `{"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}`
+
+	validData := []byte(`{"name": "John"}`)
+	invalidData := []byte(`{"age": 30}`) // Missing required field
+	invalidType := []byte(`{"name": 123}`) // Wrong type
+
+	if !validateJSONSchema(validData, schema, false) {
+		t.Error("Expected valid JSON to pass schema validation")
+	}
+	if validateJSONSchema(invalidData, schema, false) {
+		t.Error("Expected invalid JSON to fail schema validation")
+	}
+	if validateJSONSchema(invalidType, schema, false) {
+		t.Error("Expected wrong type to fail schema validation")
+	}
+}
+
+func TestValidateJSONSchema_InvalidSchema(t *testing.T) {
+	// Invalid JSON schema
+	invalidSchema := `not valid json`
+	data := []byte(`{"name": "John"}`)
+
+	if validateJSONSchema(data, invalidSchema, false) {
+		t.Error("Expected invalid schema to fail")
+	}
+}
+
+func TestValidateJSONSchema_StrictMode(t *testing.T) {
+	schema := `{"type": "object", "properties": {"name": {"type": "string"}}}`
+	dataWithExtra := []byte(`{"name": "John", "extra": "field"}`)
+
+	// Non-strict mode should pass
+	if !validateJSONSchema(dataWithExtra, schema, false) {
+		t.Error("Expected non-strict mode to pass with extra fields")
+	}
+	// Strict mode should fail
+	if validateJSONSchema(dataWithExtra, schema, true) {
+		t.Error("Expected strict mode to fail with extra fields")
+	}
+}
+
+func TestValidateNode_EnumValidation(t *testing.T) {
+	schema := map[string]interface{}{
+		"enum": []interface{}{"red", "green", "blue"},
+	}
+
+	if !validateNode("red", schema, false) {
+		t.Error("Expected 'red' to pass enum validation")
+	}
+	if validateNode("yellow", schema, false) {
+		t.Error("Expected 'yellow' to fail enum validation")
+	}
+}
+
+// Test matchesType function
+func TestMatchesType(t *testing.T) {
+	tests := []struct {
+		data       interface{}
+		expectedType string
+		want       bool
+	}{
+		{map[string]interface{}{}, "object", true},
+		{[]interface{}{}, "array", true},
+		{"string", "string", true},
+		{42.0, "number", true},
+		{42.0, "integer", true},
+		{42.5, "integer", false},
+		{true, "boolean", true},
+		{nil, "null", true},
+		{"string", "object", false},
+		{42.0, "string", false},
+	}
+
+	for _, tt := range tests {
+		result := matchesType(tt.data, tt.expectedType)
+		if result != tt.want {
+			t.Errorf("matchesType(%T, %q) = %v, want %v", tt.data, tt.expectedType, result, tt.want)
+		}
+	}
+}
+
+// Test gRPC Checker Judge function - error cases
+func TestGRPCChecker_Judge_ConnectionFailed(t *testing.T) {
+	checker := NewGRPCChecker()
+	soul := &core.Soul{
+		ID:      "test-grpc-fail",
+		Name:    "Test gRPC Fail",
+		Type:    core.CheckGRPC,
+		Target:  "localhost:1",
+		Timeout: core.Duration{Duration: 1 * time.Second},
+		GRPC:    &core.GRPCConfig{},
+	}
+
+	judgment, err := checker.Judge(context.Background(), soul)
+	if err != nil {
+		t.Fatalf("Judge failed: %v", err)
+	}
+	if judgment.Status != core.SoulDead {
+		t.Errorf("Expected status dead, got %s", judgment.Status)
+	}
+}
+
+// Test gRPC helper functions
+func TestBuildGRPCHealthCheckRequest_Empty(t *testing.T) {
+	req := buildGRPCHealthCheckRequest("")
+	if len(req) != 5 {
+		t.Errorf("Expected length 5, got %d", len(req))
+	}
+	if req[0] != 0 {
+		t.Error("Expected uncompressed flag")
+	}
+}
+
+func TestBuildGRPCHealthCheckRequest_WithService(t *testing.T) {
+	req := buildGRPCHealthCheckRequest("test.service")
+	if len(req) < 5 {
+		t.Errorf("Expected length >= 5, got %d", len(req))
+	}
+	if req[0] != 0 {
+		t.Error("Expected uncompressed flag")
+	}
+}
+
+func TestBuildHTTP2DataFrame_NoEndStream(t *testing.T) {
+	data := []byte("test payload")
+	frame := buildHTTP2DataFrame(data, false)
+	if frame[4] != 0x00 {
+		t.Errorf("Expected no END_STREAM flag 0x00, got 0x%02x", frame[4])
+	}
+}
+
+// Test DNS Checker Judge function - error case
+func TestDNSChecker_Judge_WithExpectedRecords(t *testing.T) {
+	checker := NewDNSChecker()
+	soul := &core.Soul{
+		ID:      "test-dns-expected",
+		Name:    "Test DNS Expected",
+		Type:    core.CheckDNS,
+		Target:  "example.com",
+		Timeout: core.Duration{Duration: 5 * time.Second},
+		DNS: &core.DNSConfig{
+			RecordType: "A",
+			Expected:   []string{"93.184.216.34"}, // example.com's IP
+		},
+	}
+
+	judgment, err := checker.Judge(context.Background(), soul)
+	if err != nil {
+		t.Fatalf("Judge failed: %v", err)
+	}
+	// Status depends on whether expected record is found
+	if judgment.Status != core.SoulAlive && judgment.Status != core.SoulDead {
+		t.Errorf("Expected status alive or dead, got %s", judgment.Status)
+	}
 }
