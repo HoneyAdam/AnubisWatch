@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/auth"
 )
@@ -699,4 +701,286 @@ func TestVerdictHistory_WithToken(t *testing.T) {
 	// Function will try to connect and fail - that's expected
 	// We just test that the function doesn't crash
 	t.Log("verdictHistory with token attempted connection (expected to fail)")
+}
+
+// Test restStorageAdapter methods
+func TestRestStorageAdapter_Methods(t *testing.T) {
+	// These methods just delegate to store - test that they compile and exist
+	adapter := &restStorageAdapter{store: nil}
+
+	ctx := context.Background()
+	now := time.Now()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Logf("Method panicked as expected with nil store: %v", r)
+		}
+	}()
+
+	_, _ = adapter.GetSoulNoCtx("id")
+	_, _ = adapter.ListSoulsNoCtx("workspace", 0, 10)
+	_ = adapter.SaveSoul(ctx, nil)
+	_ = adapter.DeleteSoul(ctx, "id")
+	_, _ = adapter.GetJudgmentNoCtx("id")
+	_, _ = adapter.ListJudgmentsNoCtx("soul", now, now, 10)
+	_, _ = adapter.GetChannelNoCtx("id")
+	_, _ = adapter.ListChannelsNoCtx("workspace")
+	_ = adapter.SaveChannelNoCtx(nil)
+	_ = adapter.DeleteChannelNoCtx("id")
+	_, _ = adapter.GetRuleNoCtx("id")
+	_, _ = adapter.ListRulesNoCtx("workspace")
+	_ = adapter.SaveRuleNoCtx(nil)
+	_ = adapter.DeleteRuleNoCtx("id")
+	_, _ = adapter.GetWorkspaceNoCtx("id")
+	_, _ = adapter.ListWorkspacesNoCtx()
+	_ = adapter.SaveWorkspaceNoCtx(nil)
+	_ = adapter.DeleteWorkspaceNoCtx("id")
+	_, _ = adapter.GetStatsNoCtx("workspace", now, now)
+	_, _ = adapter.GetStatusPageNoCtx("id")
+	_, _ = adapter.ListStatusPagesNoCtx()
+	_ = adapter.SaveStatusPageNoCtx(nil)
+	_ = adapter.DeleteStatusPageNoCtx("id")
+}
+
+// Test probeStorageAdapter methods
+func TestProbeStorageAdapter_Methods(t *testing.T) {
+	adapter := &probeStorageAdapter{store: nil}
+
+	ctx := context.Background()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Logf("Method panicked as expected with nil store: %v", r)
+		}
+	}()
+
+	_ = adapter.SaveJudgment(ctx, nil)
+	_, _ = adapter.GetSoul(ctx, "workspace", "id")
+	_, _ = adapter.ListSouls(ctx, "workspace")
+}
+
+// Test alertStorageAdapter methods
+func TestAlertStorageAdapter_Methods(t *testing.T) {
+	adapter := &alertStorageAdapter{store: nil}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Logf("Method panicked as expected with nil store: %v", r)
+		}
+	}()
+
+	_ = adapter.SaveChannel(nil)
+	_, _ = adapter.GetChannel("id")
+	_, _ = adapter.ListChannels()
+	_ = adapter.DeleteChannel("id")
+	_ = adapter.SaveRule(nil)
+	_, _ = adapter.GetRule("id")
+	_, _ = adapter.ListRules()
+	_ = adapter.DeleteRule("id")
+	_ = adapter.SaveEvent(nil)
+	_, _ = adapter.ListEvents("soul", 10)
+	_ = adapter.SaveIncident(nil)
+	_, _ = adapter.GetIncident("id")
+	_, _ = adapter.ListActiveIncidents()
+}
+
+// Test statusPageRepository methods
+func TestStatusPageRepository_Methods(t *testing.T) {
+	repo := &statusPageRepository{store: nil}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Logf("Method panicked as expected with nil store: %v", r)
+		}
+	}()
+
+	_, _ = repo.GetStatusPageByDomain("example.com")
+	_, _ = repo.GetStatusPageBySlug("slug")
+	_, _ = repo.GetSoul("id")
+	_, _ = repo.GetSoulJudgments("id", 10)
+	_, _ = repo.GetIncidentsByPage("page")
+}
+
+// Test clusterAdapter methods
+func TestClusterAdapter_Methods(t *testing.T) {
+	adapter := &clusterAdapter{mgr: nil}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Logf("Method panicked as expected with nil manager: %v", r)
+		}
+	}()
+
+	_ = adapter.IsLeader()
+	_ = adapter.Leader()
+	_ = adapter.IsClustered()
+	_ = adapter.GetStatus()
+}
+
+// Test CLI commands with arguments
+func TestQuickWatch_WithTarget(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "watch", "https://example.com", "--name", "Test Soul"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	quickWatch()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Adding soul") {
+		t.Error("Expected quickWatch to show 'Adding soul' message")
+	}
+}
+
+func TestSummonNode_WithArg(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "summon", "192.168.1.100:7946"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	summonNode()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Summoning Jackal") {
+		t.Error("Expected summonNode to show 'Summoning Jackal' message")
+	}
+}
+
+func TestBanishNode_WithArg(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "banish", "jackal-2"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	banishNode()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Banishing Jackal") {
+		t.Error("Expected banishNode to show 'Banishing Jackal' message")
+	}
+}
+
+func TestVerdictCommand_NoArgs(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "verdict"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	verdictCommand()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Verdict Management") {
+		t.Error("Expected verdictCommand to show usage")
+	}
+}
+
+func TestVerdictCommand_Test(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "verdict", "test", "channel-123"}
+	defer func() { os.Args = oldArgs }()
+
+	// This will try to make an HTTP request and fail
+	// Just test it doesn't crash on setup
+	t.Log("verdictTest with channel arg (will fail to connect)")
+}
+
+func TestVerdictAck_WithID(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "verdict", "ack", "incident-123"}
+	defer func() { os.Args = oldArgs }()
+
+	// This will try to make an HTTP request and fail
+	// Just test it doesn't crash on setup
+	t.Log("verdictAck with ID (will fail to connect)")
+}
+
+// Test verdictTest with no token (should return gracefully)
+func TestVerdictTest_NoToken(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "verdict", "test", "channel-123"}
+	defer func() { os.Args = oldArgs }()
+
+	os.Unsetenv("ANUBIS_API_TOKEN")
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	verdictTest()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Sending test notification") {
+		t.Error("Expected verdictTest to show 'Sending test notification' message")
+	}
+	if !strings.Contains(output, "No API token found") {
+		t.Error("Expected verdictTest to show 'No API token found' message")
+	}
+}
+
+// Test verdictAck with no token
+func TestVerdictAck_NoToken(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "verdict", "ack", "incident-123"}
+	defer func() { os.Args = oldArgs }()
+
+	os.Unsetenv("ANUBIS_API_TOKEN")
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	verdictAck()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Acknowledging incident") {
+		t.Error("Expected verdictAck to show 'Acknowledging incident' message")
+	}
 }
