@@ -224,7 +224,3 @@ type WSMessage struct {
 func generateClientID() string {
 	return fmt.Sprintf("ws_%d", time.Now().UnixNano())
 }
-
-// import fmt for generateClientID
-func init() {
-}
