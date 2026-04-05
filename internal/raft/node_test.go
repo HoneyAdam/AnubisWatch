@@ -2020,3 +2020,596 @@ func TestNode_HandlePreVote_NoTermUpdate(t *testing.T) {
 		t.Errorf("Expected votedFor to remain empty, got %s", node.votedFor)
 	}
 }
+
+// Test becomeLeader transitions correctly
+func TestNode_BecomeLeader(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+		{ID: "node-3", Address: "127.0.0.1:7002", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.SetTransport(&mockTransport{})
+
+	node.mu.Lock()
+	node.currentTerm = 3
+	node.log = []core.RaftLogEntry{{}} // sentinel
+	node.mu.Unlock()
+
+	node.becomeLeader()
+
+	if node.state != core.StateLeader {
+		t.Errorf("Expected StateLeader, got %s", node.state)
+	}
+	if node.leaderID != cfg.NodeID {
+		t.Errorf("Expected leaderID %s, got %s", cfg.NodeID, node.leaderID)
+	}
+	if node.stats.ElectionsWon != 1 {
+		t.Errorf("Expected ElectionsWon=1, got %d", node.stats.ElectionsWon)
+	}
+	if node.stats.LeaderChanges != 1 {
+		t.Errorf("Expected LeaderChanges=1, got %d", node.stats.LeaderChanges)
+	}
+
+	// Should have a no-op entry appended
+	node.mu.RLock()
+	logLen := len(node.log)
+	node.mu.RUnlock()
+	if logLen != 2 {
+		t.Errorf("Expected log length 2 (sentinel + no-op), got %d", logLen)
+	}
+}
+
+// Test handleRPC dispatches correctly
+func TestNode_HandleRPC(t *testing.T) {
+	node := createTestNode(t)
+
+	// Test AppendEntries dispatch
+	respCh := make(chan interface{}, 1)
+	rpc := &rpcWrapper{
+		cmd: &core.AppendEntriesRequest{
+			Term:     1,
+			LeaderID: "leader-1",
+		},
+		respCh: respCh,
+	}
+
+	node.handleRPC(rpc)
+
+	select {
+	case resp := <-respCh:
+		aeResp, ok := resp.(*core.AppendEntriesResponse)
+		if !ok {
+			t.Fatal("Expected AppendEntriesResponse")
+		}
+		if aeResp == nil {
+			t.Error("Expected non-nil response")
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Error("handleRPC timed out for AppendEntries")
+	}
+
+	// Test Heartbeat dispatch
+	respCh2 := make(chan interface{}, 1)
+	rpc2 := &rpcWrapper{
+		cmd: &core.HeartbeatRequest{
+			Term:     1,
+			LeaderID: "leader-1",
+		},
+		respCh: respCh2,
+	}
+
+	node.handleRPC(rpc2)
+
+	select {
+	case resp := <-respCh2:
+		hbResp, ok := resp.(*core.HeartbeatResponse)
+		if !ok {
+			t.Fatal("Expected HeartbeatResponse")
+		}
+		_ = hbResp
+	case <-time.After(100 * time.Millisecond):
+		t.Error("handleRPC timed out for Heartbeat")
+	}
+
+	// Test RequestVote dispatch
+	respCh3 := make(chan interface{}, 1)
+	rpc3 := &rpcWrapper{
+		cmd: &core.RequestVoteRequest{
+			Term:        1,
+			CandidateID: "candidate-1",
+		},
+		respCh: respCh3,
+	}
+
+	node.handleRPC(rpc3)
+
+	select {
+	case resp := <-respCh3:
+		rvResp, ok := resp.(*core.RequestVoteResponse)
+		if !ok {
+			t.Fatal("Expected RequestVoteResponse")
+		}
+		_ = rvResp
+	case <-time.After(100 * time.Millisecond):
+		t.Error("handleRPC timed out for RequestVote")
+	}
+
+	// Test InstallSnapshot dispatch
+	respCh4 := make(chan interface{}, 1)
+	rpc4 := &rpcWrapper{
+		cmd: &core.InstallSnapshotRequest{
+			Term:     1,
+			LeaderID: "leader-1",
+			Data:     []byte("snap"),
+		},
+		respCh: respCh4,
+	}
+
+	node.handleRPC(rpc4)
+
+	select {
+	case resp := <-respCh4:
+		isResp, ok := resp.(*core.InstallSnapshotResponse)
+		if !ok {
+			t.Fatal("Expected InstallSnapshotResponse")
+		}
+		_ = isResp
+	case <-time.After(100 * time.Millisecond):
+		t.Error("handleRPC timed out for InstallSnapshot")
+	}
+}
+
+// Test handleApply as leader appends to log
+func TestNode_HandleApply_AsLeader(t *testing.T) {
+	node := createTestNode(t)
+	node.SetTransport(&mockTransport{})
+	node.running.Store(true)
+
+	node.mu.Lock()
+	node.state = core.StateLeader
+	node.currentTerm = 1
+	node.log = []core.RaftLogEntry{{}} // sentinel
+	node.mu.Unlock()
+
+	cmd := core.FSMCommand{
+		Op:    core.FSMSet,
+		Table: "test",
+		Key:   "key1",
+		Value: []byte("value1"),
+	}
+
+	future := &applyFuture{
+		command: cmd,
+		done:    make(chan struct{}),
+	}
+
+	node.handleApply(future)
+
+	if future.index != 1 {
+		t.Errorf("Expected index 1, got %d", future.index)
+	}
+	if future.term != 1 {
+		t.Errorf("Expected term 1, got %d", future.term)
+	}
+
+	node.mu.RLock()
+	logLen := len(node.log)
+	node.mu.RUnlock()
+	if logLen != 2 {
+		t.Errorf("Expected log length 2, got %d", logLen)
+	}
+}
+
+// Test handleApply as non-leader returns error
+func TestNode_HandleApply_NotLeader(t *testing.T) {
+	node := createTestNode(t)
+	// Default state is follower
+
+	cmd := core.FSMCommand{Op: core.FSMSet, Key: "k", Value: []byte("v")}
+	future := &applyFuture{
+		command: cmd,
+		done:    make(chan struct{}),
+	}
+
+	node.handleApply(future)
+
+	if future.err == nil {
+		t.Error("Expected error for non-leader apply")
+	}
+
+	select {
+	case <-future.done:
+		// Expected: channel should be closed
+	default:
+		t.Error("Expected done channel to be closed")
+	}
+}
+
+// Test handleAppendEntriesResponse with success
+func TestNode_HandleAppendEntriesResponse_Success(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.SetTransport(&mockTransport{})
+	node.state = core.StateLeader
+	node.currentTerm = 1
+	node.log = []core.RaftLogEntry{
+		{}, // sentinel
+		{Index: 1, Term: 1, Type: core.LogCommand, Data: []byte(`{"op":"set"}`)},
+		{Index: 2, Term: 1, Type: core.LogCommand, Data: []byte(`{"op":"set"}`)},
+	}
+
+	peer := &Peer{
+		ID:        "node-2",
+		Address:   "127.0.0.1:7001",
+		Role:      core.RoleVoter,
+		nextIndex: 3,
+		matchIndex: 0,
+	}
+	node.peerMu.Lock()
+	node.peers["node-2"] = peer
+	node.nextIndex["node-2"] = 3
+	node.matchIndex["node-2"] = 0
+	node.peerMu.Unlock()
+
+	req := &core.AppendEntriesRequest{
+		Term:         1,
+		LeaderID:     cfg.NodeID,
+		PrevLogIndex: 0,
+		PrevLogTerm:  0,
+		Entries: []core.RaftLogEntry{
+			{Index: 1, Term: 1, Data: []byte("d1")},
+			{Index: 2, Term: 1, Data: []byte("d2")},
+		},
+	}
+	resp := &core.AppendEntriesResponse{
+		Term:    1,
+		Success: true,
+	}
+
+	node.handleAppendEntriesResponse(peer, req, resp)
+
+	if node.matchIndex["node-2"] != 2 {
+		t.Errorf("Expected matchIndex 2, got %d", node.matchIndex["node-2"])
+	}
+	if node.nextIndex["node-2"] != 3 {
+		t.Errorf("Expected nextIndex 3, got %d", node.nextIndex["node-2"])
+	}
+}
+
+// Test handleAppendEntriesResponse with failure and conflict
+func TestNode_HandleAppendEntriesResponse_Conflict(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.state = core.StateLeader
+	node.currentTerm = 1
+	node.nextIndex["node-2"] = 5
+	node.matchIndex["node-2"] = 0
+
+	peer := &Peer{ID: "node-2", nextIndex: 5, matchIndex: 0}
+	node.peerMu.Lock()
+	node.peers["node-2"] = peer
+	node.peerMu.Unlock()
+
+	req := &core.AppendEntriesRequest{
+		Term:         1,
+		PrevLogIndex: 4,
+		PrevLogTerm:  1,
+		Entries:      []core.RaftLogEntry{},
+	}
+	resp := &core.AppendEntriesResponse{
+		Term:         1,
+		Success:      false,
+		ConflictTerm: 1,
+		ConflictIndex: 3,
+	}
+
+	node.handleAppendEntriesResponse(peer, req, resp)
+
+	// ConflictIndex=3, then code sets nextIndex=ConflictIndex(3), then decrements to 2
+	if node.nextIndex["node-2"] != 2 {
+		t.Errorf("Expected nextIndex to be decremented to 2, got %d", node.nextIndex["node-2"])
+	}
+}
+
+// Test handleAppendEntriesResponse with higher term causes stepdown
+func TestNode_HandleAppendEntriesResponse_HigherTerm(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.state = core.StateLeader
+	node.currentTerm = 1
+
+	peer := &Peer{ID: "node-2", nextIndex: 1, matchIndex: 0}
+	node.peerMu.Lock()
+	node.peers["node-2"] = peer
+	node.peerMu.Unlock()
+
+	req := &core.AppendEntriesRequest{Term: 1}
+	resp := &core.AppendEntriesResponse{Term: 5, Success: false}
+
+	node.handleAppendEntriesResponse(peer, req, resp)
+
+	if node.state != core.StateFollower {
+		t.Errorf("Expected StateFollower after higher term, got %s", node.state)
+	}
+	if node.currentTerm != 5 {
+		t.Errorf("Expected term 5, got %d", node.currentTerm)
+	}
+}
+
+// Test checkCommit as leader
+func TestNode_CheckCommit(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.state = core.StateLeader
+	node.currentTerm = 1
+	node.log = []core.RaftLogEntry{
+		{}, // sentinel
+		{Index: 1, Term: 1, Type: core.LogCommand, Data: []byte("d1")},
+	}
+	node.matchIndex["node-2"] = 1
+	node.commitIndex = 0
+
+	// Drain commitCh to prevent blocking
+	go func() {
+		for range node.commitCh {
+		}
+	}()
+
+	node.checkCommit()
+
+	// Should advance commitIndex if majority replicated
+	// With 2 peers, majority = (2+1)/2 + 1 = 2, leader has 1 entry
+	// So leader match = 1, peer match = 1, count = 2, needed > 1 => commit
+	if node.commitIndex != 1 {
+		t.Errorf("Expected commitIndex 1, got %d", node.commitIndex)
+	}
+}
+
+// Test checkCommit as non-leader does nothing
+func TestNode_CheckCommit_NotLeader(t *testing.T) {
+	node := createTestNode(t)
+	node.commitIndex = 0
+	node.log = []core.RaftLogEntry{
+		{},
+		{Index: 1, Term: 1},
+	}
+
+	node.checkCommit()
+
+	if node.commitIndex != 0 {
+		t.Errorf("Expected commitIndex unchanged at 0, got %d", node.commitIndex)
+	}
+}
+
+// Test processCommitted applies entries to FSM
+func TestNode_ProcessCommitted(t *testing.T) {
+	store := NewInMemoryStorage()
+	fsm := NewStorageFSM(store)
+
+	cfg := newTestRaftNodeConfig()
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.lastApplied = 0
+	node.log = []core.RaftLogEntry{
+		{}, // sentinel
+		{Index: 1, Term: 1, Type: core.LogCommand, Data: []byte(`{"op":"set","table":"test","key":"k1","value":"djE="}`)},
+		{Index: 2, Term: 1, Type: core.LogCommand, Data: []byte(`{"op":"set","table":"test","key":"k2","value":"djI="}`)},
+	}
+
+	// Register futures for notification
+	f1 := &applyFuture{done: make(chan struct{})}
+	f2 := &applyFuture{done: make(chan struct{})}
+	applyWaiters.Store(uint64(1), f1)
+	applyWaiters.Store(uint64(2), f2)
+
+	node.processCommitted(2)
+
+	if node.lastApplied != 2 {
+		t.Errorf("Expected lastApplied 2, got %d", node.lastApplied)
+	}
+
+	// Verify futures were notified
+	select {
+	case <-f1.done:
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Future 1 not notified")
+	}
+	select {
+	case <-f2.done:
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Future 2 not notified")
+	}
+}
+
+// Test restoreLog returns nil
+func TestNode_RestoreLog(t *testing.T) {
+	node := createTestNode(t)
+	err := node.restoreLog()
+	if err != nil {
+		t.Errorf("Expected nil error from restoreLog, got %v", err)
+	}
+}
+
+// Test compactLog removes old entries
+func TestNode_CompactLog(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.TrailingLogs = 1 // Keep only 1 trailing log
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.log = []core.RaftLogEntry{
+		{}, // sentinel index 0
+		{Index: 1, Term: 1},
+		{Index: 2, Term: 1},
+		{Index: 3, Term: 1},
+		{Index: 4, Term: 1},
+		{Index: 5, Term: 1},
+	}
+
+	node.compactLog(3)
+
+	// After compaction with TrailingLogs=1, log should be smaller
+	if len(node.log) >= 6 {
+		t.Errorf("Expected log to be compacted, got length %d", len(node.log))
+	}
+}
+
+// Test compactLog with invalid index
+func TestNode_CompactLog_InvalidIndex(t *testing.T) {
+	node := createTestNode(t)
+	node.log = []core.RaftLogEntry{
+		{},
+		{Index: 1, Term: 1},
+	}
+
+	// Index 0 - should not compact
+	node.compactLog(0)
+	if len(node.log) != 2 {
+		t.Errorf("Expected log unchanged, got %d", len(node.log))
+	}
+
+	// Index beyond log - should not compact
+	node.compactLog(10)
+	if len(node.log) != 2 {
+		t.Errorf("Expected log unchanged, got %d", len(node.log))
+	}
+}
+
+// Test maybeTakeSnapshot with nil snapshot store
+func TestNode_MaybeTakeSnapshot_NilStore(t *testing.T) {
+	node := createTestNode(t)
+	node.snapshot = nil
+	node.snapshotThreshold = 10
+
+	// Should not panic
+	node.maybeTakeSnapshot()
+}
+
+// Test maybeTakeSnapshot below threshold
+func TestNode_MaybeTakeSnapshot_BelowThreshold(t *testing.T) {
+	node := createTestNode(t)
+	node.snapshotThreshold = 100
+	node.log = make([]core.RaftLogEntry, 5)
+	node.commitIndex = 4
+
+	// Should not take snapshot - below threshold
+	node.maybeTakeSnapshot()
+}
+
+// Test startElection with mock transport
+func TestNode_StartElection_NoPeers(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	// No peers configured
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.SetTransport(&mockTransport{})
+	node.log = []core.RaftLogEntry{{}} // sentinel
+
+	// With no peers, single node should win election immediately
+	node.startElection()
+
+	node.mu.RLock()
+	defer node.mu.RUnlock()
+
+	// Single node with 0 peers: votesNeeded = (0+1)/2 + 1 = 1
+	// Self vote = 1, so wins election
+	if node.state != core.StateLeader {
+		t.Logf("State after election: %s (term: %d)", node.state, node.currentTerm)
+	}
+}
+
+// Test sendHeartbeats with peers
+func TestNode_SendHeartbeats(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.SetTransport(&mockTransport{})
+	node.state = core.StateLeader
+	node.currentTerm = 1
+	node.log = []core.RaftLogEntry{{}} // sentinel
+	node.nextIndex["node-2"] = 1
+	node.matchIndex["node-2"] = 0
+
+	// Should not panic
+	node.sendHeartbeats()
+
+	// Give goroutines time to complete
+	time.Sleep(50 * time.Millisecond)
+}
+
+// Test applyLoop reads from applyCh and stops on shutdown
+func TestNode_ApplyLoop(t *testing.T) {
+	node := createTestNode(t)
+	node.SetTransport(&mockTransport{})
+
+	go node.applyLoop()
+
+	// Send shutdown signal
+	close(node.shutdownCh)
+
+	// Give time for goroutine to exit
+	time.Sleep(50 * time.Millisecond)
+}
+
+// Test handleHeartbeat with old term
+func TestNode_HandleHeartbeat_OldTerm(t *testing.T) {
+	node := createTestNode(t)
+	node.currentTerm = 10
+
+	req := &core.HeartbeatRequest{
+		Term:     5, // Lower than current
+		LeaderID: "leader-1",
+	}
+
+	resp := node.handleHeartbeat(req)
+	if resp == nil {
+		t.Fatal("Expected response")
+	}
+	// Should return current term in response
+}

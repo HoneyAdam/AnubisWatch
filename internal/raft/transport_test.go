@@ -1474,3 +1474,118 @@ func (m *mockConnWithValidResponse) RemoteAddr() net.Addr               { return
 func (m *mockConnWithValidResponse) SetDeadline(t time.Time) error      { return nil }
 func (m *mockConnWithValidResponse) SetReadDeadline(t time.Time) error  { return nil }
 func (m *mockConnWithValidResponse) SetWriteDeadline(t time.Time) error { return nil }
+
+// Test RegisterPeer stores peer address
+func TestTCPTransport_RegisterPeer(t *testing.T) {
+	transport, _ := NewTCPTransport("127.0.0.1:0", "127.0.0.1:7000", nil, newTestTransportLogger())
+
+	transport.RegisterPeer("peer-1", "192.168.1.100:7946")
+
+	transport.connMu.Lock()
+	addr, ok := transport.peerAddrs["peer-1"]
+	transport.connMu.Unlock()
+
+	if !ok {
+		t.Error("Expected peer address to be registered")
+	}
+	if addr != "192.168.1.100:7946" {
+		t.Errorf("Expected address 192.168.1.100:7946, got %s", addr)
+	}
+}
+
+// Test UnregisterPeer removes peer and closes connection
+func TestTCPTransport_UnregisterPeer(t *testing.T) {
+	transport, _ := NewTCPTransport("127.0.0.1:0", "127.0.0.1:7000", nil, newTestTransportLogger())
+
+	// Register a peer with a mock connection
+	transport.RegisterPeer("peer-1", "192.168.1.100:7946")
+	mockConn := &mockConn{}
+	transport.connections["peer-1"] = mockConn
+
+	transport.UnregisterPeer("peer-1")
+
+	transport.connMu.Lock()
+	_, addrExists := transport.peerAddrs["peer-1"]
+	_, connExists := transport.connections["peer-1"]
+	transport.connMu.Unlock()
+
+	if addrExists {
+		t.Error("Expected peer address to be removed")
+	}
+	if connExists {
+		t.Error("Expected connection to be removed")
+	}
+	if !mockConn.closed {
+		t.Error("Expected connection to be closed")
+	}
+}
+
+// Test UnregisterPeer for non-existent peer (no panic)
+func TestTCPTransport_UnregisterPeer_NotExists(t *testing.T) {
+	transport, _ := NewTCPTransport("127.0.0.1:0", "127.0.0.1:7000", nil, newTestTransportLogger())
+
+	// Should not panic
+	transport.UnregisterPeer("non-existent-peer")
+}
+
+// Test SendPreVote success path
+func TestTCPTransport_SendPreVote_Success(t *testing.T) {
+	transport, _ := NewTCPTransport("127.0.0.1:0", "127.0.0.1:7000", nil, newTestTransportLogger())
+
+	mockConn := &mockConnWithValidPreVoteResponse{}
+	transport.connections["peer-1"] = mockConn
+
+	req := &core.PreVoteRequest{
+		Term:         2,
+		CandidateID:  "candidate-1",
+		LastLogIndex: 5,
+		LastLogTerm:  1,
+	}
+
+	resp, err := transport.SendPreVote("peer-1", req)
+	if err != nil {
+		t.Fatalf("SendPreVote failed: %v", err)
+	}
+
+	if resp == nil {
+		t.Fatal("Expected response")
+	}
+
+	if resp.Term != 2 {
+		t.Errorf("Expected term 2, got %d", resp.Term)
+	}
+
+	if !resp.VoteGranted {
+		t.Error("Expected vote granted")
+	}
+}
+
+// mockConnWithValidPreVoteResponse returns valid PreVote response
+type mockConnWithValidPreVoteResponse struct {
+	closed    bool
+	readCount int
+}
+
+func (m *mockConnWithValidPreVoteResponse) Read(b []byte) (n int, err error) {
+	m.readCount++
+	switch m.readCount {
+	case 1:
+		// {"term":2,"vote_granted":true} = 30 bytes
+		n = copy(b, "30\n{\"term\":2,\"vote_granted\":true}")
+		return n, nil
+	}
+	return 0, fmt.Errorf("EOF")
+}
+func (m *mockConnWithValidPreVoteResponse) Write(b []byte) (n int, err error) {
+	return len(b), nil
+}
+func (m *mockConnWithValidPreVoteResponse) Close() error {
+	m.closed = true
+	return nil
+}
+func (m *mockConnWithValidPreVoteResponse) LocalAddr() net.Addr                { return nil }
+func (m *mockConnWithValidPreVoteResponse) RemoteAddr() net.Addr               { return nil }
+func (m *mockConnWithValidPreVoteResponse) SetDeadline(t time.Time) error      { return nil }
+func (m *mockConnWithValidPreVoteResponse) SetReadDeadline(t time.Time) error  { return nil }
+func (m *mockConnWithValidPreVoteResponse) SetWriteDeadline(t time.Time) error { return nil }
+
