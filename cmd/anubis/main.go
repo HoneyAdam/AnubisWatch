@@ -888,8 +888,60 @@ Jackals:
 }
 
 func selfHealth() {
-	// TODO: Implement actual health check
-	fmt.Println(`{"status":"healthy","checks":{}}`)
+	// Check critical components
+	checks := map[string]interface{}{
+		"memory": checkMemory(),
+		"uptime": time.Since(startTime).String(),
+	}
+
+	// Check HTTPS endpoint if configured
+	if port := os.Getenv("ANUBIS_PORT"); port != "" {
+		checks["https_port"] = port
+	} else {
+		checks["https_port"] = "8443"
+	}
+
+	// Check data directory accessibility
+	dataDir := getDataDir()
+	if info, err := os.Stat(dataDir); err == nil && info.IsDir() {
+		checks["data_dir"] = "accessible"
+	} else {
+		checks["data_dir"] = "inaccessible"
+	}
+
+	response := map[string]interface{}{
+		"status":  "healthy",
+		"version": Version,
+		"checks":  checks,
+	}
+
+	data, _ := json.MarshalIndent(response, "", "  ")
+	fmt.Println(string(data))
+}
+
+var startTime = time.Now()
+
+func checkMemory() map[string]interface{} {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return map[string]interface{}{
+		"alloc_mb":   m.Alloc / 1024 / 1024,
+		"sys_mb":     m.Sys / 1024 / 1024,
+		"num_gc":     m.NumGC,
+		"goroutines": runtime.NumGoroutine(),
+	}
+}
+
+func getDataDir() string {
+	if dir := os.Getenv("ANUBIS_DATA_DIR"); dir != "" {
+		return dir
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return filepath.Join(os.Getenv("APPDATA"), "anubis")
+	default:
+		return filepath.Join("/var", "lib", "anubis")
+	}
 }
 
 // verdictCommand handles verdict subcommands

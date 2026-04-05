@@ -16,7 +16,7 @@ func (db *CobaltDB) SaveJudgment(ctx context.Context, j *core.Judgment) error {
 		j.ID = core.GenerateID()
 	}
 
-	workspaceID := "default" // TODO: Extract from context
+	workspaceID := core.WorkspaceIDFromContext(ctx)
 
 	// Primary key: {workspace}/judgments/{soul}/{timestamp}
 	ts := j.Timestamp.UnixNano()

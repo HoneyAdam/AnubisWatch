@@ -77,7 +77,7 @@ func (ts *TimeSeriesStore) SaveJudgment(ctx context.Context, j *core.Judgment) e
 
 // updateSummary updates the aggregated summary for a judgment
 func (ts *TimeSeriesStore) updateSummary(ctx context.Context, j *core.Judgment, resolution TimeResolution) error {
-	workspaceID := "default" // TODO: Extract from soul
+	workspaceID := core.WorkspaceIDFromContext(ctx)
 
 	// Calculate bucket time
 	bucketTime := truncateToResolution(j.Timestamp, resolution)
