@@ -618,8 +618,8 @@ type mockConn struct {
 	closed bool
 }
 
-func (m *mockConn) Read(b []byte) (n int, err error)   { return 0, nil }
-func (m *mockConn) Write(b []byte) (n int, err error)  { return len(b), nil }
+func (m *mockConn) Read(b []byte) (n int, err error)  { return 0, nil }
+func (m *mockConn) Write(b []byte) (n int, err error) { return len(b), nil }
 func (m *mockConn) Close() error {
 	m.closed = true
 	return nil
@@ -908,7 +908,7 @@ func TestTCPTransport_SendRPC_InvalidJSON(t *testing.T) {
 
 // mockConnWithUnknownMethod sends an unknown RPC method
 type mockConnWithUnknownMethod struct {
-	closed bool
+	closed    bool
 	readCount int
 }
 
@@ -936,7 +936,7 @@ func (m *mockConnWithUnknownMethod) SetWriteDeadline(t time.Time) error { return
 
 // mockConnWithInvalidJSON sends invalid JSON payload
 type mockConnWithInvalidJSON struct {
-	closed bool
+	closed    bool
 	readCount int
 }
 
@@ -964,7 +964,7 @@ func (m *mockConnWithInvalidJSON) SetWriteDeadline(t time.Time) error { return n
 
 // mockConnWithEmptyMethod sends empty method line
 type mockConnWithEmptyMethod struct {
-	closed bool
+	closed    bool
 	readCount int
 }
 
@@ -998,7 +998,7 @@ func (m *mockConnWithEmptyMethod) SetWriteDeadline(t time.Time) error { return n
 
 // mockConnWithSlowHandler sends request but handler times out
 type mockConnWithSlowHandler struct {
-	closed bool
+	closed    bool
 	readCount int
 }
 
@@ -1076,7 +1076,7 @@ func TestTCPTransport_SendRPC_InvalidResponseLengthFormat(t *testing.T) {
 
 // mockConnWithInvalidLengthFormat returns invalid length format
 type mockConnWithInvalidLengthFormat struct {
-	closed bool
+	closed    bool
 	readCount int
 }
 
@@ -1219,7 +1219,7 @@ func TestTCPTransport_SendRPC_JSONUnmarshalError_Heartbeat(t *testing.T) {
 
 // mockConnWithReadErrorAfterWrite succeeds on write but fails on first read
 type mockConnWithReadErrorAfterWrite struct {
-	closed bool
+	closed    bool
 	readCount int
 }
 
@@ -1266,7 +1266,7 @@ func (m *mockConnWithShortPayload) SetWriteDeadline(t time.Time) error { return 
 
 // mockConnWithValidLengthBadJSON returns valid length but invalid JSON
 type mockConnWithValidLengthBadJSON struct {
-	closed bool
+	closed    bool
 	readCount int
 }
 
@@ -1417,10 +1417,10 @@ func TestTCPTransport_SendHeartbeat_Success(t *testing.T) {
 
 // mockConnWithValidResponse returns valid response for specific RPC type
 type mockConnWithValidResponse struct {
-	closed bool
+	closed       bool
 	responseType string
-	readCount int
-	writtenData []byte
+	readCount    int
+	writtenData  []byte
 }
 
 func (m *mockConnWithValidResponse) Read(b []byte) (n int, err error) {
@@ -1432,13 +1432,13 @@ func (m *mockConnWithValidResponse) Read(b []byte) (n int, err error) {
 		var lengthStr string
 		switch m.responseType {
 		case "AppendEntries":
-			lengthStr = "25\n"  // {"term":1,"success":true} = 25 bytes
+			lengthStr = "25\n" // {"term":1,"success":true} = 25 bytes
 		case "RequestVote":
-			lengthStr = "30\n"  // {"term":1,"vote_granted":true} = 30 bytes
+			lengthStr = "30\n" // {"term":1,"vote_granted":true} = 30 bytes
 		case "InstallSnapshot":
-			lengthStr = "25\n"  // {"term":1,"success":true} = 25 bytes
+			lengthStr = "25\n" // {"term":1,"success":true} = 25 bytes
 		case "Heartbeat":
-			lengthStr = "26\n"  // {"term":1,"leader_id":"x"} = 26 bytes
+			lengthStr = "26\n" // {"term":1,"leader_id":"x"} = 26 bytes
 		}
 		n = copy(b, lengthStr)
 		return n, nil

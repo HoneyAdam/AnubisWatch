@@ -162,7 +162,7 @@ func (rm *RetentionManager) purgeRawData(cutoff time.Time) error {
 // purgeSummaries removes aggregated summaries older than cutoff
 func (rm *RetentionManager) purgeSummaries(resolution string, cutoff time.Time) error {
 	// Find all time-series summaries
-	prefix := fmt.Sprintf("/ts/")
+	prefix := "/ts/"
 	results, err := rm.db.PrefixScan("")
 	if err != nil {
 		return err

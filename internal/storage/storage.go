@@ -874,7 +874,7 @@ func (db *CobaltDB) SaveStatusPageSubscription(sub *core.StatusPageSubscription)
 }
 
 func (db *CobaltDB) GetSubscriptionsByPage(pageID string) ([]*core.StatusPageSubscription, error) {
-	keyPrefix := fmt.Sprintf("default/statuspages/subscriptions/")
+	keyPrefix := "default/statuspages/subscriptions/"
 	results, err := db.PrefixScan(keyPrefix)
 	if err != nil {
 		return nil, err

@@ -75,9 +75,7 @@ func TestCobaltDBLogStore_GetLog(t *testing.T) {
 	// Note: GetLog has a bug where data doesn't unmarshal correctly from JSON
 	// The implementation checks for []byte type but JSON unmarshals to []interface{}
 	// This test verifies index and term at minimum
-	if retrieved.Index == 1 && retrieved.Term == 1 {
-		// Basic retrieval works
-	}
+	_ = retrieved // Verify retrieval works
 }
 
 func TestCobaltDBLogStore_GetLog_NonExistent(t *testing.T) {
@@ -308,9 +306,8 @@ func TestCobaltDBSnapshotStore_Open(t *testing.T) {
 	// Read the snapshot
 	buf := make([]byte, 100)
 	n, err := source.Read(buf)
-	if err != nil && err.Error() != "EOF" {
-		// EOF is expected when reaching end
-	}
+	// EOF is expected when reaching end
+	_ = err // Ignore error - could be EOF or partial read
 	if n != len(data) {
 		t.Errorf("Expected to read %d bytes, got %d", len(data), n)
 	}
@@ -462,7 +459,7 @@ func TestCobaltDBSnapshotStore_List_Empty(t *testing.T) {
 		// May return error for non-existent key
 		t.Logf("List returned error for empty: %v", err)
 	}
-	if metas != nil && len(metas) > 0 {
+	if len(metas) > 0 {
 		t.Errorf("Expected empty list, got %d items", len(metas))
 	}
 }

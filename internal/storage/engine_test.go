@@ -983,10 +983,8 @@ func TestCobaltDB_Delete(t *testing.T) {
 	if value != nil {
 		t.Error("expected nil value after deletion")
 	}
-	if err == nil {
-		// Some storage implementations return nil for both on deleted keys
-		// Just verify the value is nil/empty
-	}
+	// err may be nil or "not found" - both acceptable
+	_ = err
 }
 
 func TestCobaltDB_PrefixScan(t *testing.T) {

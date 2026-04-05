@@ -614,9 +614,9 @@ func TestHandler_renderStatusPage_CustomTheme(t *testing.T) {
 		ID:   "test-page",
 		Name: "Test Page",
 		Theme: core.StatusPageTheme{
-			PrimaryColor: "#ff0000",
+			PrimaryColor:    "#ff0000",
 			BackgroundColor: "#000000",
-			TextColor:    "#ffffff",
+			TextColor:       "#ffffff",
 		},
 	}
 
@@ -1708,9 +1708,9 @@ func TestHandler_Router_WithAcmeManager(t *testing.T) {
 	}
 
 	handler := &Handler{
-		repository:     repo,
-		acmeManager:    acmeMgr,
-		defaultTheme:   core.GetDefaultTheme(),
+		repository:   repo,
+		acmeManager:  acmeMgr,
+		defaultTheme: core.GetDefaultTheme(),
 	}
 
 	router := handler.Router()

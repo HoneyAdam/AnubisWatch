@@ -234,9 +234,8 @@ func (s *cobaltDBSnapshotSink) Close() error {
 		Size:    int64(s.buf.Len()),
 		Version: s.version,
 	}
-	metas, _ := s.store.List()
-	metas = []raft.SnapshotMeta{meta} // Keep only latest snapshot
-	metaData, _ := json.Marshal(metas)
+	// Keep only latest snapshot
+	metaData, _ := json.Marshal([]raft.SnapshotMeta{meta})
 	return s.store.db.Put("raft/snapshot-meta", metaData)
 }
 

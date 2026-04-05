@@ -801,8 +801,8 @@ func TestPeer_Structure(t *testing.T) {
 
 type mockTransport struct{}
 
-func (m *mockTransport) Start() error                                       { return nil }
-func (m *mockTransport) Stop() error                                        { return nil }
+func (m *mockTransport) Start() error { return nil }
+func (m *mockTransport) Stop() error  { return nil }
 func (m *mockTransport) SendAppendEntries(peerID string, req *core.AppendEntriesRequest) (*core.AppendEntriesResponse, error) {
 	return &core.AppendEntriesResponse{Term: req.Term, Success: true}, nil
 }
@@ -1876,8 +1876,8 @@ func TestNode_HandleRequestVote_UpToDateLog(t *testing.T) {
 	}
 
 	req := &core.RequestVoteRequest{
-		Term:        5,
-		CandidateID: "candidate-1",
+		Term:         5,
+		CandidateID:  "candidate-1",
 		LastLogIndex: 2,
 		LastLogTerm:  2,
 	}
@@ -1901,8 +1901,8 @@ func TestNode_HandleRequestVote_StaleLog(t *testing.T) {
 
 	// Candidate has older log (lower lastLogTerm)
 	req := &core.RequestVoteRequest{
-		Term:        5,
-		CandidateID: "candidate-1",
+		Term:         5,
+		CandidateID:  "candidate-1",
 		LastLogIndex: 5, // More entries but lower term
 		LastLogTerm:  3, // Lower than our lastLogTerm (5)
 	}
