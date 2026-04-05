@@ -711,6 +711,67 @@ func TestEmailDispatcher_Send_MissingTo(t *testing.T) {
 	}
 }
 
+func TestEmailDispatcher_Send_EmptyRecipientsList(t *testing.T) {
+	dispatcher := &EmailDispatcher{logger: newTestLogger()}
+
+	event := &core.AlertEvent{SoulName: "Test Soul"}
+	channel := &core.AlertChannel{
+		Type: core.ChannelEmail,
+		Config: map[string]interface{}{
+			"smtp_host": "smtp.example.com",
+			"smtp_port": float64(587),
+			"to":        []interface{}{}, // Empty list
+		},
+	}
+
+	err := dispatcher.Send(context.Background(), event, channel)
+	if err == nil {
+		t.Error("Expected error for empty recipients list")
+	}
+}
+
+func TestEmailDispatcher_Send_InvalidRecipientType(t *testing.T) {
+	dispatcher := &EmailDispatcher{logger: newTestLogger()}
+
+	event := &core.AlertEvent{SoulName: "Test Soul"}
+	channel := &core.AlertChannel{
+		Type: core.ChannelEmail,
+		Config: map[string]interface{}{
+			"smtp_host": "smtp.example.com",
+			"smtp_port": float64(587),
+			"to":        []interface{}{123, "invalid"}, // Non-string types
+		},
+	}
+
+	err := dispatcher.Send(context.Background(), event, channel)
+	// Should return error for no valid recipients
+	if err == nil {
+		t.Error("Expected error for invalid recipient types")
+	}
+}
+
+func TestEmailDispatcher_Send_SMTPFailure(t *testing.T) {
+	dispatcher := &EmailDispatcher{logger: newTestLogger()}
+
+	event := &core.AlertEvent{SoulName: "Test Soul"}
+	channel := &core.AlertChannel{
+		Type: core.ChannelEmail,
+		Config: map[string]interface{}{
+			"smtp_host": "invalid.smtp.host.that.does.not.exist",
+			"smtp_port": float64(587),
+			"username":  "user",
+			"password":  "pass",
+			"from":      "from@example.com",
+			"to":        []interface{}{"to@example.com"},
+		},
+	}
+
+	err := dispatcher.Send(context.Background(), event, channel)
+	if err == nil {
+		t.Error("Expected error for SMTP connection failure")
+	}
+}
+
 func TestSMSDispatcher_Send_MissingConfig(t *testing.T) {
 	dispatcher := &SMSDispatcher{logger: newTestLogger()}
 
