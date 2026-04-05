@@ -273,9 +273,10 @@ func TestTLSConfig_Structure(t *testing.T) {
 	// Test TLSConfig structure
 	tlsConfig := &TLSConfig{}
 
-	// Verify struct fields exist
-	_ = tlsConfig.ServerName
-	_ = tlsConfig.Domain
+	// Verify struct has manager field
+	if tlsConfig.manager != nil {
+		t.Error("TLSConfig manager should be nil initially")
+	}
 }
 
 func TestClientHelloInfo_Structure(t *testing.T) {
