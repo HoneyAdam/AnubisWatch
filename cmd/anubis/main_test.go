@@ -597,36 +597,36 @@ func TestHandleLogout_Methods(t *testing.T) {
 // Test adapter types
 func TestProbeStorageAdapter(t *testing.T) {
 	adapter := &probeStorageAdapter{store: nil}
-	if adapter == nil {
-		t.Error("Expected adapter to be created")
+	if adapter.store != nil {
+		t.Error("Expected store to be nil")
 	}
 }
 
 func TestRestStorageAdapter(t *testing.T) {
 	adapter := &restStorageAdapter{store: nil}
-	if adapter == nil {
-		t.Error("Expected adapter to be created")
+	if adapter.store != nil {
+		t.Error("Expected store to be nil")
 	}
 }
 
 func TestClusterAdapter(t *testing.T) {
 	adapter := &clusterAdapter{mgr: nil}
-	if adapter == nil {
-		t.Error("Expected adapter to be created")
+	if adapter.mgr != nil {
+		t.Error("Expected mgr to be nil")
 	}
 }
 
 func TestAlertStorageAdapter(t *testing.T) {
 	adapter := &alertStorageAdapter{store: nil}
-	if adapter == nil {
-		t.Error("Expected adapter to be created")
+	if adapter.store != nil {
+		t.Error("Expected store to be nil")
 	}
 }
 
 func TestStatusPageRepository(t *testing.T) {
 	repo := &statusPageRepository{store: nil}
-	if repo == nil {
-		t.Error("Expected repository to be created")
+	if repo.store != nil {
+		t.Error("Expected store to be nil")
 	}
 }
 

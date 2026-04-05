@@ -851,11 +851,11 @@ func TestOpsGenieDispatcher_Send_Recovery(t *testing.T) {
 	dispatcher := &OpsGenieDispatcher{logger: newTestLogger()}
 
 	event := &core.AlertEvent{
-		SoulID:    "test-soul",
-		SoulName:  "Test Soul",
-		Status:    core.SoulAlive, // Recovery
-		Severity:  core.SeverityCritical,
-		Message:   "Test recovery",
+		SoulID:   "test-soul",
+		SoulName: "Test Soul",
+		Status:   core.SoulAlive, // Recovery
+		Severity: core.SeverityCritical,
+		Message:  "Test recovery",
 	}
 
 	channel := &core.AlertChannel{
@@ -1071,11 +1071,11 @@ func TestSMSDispatcher_Send_Twilio_NoRecipients(t *testing.T) {
 	channel := &core.AlertChannel{
 		Type: core.ChannelSMS,
 		Config: map[string]interface{}{
-			"provider":     "twilio",
-			"account_sid":  "AC123",
-			"auth_token":   "secret",
-			"from":         "+1234567890",
-			"to":           []interface{}{}, // Empty recipients
+			"provider":    "twilio",
+			"account_sid": "AC123",
+			"auth_token":  "secret",
+			"from":        "+1234567890",
+			"to":          []interface{}{}, // Empty recipients
 		},
 	}
 
@@ -1099,11 +1099,11 @@ func TestSMSDispatcher_Send_Vonage(t *testing.T) {
 	channel := &core.AlertChannel{
 		Type: core.ChannelSMS,
 		Config: map[string]interface{}{
-			"provider":    "vonage",
-			"api_key":     "key123",
-			"api_secret":  "secret",
-			"from":        "AnubisWatch",
-			"to":          []interface{}{"+0987654321"},
+			"provider":   "vonage",
+			"api_key":    "key123",
+			"api_secret": "secret",
+			"from":       "AnubisWatch",
+			"to":         []interface{}{"+0987654321"},
 		},
 	}
 
@@ -1139,11 +1139,11 @@ func TestSMSDispatcher_Send_Vonage_NoRecipients(t *testing.T) {
 	channel := &core.AlertChannel{
 		Type: core.ChannelSMS,
 		Config: map[string]interface{}{
-			"provider":    "vonage",
-			"api_key":     "key123",
-			"api_secret":  "secret",
-			"from":        "AnubisWatch",
-			"to":          []interface{}{},
+			"provider":   "vonage",
+			"api_key":    "key123",
+			"api_secret": "secret",
+			"from":       "AnubisWatch",
+			"to":         []interface{}{},
 		},
 	}
 
@@ -1254,10 +1254,10 @@ func TestDiscordDispatcher_getColor(t *testing.T) {
 		status   core.SoulStatus
 		expected int
 	}{
-		{core.SeverityCritical, core.SoulAlive, 0x00FF00},    // Alive overrides severity
-		{core.SeverityCritical, core.SoulDead, 0xFF0000},     // Red
-		{core.SeverityWarning, core.SoulDegraded, 0xFFA500},  // Orange
-		{core.SeverityInfo, core.SoulUnknown, 0x439FE0},      // Blue (default)
+		{core.SeverityCritical, core.SoulAlive, 0x00FF00},   // Alive overrides severity
+		{core.SeverityCritical, core.SoulDead, 0xFF0000},    // Red
+		{core.SeverityWarning, core.SoulDegraded, 0xFFA500}, // Orange
+		{core.SeverityInfo, core.SoulUnknown, 0x439FE0},     // Blue (default)
 	}
 
 	for _, tt := range tests {

@@ -24,24 +24,24 @@ func newTestLogger() *slog.Logger {
 
 // mockStorage implements Storage interface for testing
 type mockStorage struct {
-	souls       map[string]*core.Soul
-	judgments   map[string]*core.Judgment
-	channels    map[string]*core.AlertChannel
-	rules       map[string]*core.AlertRule
-	workspaces  map[string]*core.Workspace
+	souls      map[string]*core.Soul
+	judgments  map[string]*core.Judgment
+	channels   map[string]*core.AlertChannel
+	rules      map[string]*core.AlertRule
+	workspaces map[string]*core.Workspace
 }
 
 func newMockStorage() *mockStorage {
 	return &mockStorage{
-		souls:       make(map[string]*core.Soul),
-		judgments:   make(map[string]*core.Judgment),
-		channels:    make(map[string]*core.AlertChannel),
-		rules:       make(map[string]*core.AlertRule),
-		workspaces:  make(map[string]*core.Workspace),
+		souls:      make(map[string]*core.Soul),
+		judgments:  make(map[string]*core.Judgment),
+		channels:   make(map[string]*core.AlertChannel),
+		rules:      make(map[string]*core.AlertRule),
+		workspaces: make(map[string]*core.Workspace),
 	}
 }
 
-func (m *mockStorage) GetSoulNoCtx(id string) (*core.Soul, error)       { return m.souls[id], nil }
+func (m *mockStorage) GetSoulNoCtx(id string) (*core.Soul, error) { return m.souls[id], nil }
 func (m *mockStorage) ListSoulsNoCtx(ws string, offset, limit int) ([]*core.Soul, error) {
 	souls := make([]*core.Soul, 0, len(m.souls))
 	for _, s := range m.souls {
@@ -64,11 +64,15 @@ func (m *mockStorage) DeleteSoul(ctx context.Context, id string) error {
 	delete(m.souls, id)
 	return nil
 }
-func (m *mockStorage) GetJudgmentNoCtx(id string) (*core.Judgment, error) { return m.judgments[id], nil }
+func (m *mockStorage) GetJudgmentNoCtx(id string) (*core.Judgment, error) {
+	return m.judgments[id], nil
+}
 func (m *mockStorage) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error) {
 	return []*core.Judgment{}, nil
 }
-func (m *mockStorage) GetChannelNoCtx(id string) (*core.AlertChannel, error) { return m.channels[id], nil }
+func (m *mockStorage) GetChannelNoCtx(id string) (*core.AlertChannel, error) {
+	return m.channels[id], nil
+}
 func (m *mockStorage) ListChannelsNoCtx(ws string) ([]*core.AlertChannel, error) {
 	channels := make([]*core.AlertChannel, 0, len(m.channels))
 	for _, c := range m.channels {
@@ -100,7 +104,9 @@ func (m *mockStorage) DeleteRuleNoCtx(id string) error {
 	delete(m.rules, id)
 	return nil
 }
-func (m *mockStorage) GetWorkspaceNoCtx(id string) (*core.Workspace, error) { return m.workspaces[id], nil }
+func (m *mockStorage) GetWorkspaceNoCtx(id string) (*core.Workspace, error) {
+	return m.workspaces[id], nil
+}
 func (m *mockStorage) ListWorkspacesNoCtx() ([]*core.Workspace, error) {
 	ws := make([]*core.Workspace, 0, len(m.workspaces))
 	for _, w := range m.workspaces {
@@ -122,9 +128,11 @@ func (m *mockStorage) GetStatsNoCtx(ws string, start, end time.Time) (*core.Stat
 
 // StatusPage methods
 func (m *mockStorage) GetStatusPageNoCtx(id string) (*core.StatusPage, error) { return nil, nil }
-func (m *mockStorage) ListStatusPagesNoCtx() ([]*core.StatusPage, error) { return []*core.StatusPage{}, nil }
+func (m *mockStorage) ListStatusPagesNoCtx() ([]*core.StatusPage, error) {
+	return []*core.StatusPage{}, nil
+}
 func (m *mockStorage) SaveStatusPageNoCtx(page *core.StatusPage) error { return nil }
-func (m *mockStorage) DeleteStatusPageNoCtx(id string) error { return nil }
+func (m *mockStorage) DeleteStatusPageNoCtx(id string) error           { return nil }
 
 // mockProbeEngine implements ProbeEngine interface
 type mockProbeEngine struct {
@@ -144,8 +152,8 @@ type mockAlertManager struct{}
 func (a *mockAlertManager) GetStats() core.AlertManagerStats {
 	return core.AlertManagerStats{}
 }
-func (a *mockAlertManager) ListChannels() []*core.AlertChannel { return nil }
-func (a *mockAlertManager) ListRules() []*core.AlertRule       { return nil }
+func (a *mockAlertManager) ListChannels() []*core.AlertChannel          { return nil }
+func (a *mockAlertManager) ListRules() []*core.AlertRule                { return nil }
 func (a *mockAlertManager) RegisterChannel(ch *core.AlertChannel) error { return nil }
 func (a *mockAlertManager) RegisterRule(rule *core.AlertRule) error     { return nil }
 func (a *mockAlertManager) DeleteChannel(id string) error               { return nil }
@@ -174,10 +182,12 @@ func (a *mockAuthenticator) Logout(token string) error { return nil }
 // mockClusterManager implements ClusterManager interface
 type mockClusterManager struct{}
 
-func (m *mockClusterManager) IsLeader() bool                           { return true }
-func (m *mockClusterManager) Leader() string                           { return "test-node" }
-func (m *mockClusterManager) IsClustered() bool                        { return false }
-func (m *mockClusterManager) GetStatus() *ClusterStatus                { return &ClusterStatus{IsClustered: false, NodeID: "test-node", State: "standalone"} }
+func (m *mockClusterManager) IsLeader() bool    { return true }
+func (m *mockClusterManager) Leader() string    { return "test-node" }
+func (m *mockClusterManager) IsClustered() bool { return false }
+func (m *mockClusterManager) GetStatus() *ClusterStatus {
+	return &ClusterStatus{IsClustered: false, NodeID: "test-node", State: "standalone"}
+}
 
 func TestHandleHealth(t *testing.T) {
 	storage := newMockStorage()
@@ -214,10 +224,10 @@ func TestHandleLogin_Success(t *testing.T) {
 	router := &Router{routes: make(map[string]map[string]Handler)}
 
 	server := &RESTServer{
-		store:  storage,
-		router: router,
-		auth:   auth,
-		logger: newTestLogger(),
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -246,10 +256,10 @@ func TestHandleLogin_InvalidCredentials(t *testing.T) {
 	router := &Router{routes: make(map[string]map[string]Handler)}
 
 	server := &RESTServer{
-		store:  storage,
-		router: router,
-		auth:   auth,
-		logger: newTestLogger(),
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -272,11 +282,11 @@ func TestHandleListSouls(t *testing.T) {
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -316,11 +326,11 @@ func TestHandleCreateSoul(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -357,11 +367,11 @@ func TestHandleGetSoul_NotFound(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -385,11 +395,11 @@ func TestHandleDeleteSoul(t *testing.T) {
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -412,12 +422,12 @@ func TestHandleListChannels(t *testing.T) {
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		alert:  &mockAlertManager{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		alert:   &mockAlertManager{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -440,12 +450,12 @@ func TestHandleListRules(t *testing.T) {
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		alert:  &mockAlertManager{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		alert:   &mockAlertManager{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -468,12 +478,12 @@ func TestHandleListWorkspaces(t *testing.T) {
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		alert:  &mockAlertManager{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		alert:   &mockAlertManager{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -605,11 +615,11 @@ func TestHandleGetSoul_Success(t *testing.T) {
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -632,11 +642,11 @@ func TestHandleUpdateSoul(t *testing.T) {
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -668,12 +678,12 @@ func TestHandleForceCheck(t *testing.T) {
 	probe := &mockProbeEngine{}
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		probe:  probe,
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		probe:   probe,
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -694,11 +704,11 @@ func TestHandleStats(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -720,12 +730,12 @@ func TestHandleCreateChannel(t *testing.T) {
 	alert := &mockAlertManager{}
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		alert:  alert,
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		alert:   alert,
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -756,12 +766,12 @@ func TestHandleCreateRule(t *testing.T) {
 	alert := &mockAlertManager{}
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		alert:  alert,
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		alert:   alert,
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -795,12 +805,12 @@ func TestHandleAcknowledgeIncident(t *testing.T) {
 	alert := &mockAlertManager{}
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		alert:  alert,
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		alert:   alert,
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -822,12 +832,12 @@ func TestHandleResolveIncident(t *testing.T) {
 	alert := &mockAlertManager{}
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		alert:  alert,
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		alert:   alert,
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -848,11 +858,11 @@ func TestHandleClusterStatus(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -873,11 +883,11 @@ func TestHandleCreateStatusPage(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -906,11 +916,11 @@ func TestHandleUpdateStatusPage(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -940,11 +950,11 @@ func TestHandleDeleteStatusPage(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -965,11 +975,11 @@ func TestHandleListStatusPages(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -990,11 +1000,11 @@ func TestHandleGetStatusPage(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1016,11 +1026,11 @@ func TestLoggingMiddleware(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1056,11 +1066,11 @@ func TestCORSMiddleware(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1097,11 +1107,11 @@ func TestCORSMiddleware_Preflight(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1134,11 +1144,11 @@ func TestRecoveryMiddleware(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1203,45 +1213,45 @@ func TestRouter_Use(t *testing.T) {
 
 func TestMatchRoute(t *testing.T) {
 	tests := []struct {
-		name      string
-		pattern   string
-		path      string
-		wantMatch bool
+		name       string
+		pattern    string
+		path       string
+		wantMatch  bool
 		wantParams map[string]string
 	}{
 		{
-			name:      "exact match",
-			pattern:   "/api/v1/souls",
-			path:      "/api/v1/souls",
-			wantMatch: true,
+			name:       "exact match",
+			pattern:    "/api/v1/souls",
+			path:       "/api/v1/souls",
+			wantMatch:  true,
 			wantParams: map[string]string{},
 		},
 		{
-			name:      "param match",
-			pattern:   "/api/v1/souls/:id",
-			path:      "/api/v1/souls/123",
-			wantMatch: true,
+			name:       "param match",
+			pattern:    "/api/v1/souls/:id",
+			path:       "/api/v1/souls/123",
+			wantMatch:  true,
 			wantParams: map[string]string{"id": "123"},
 		},
 		{
-			name:      "multiple params",
-			pattern:   "/api/v1/:resource/:id",
-			path:      "/api/v1/souls/456",
-			wantMatch: true,
+			name:       "multiple params",
+			pattern:    "/api/v1/:resource/:id",
+			path:       "/api/v1/souls/456",
+			wantMatch:  true,
 			wantParams: map[string]string{"resource": "souls", "id": "456"},
 		},
 		{
-			name:      "length mismatch",
-			pattern:   "/api/v1/souls/:id",
-			path:      "/api/v1/souls/123/extra",
-			wantMatch: false,
+			name:       "length mismatch",
+			pattern:    "/api/v1/souls/:id",
+			path:       "/api/v1/souls/123/extra",
+			wantMatch:  false,
 			wantParams: nil,
 		},
 		{
-			name:      "path mismatch",
-			pattern:   "/api/v1/souls/:id",
-			path:      "/api/v1/channels/123",
-			wantMatch: false,
+			name:       "path mismatch",
+			pattern:    "/api/v1/souls/:id",
+			path:       "/api/v1/channels/123",
+			wantMatch:  false,
 			wantParams: nil,
 		},
 	}
@@ -1294,11 +1304,11 @@ func TestHandleReady(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1325,11 +1335,11 @@ func TestHandleLogout(t *testing.T) {
 	auth := &mockAuthenticator{}
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   auth,
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1350,11 +1360,11 @@ func TestHandleMe(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1382,12 +1392,12 @@ func TestHandleStatsOverview(t *testing.T) {
 	alert := &mockAlertManager{}
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		alert:  alert,
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		alert:   alert,
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1408,11 +1418,11 @@ func TestHandleClusterPeers(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1433,11 +1443,11 @@ func TestHandleListIncidents(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1458,11 +1468,11 @@ func TestHandleTestChannel(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1483,11 +1493,11 @@ func TestHandleListAllJudgments(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -1508,11 +1518,11 @@ func TestHandleGetJudgment(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
 	}
 
@@ -2904,9 +2914,9 @@ func TestMCPServer_handleReadResource_Direct(t *testing.T) {
 	server := NewMCPServer(store, probe, alert, logger)
 
 	req := &MCPRequest{
-		ID:      1,
-		Method:  "resources/read",
-		Params:  json.RawMessage(`{"uri": "anubiswatch://stats"}`),
+		ID:     1,
+		Method: "resources/read",
+		Params: json.RawMessage(`{"uri": "anubiswatch://stats"}`),
 	}
 	resp := server.handleReadResource(req)
 	if resp == nil {
@@ -2924,9 +2934,9 @@ func TestMCPServer_handleGetPrompt_Direct(t *testing.T) {
 	server := NewMCPServer(store, probe, alert, logger)
 
 	req := &MCPRequest{
-		ID:      1,
-		Method:  "prompts/get",
-		Params:  json.RawMessage(`{"name": "analyze_soul"}`),
+		ID:     1,
+		Method: "prompts/get",
+		Params: json.RawMessage(`{"name": "analyze_soul"}`),
 	}
 	resp := server.handleGetPrompt(req)
 	if resp == nil {

@@ -278,9 +278,9 @@ func TestCheckConditions(t *testing.T) {
 
 // Mock storage for testing
 type mockAlertStorage struct {
-	channels map[string]*core.AlertChannel
-	rules    map[string]*core.AlertRule
-	events   []*core.AlertEvent
+	channels  map[string]*core.AlertChannel
+	rules     map[string]*core.AlertRule
+	events    []*core.AlertEvent
 	incidents map[string]*core.Incident
 }
 
@@ -618,11 +618,11 @@ func TestSMSDispatcher_Validate(t *testing.T) {
 
 	// Valid config
 	validConfig := map[string]interface{}{
-		"provider": "twilio",
+		"provider":    "twilio",
 		"account_sid": "AC1234567890",
-		"auth_token": "abc123",
-		"from": "+1234567890",
-		"to": "+0987654321",
+		"auth_token":  "abc123",
+		"from":        "+1234567890",
+		"to":          "+0987654321",
 	}
 	if err := dispatcher.Validate(validConfig); err != nil {
 		t.Errorf("Validate() unexpected error: %v", err)
@@ -1033,13 +1033,13 @@ func TestManager_AcknowledgeIncident(t *testing.T) {
 	manager := NewManager(storage, newTestLogger())
 
 	incident := &core.Incident{
-		ID:        "incident-1",
-		RuleID:    "rule-1",
-		SoulID:    "soul-1",
+		ID:          "incident-1",
+		RuleID:      "rule-1",
+		SoulID:      "soul-1",
 		WorkspaceID: "default",
-		Status:    core.IncidentOpen,
-		Severity:  core.SeverityCritical,
-		StartedAt: time.Now().UTC(),
+		Status:      core.IncidentOpen,
+		Severity:    core.SeverityCritical,
+		StartedAt:   time.Now().UTC(),
 	}
 	// Add incident directly to manager's internal map
 	manager.mu.Lock()
@@ -1068,13 +1068,13 @@ func TestManager_ResolveIncident(t *testing.T) {
 	manager := NewManager(storage, newTestLogger())
 
 	incident := &core.Incident{
-		ID:        "incident-1",
-		RuleID:    "rule-1",
-		SoulID:    "soul-1",
+		ID:          "incident-1",
+		RuleID:      "rule-1",
+		SoulID:      "soul-1",
 		WorkspaceID: "default",
-		Status:    core.IncidentOpen,
-		Severity:  core.SeverityCritical,
-		StartedAt: time.Now().UTC(),
+		Status:      core.IncidentOpen,
+		Severity:    core.SeverityCritical,
+		StartedAt:   time.Now().UTC(),
 	}
 	// Add incident directly to manager's internal map
 	manager.mu.Lock()
