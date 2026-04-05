@@ -1,9 +1,6 @@
 version: "2"
 run:
   timeout: 5m
-  exclude-dirs:
-    - web/
-    - vendor/
 linters:
   default: none
   enable:
@@ -12,45 +9,17 @@ linters:
     - staticcheck
     - bodyclose
     - misspell
-issues:
-  exclude-rules:
-    - path: _test\.go$
-      linters:
-        - staticcheck
-        - gofmt
-    - path: internal/statuspage/handler.go
-      linters:
-        - staticcheck
-    - path: internal/cluster/manager_test.go
-      linters:
-        - staticcheck
-    - path: internal/probe/grpc.go
-      linters:
-        - staticcheck
-    - path: internal/raft/discovery_test.go
-      linters:
-        - staticcheck
-    - path: internal/journey/executor_test.go
-      linters:
-        - staticcheck
-    - path: internal/probe/tls_test.go
-      linters:
-        - staticcheck
-    - path: internal/acme/manager_test.go
-      linters:
-        - staticcheck
-    - path: internal/api/rest_test.go
-      linters:
-        - staticcheck
-    - path: cmd/anubis/main_test.go
-      linters:
-        - staticcheck
-    - path: internal/probe/tls.go
-      linters:
-        - staticcheck
-    - path: internal/storage/raft_log.go
-      linters:
-        - staticcheck
-    - path: internal/probe/icmp.go
-      linters:
-        - staticcheck
+  exclude-files:
+    - _test\.go$
+    - internal/statuspage/handler.go
+    - internal/cluster/manager_test.go
+    - internal/probe/grpc.go
+    - internal/raft/discovery_test.go
+    - internal/journey/executor_test.go
+    - internal/probe/tls_test.go
+    - internal/acme/manager_test.go
+    - internal/api/rest_test.go
+    - cmd/anubis/main_test.go
+    - internal/probe/tls.go
+    - internal/storage/raft_log.go
+    - internal/probe/icmp.go
