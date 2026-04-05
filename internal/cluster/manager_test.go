@@ -348,3 +348,22 @@ func TestManager_Logger(t *testing.T) {
 		t.Error("Expected logger to be set")
 	}
 }
+
+// TestManager_IsLeader_WithNilNode tests IsLeader when node is nil
+func TestManager_IsLeader_WithNilNode(t *testing.T) {
+	manager := &Manager{node: nil}
+
+	if manager.IsLeader() {
+		t.Error("Expected IsLeader to return false with nil node")
+	}
+}
+
+// TestManager_Leader_WithNilNode tests Leader when node is nil
+func TestManager_Leader_WithNilNode(t *testing.T) {
+	manager := &Manager{node: nil}
+
+	leader := manager.Leader()
+	if leader != "" {
+		t.Errorf("Expected Leader to return empty string with nil node, got %q", leader)
+	}
+}
