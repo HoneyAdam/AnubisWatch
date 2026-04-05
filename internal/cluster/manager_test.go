@@ -367,3 +367,57 @@ func TestManager_Leader_WithNilNode(t *testing.T) {
 		t.Errorf("Expected Leader to return empty string with nil node, got %q", leader)
 	}
 }
+
+// TestManager_GetStatus_WithRunningNode tests GetStatus when node is running
+func TestManager_GetStatus_WithRunningNode(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	cfg := newTestRaftConfig()
+	cfg.Bootstrap = true
+	cfg.BindAddr = "127.0.0.1:0"
+
+	manager, err := NewManager(cfg, db, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Start the node
+	err = manager.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer manager.Stop(ctx)
+
+	// Get status with running node
+	status := manager.GetStatus()
+
+	if status == nil {
+		t.Fatal("Expected status to be returned")
+	}
+
+	if !status.IsClustered {
+		t.Error("Expected IsClustered to be true")
+	}
+
+	if status.NodeID != cfg.NodeID {
+		t.Errorf("Expected node ID %s, got %s", cfg.NodeID, status.NodeID)
+	}
+
+	// State should be populated (might be "follower", "candidate", or "leader")
+	if status.State == "" {
+		t.Error("Expected state to be populated")
+	}
+
+	// Term should be >= 0
+	if status.Term < 0 {
+		t.Errorf("Expected non-negative term, got %d", status.Term)
+	}
+
+	// PeerCount should be >= 0
+	if status.PeerCount < 0 {
+		t.Errorf("Expected non-negative peer count, got %d", status.PeerCount)
+	}
+}
