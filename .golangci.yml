@@ -1,20 +1,18 @@
+version: "2"
 run:
   timeout: 5m
   exclude-dirs:
     - web/
     - vendor/
-
 linters:
-  disable-all: true
+  default: none
   enable:
     - gofmt
     - govet
     - staticcheck
     - bodyclose
     - misspell
-
 issues:
-  exclude-use-default: false
   exclude-rules:
     - path: _test\.go$
       linters:
