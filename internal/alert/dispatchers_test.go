@@ -1141,3 +1141,68 @@ func TestPlainAuth_Next(t *testing.T) {
 		t.Errorf("Expected nil response, got %v", response)
 	}
 }
+
+func TestTelegramDispatcher_getEmoji(t *testing.T) {
+	dispatcher := &TelegramDispatcher{logger: newTestLogger()}
+
+	tests := []struct {
+		status   core.SoulStatus
+		expected string
+	}{
+		{core.SoulAlive, "✅"},
+		{core.SoulDead, "🔴"},
+		{core.SoulDegraded, "⚠️"},
+		{core.SoulUnknown, "ℹ️"},
+		{core.SoulEmbalmed, "ℹ️"},
+	}
+
+	for _, tt := range tests {
+		result := dispatcher.getEmoji(tt.status)
+		if result != tt.expected {
+			t.Errorf("getEmoji(%s) = %q, want %q", tt.status, result, tt.expected)
+		}
+	}
+}
+
+func TestSlackDispatcher_getEmoji(t *testing.T) {
+	dispatcher := &SlackDispatcher{logger: newTestLogger()}
+
+	tests := []struct {
+		status   core.SoulStatus
+		expected string
+	}{
+		{core.SoulAlive, "✅"},
+		{core.SoulDead, "🔴"},
+		{core.SoulDegraded, "⚠️"},
+		{core.SoulUnknown, "ℹ️"},
+	}
+
+	for _, tt := range tests {
+		result := dispatcher.getEmoji(tt.status)
+		if result != tt.expected {
+			t.Errorf("getEmoji(%s) = %q, want %q", tt.status, result, tt.expected)
+		}
+	}
+}
+
+func TestDiscordDispatcher_getColor(t *testing.T) {
+	dispatcher := &DiscordDispatcher{logger: newTestLogger()}
+
+	tests := []struct {
+		severity core.Severity
+		status   core.SoulStatus
+		expected int
+	}{
+		{core.SeverityCritical, core.SoulAlive, 0x00FF00},    // Alive overrides severity
+		{core.SeverityCritical, core.SoulDead, 0xFF0000},     // Red
+		{core.SeverityWarning, core.SoulDegraded, 0xFFA500},  // Orange
+		{core.SeverityInfo, core.SoulUnknown, 0x439FE0},      // Blue (default)
+	}
+
+	for _, tt := range tests {
+		result := dispatcher.getColor(tt.severity, tt.status)
+		if result != tt.expected {
+			t.Errorf("getColor(%s, %s) = 0x%06X, want 0x%06X", tt.severity, tt.status, result, tt.expected)
+		}
+	}
+}
