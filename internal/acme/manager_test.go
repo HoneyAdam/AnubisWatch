@@ -945,9 +945,9 @@ func TestChallengeHandler_ServeHTTP_PostMethod(t *testing.T) {
 		},
 	}
 
-	// Verify handler exists
-	if handler == nil {
-		t.Error("Handler should not be nil")
+	// Verify handler has tokens
+	if len(handler.tokens) != 1 {
+		t.Error("Handler should have 1 token")
 	}
 }
 

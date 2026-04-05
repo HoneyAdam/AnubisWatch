@@ -549,9 +549,10 @@ func (d *OpsGenieDispatcher) Send(ctx context.Context, event *core.AlertEvent, c
 
 	// Build alert
 	priority := "P3"
-	if event.Severity == core.SeverityCritical {
+	switch event.Severity {
+	case core.SeverityCritical:
 		priority = "P1"
-	} else if event.Severity == core.SeverityWarning {
+	case core.SeverityWarning:
 		priority = "P2"
 	}
 
@@ -659,9 +660,10 @@ func (d *NtfyDispatcher) Send(ctx context.Context, event *core.AlertEvent, chann
 	}
 
 	priority := "default"
-	if event.Severity == core.SeverityCritical {
+	switch event.Severity {
+	case core.SeverityCritical:
 		priority = "urgent"
-	} else if event.Severity == core.SeverityWarning {
+	case core.SeverityWarning:
 		priority = "high"
 	}
 
@@ -966,14 +968,15 @@ func (d *SMSDispatcher) Validate(config map[string]interface{}) error {
 		provider = "twilio"
 	}
 
-	if provider == "twilio" {
+	switch provider {
+	case "twilio":
 		if _, ok := config["account_sid"]; !ok {
 			return fmt.Errorf("account_sid is required for twilio")
 		}
 		if _, ok := config["auth_token"]; !ok {
 			return fmt.Errorf("auth_token is required for twilio")
 		}
-	} else if provider == "vonage" {
+	case "vonage":
 		if _, ok := config["api_key"]; !ok {
 			return fmt.Errorf("api_key is required for vonage")
 		}

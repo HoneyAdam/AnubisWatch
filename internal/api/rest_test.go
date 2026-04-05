@@ -1671,8 +1671,8 @@ func TestWSConn_Structure(t *testing.T) {
 		closed: false,
 	}
 
-	if conn == nil {
-		t.Error("WSConn should not be nil")
+	if conn.closed {
+		t.Error("WSConn should not be closed initially")
 	}
 }
 

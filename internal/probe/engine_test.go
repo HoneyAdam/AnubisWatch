@@ -314,7 +314,7 @@ func TestRegisterChecker(t *testing.T) {
 
 type testChecker struct{}
 
-func (c *testChecker) Type() core.CheckType                    { return "test" }
+func (c *testChecker) Type() core.CheckType { return "test" }
 func (c *testChecker) Judge(ctx context.Context, soul *core.Soul) (*core.Judgment, error) {
 	return nil, nil
 }
@@ -714,9 +714,9 @@ func TestDNSChecker_JudgePropagation_Success(t *testing.T) {
 		Target:  "example.com",
 		Timeout: core.Duration{Duration: 10 * time.Second},
 		DNS: &core.DNSConfig{
-			RecordType:        "A",
-			PropagationCheck:  true,
-			Nameservers:       []string{"8.8.8.8", "1.1.1.1"},
+			RecordType:           "A",
+			PropagationCheck:     true,
+			Nameservers:          []string{"8.8.8.8", "1.1.1.1"},
 			PropagationThreshold: 50,
 		},
 	}
@@ -780,7 +780,7 @@ func TestValidateJSONSchema(t *testing.T) {
 	schema := `{"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}`
 
 	validData := []byte(`{"name": "John"}`)
-	invalidData := []byte(`{"age": 30}`) // Missing required field
+	invalidData := []byte(`{"age": 30}`)   // Missing required field
 	invalidType := []byte(`{"name": 123}`) // Wrong type
 
 	if !validateJSONSchema(validData, schema, false) {
@@ -834,9 +834,9 @@ func TestValidateNode_EnumValidation(t *testing.T) {
 // Test matchesType function
 func TestMatchesType(t *testing.T) {
 	tests := []struct {
-		data       interface{}
+		data         interface{}
 		expectedType string
-		want       bool
+		want         bool
 	}{
 		{map[string]interface{}{}, "object", true},
 		{[]interface{}{}, "array", true},
@@ -936,12 +936,12 @@ func TestDNSChecker_Judge_WithExpectedRecords(t *testing.T) {
 // Helper function to create test engine
 func newTestEngine(t *testing.T) *Engine {
 	opts := EngineOptions{
-		NodeID:     "test-node",
-		Region:     "test-region",
-		Store:      &mockProbeStorage{},
-		Alerter:    &mockProbeAlerter{},
-		Logger:     newTestProbeLogger(),
-		Registry:   NewCheckerRegistry(),
+		NodeID:   "test-node",
+		Region:   "test-region",
+		Store:    &mockProbeStorage{},
+		Alerter:  &mockProbeAlerter{},
+		Logger:   newTestProbeLogger(),
+		Registry: NewCheckerRegistry(),
 	}
 	return NewEngine(opts)
 }
@@ -1207,10 +1207,10 @@ func TestCircuitBreaker_StateTransitions(t *testing.T) {
 		Logger:   newTestProbeLogger(),
 		Config: EngineConfig{
 			CircuitBreaker: CircuitBreakerConfig{
-				Enabled:         true,
+				Enabled:          true,
 				FailureThreshold: 3,
 				SuccessThreshold: 2,
-				Timeout:         100 * time.Millisecond,
+				Timeout:          100 * time.Millisecond,
 			},
 		},
 	})
@@ -1359,10 +1359,10 @@ func TestEngine_Config(t *testing.T) {
 		Config: EngineConfig{
 			MaxConcurrentChecks: 50,
 			CircuitBreaker: CircuitBreakerConfig{
-				Enabled:         true,
+				Enabled:          true,
 				FailureThreshold: 10,
 				SuccessThreshold: 5,
-				Timeout:         60 * time.Second,
+				Timeout:          60 * time.Second,
 			},
 		},
 	})
@@ -1469,10 +1469,10 @@ func TestEngine_AssignSouls_RegionFiltering(t *testing.T) {
 			HTTP:    &core.HTTPConfig{Method: "GET", ValidStatus: []int{200}},
 		},
 		{
-			ID:      "soul-any",
-			Name:    "Soul Any",
-			Type:    core.CheckHTTP,
-			Target:  "https://example.com",
+			ID:     "soul-any",
+			Name:   "Soul Any",
+			Type:   core.CheckHTTP,
+			Target: "https://example.com",
 			// No Regions field - should be assigned
 			HTTP: &core.HTTPConfig{Method: "GET", ValidStatus: []int{200}},
 		},

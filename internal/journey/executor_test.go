@@ -211,9 +211,9 @@ func TestExtractRegex(t *testing.T) {
 	executor := NewExecutor(db, newTestLogger())
 
 	tests := []struct {
-		name    string
-		input   string
-		pattern string
+		name     string
+		input    string
+		pattern  string
 		expected string
 	}{
 		{
@@ -490,9 +490,9 @@ func TestExecutor_executeStep_Success(t *testing.T) {
 	executor := NewExecutor(db, newTestLogger())
 
 	step := core.JourneyStep{
-		Name:   "Test Step",
-		Type:   core.CheckHTTP,
-		Target: "https://example.com",
+		Name:    "Test Step",
+		Type:    core.CheckHTTP,
+		Target:  "https://example.com",
 		Timeout: core.Duration{Duration: 5 * time.Second},
 		HTTP: &core.HTTPConfig{
 			Method:      "GET",
@@ -566,9 +566,9 @@ func TestExecutor_executeStep_WithVariableInterpolation(t *testing.T) {
 	executor := NewExecutor(db, newTestLogger())
 
 	step := core.JourneyStep{
-		Name:   "Variable Step",
-		Type:   core.CheckHTTP,
-		Target: "https://${host}/${path}",
+		Name:    "Variable Step",
+		Type:    core.CheckHTTP,
+		Target:  "https://${host}/${path}",
 		Timeout: core.Duration{Duration: 5 * time.Second},
 		HTTP: &core.HTTPConfig{
 			Method:      "GET",
@@ -597,7 +597,7 @@ func TestExecutor_extractVariables(t *testing.T) {
 	executor := NewExecutor(db, newTestLogger())
 
 	judgment := &core.Judgment{
-		Status: core.SoulAlive,
+		Status:  core.SoulAlive,
 		Message: "OK",
 		Details: &core.JudgmentDetails{
 			ResponseBody:    `{"token": "abc123", "user": {"name": "John"}}`,

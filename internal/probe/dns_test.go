@@ -292,9 +292,9 @@ func TestDNSChecker_Judge_PropagationThreshold(t *testing.T) {
 		Type:   core.CheckDNS,
 		Target: "example.com",
 		DNS: &core.DNSConfig{
-			RecordType:          "A",
-			PropagationCheck:    true,
-			Nameservers:         []string{"8.8.8.8:53", "1.1.1.1:53", "9.9.9.9:53"},
+			RecordType:           "A",
+			PropagationCheck:     true,
+			Nameservers:          []string{"8.8.8.8:53", "1.1.1.1:53", "9.9.9.9:53"},
 			PropagationThreshold: 50, // Only need 50% propagation
 		},
 		Timeout: core.Duration{Duration: 10 * time.Second},
@@ -387,7 +387,7 @@ func TestDNSChecker_Judge_DNSSECValidate(t *testing.T) {
 		Type:   core.CheckDNS,
 		Target: "example.com",
 		DNS: &core.DNSConfig{
-			RecordType:    "A",
+			RecordType:     "A",
 			DNSSECValidate: true,
 		},
 		Timeout: core.Duration{Duration: 5 * time.Second},
@@ -414,7 +414,7 @@ func TestDNSChecker_Judge_DefaultRecordType(t *testing.T) {
 		Name:   "Test DNS",
 		Type:   core.CheckDNS,
 		Target: "example.com",
-		DNS: &core.DNSConfig{
+		DNS:    &core.DNSConfig{
 			// Empty RecordType should default to "A"
 		},
 		Timeout: core.Duration{Duration: 5 * time.Second},
@@ -460,9 +460,9 @@ func TestDNSChecker_Judge_ContextCancellation(t *testing.T) {
 		Type:   core.CheckDNS,
 		Target: "example.com",
 		DNS: &core.DNSConfig{
-			RecordType:    "A",
+			RecordType:       "A",
 			PropagationCheck: true,
-			Nameservers:     []string{"8.8.8.8:53", "1.1.1.1:53"},
+			Nameservers:      []string{"8.8.8.8:53", "1.1.1.1:53"},
 		},
 		Timeout: core.Duration{Duration: 10 * time.Second},
 	}
