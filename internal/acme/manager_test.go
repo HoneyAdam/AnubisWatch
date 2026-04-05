@@ -1986,3 +1986,34 @@ func TestTLSConfig_GetCertificate_ValidCert(t *testing.T) {
 		t.Error("Expected private key")
 	}
 }
+
+// TestObtainCertificate_ErrorPath tests the error path when ACME protocol fails
+func TestObtainCertificate_ErrorPath(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	cfg := Config{
+		Enabled:   true,
+		Provider:  ProviderLetsEncrypt,
+		Email:     "test@example.com",
+		AcceptTOS: true,
+		CertPath:  t.TempDir(),
+	}
+
+	mgr, err := NewManager(db, cfg)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	// ObtainCertificate will fail because executeACMEProtocol returns an error
+	// This tests the error handling path
+	_, err = mgr.ObtainCertificate("test.example.com")
+	if err == nil {
+		t.Error("Expected error when ACME protocol fails")
+	}
+
+	// The error should mention ACME protocol
+	if !contains(err.Error(), "ACME") {
+		t.Errorf("Expected ACME error, got: %v", err)
+	}
+}
