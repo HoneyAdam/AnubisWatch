@@ -16,8 +16,8 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the React dashboard
-RUN cd web && npm ci && npm run build
+# Build the React dashboard (if exists)
+RUN if [ -f web/package.json ]; then cd web && npm ci && npm run build; else echo "web/ directory not found, skipping dashboard build"; fi
 
 # Build the Go binary (statically linked)
 RUN CGO_ENABLED=0 GOOS=linux go build \
