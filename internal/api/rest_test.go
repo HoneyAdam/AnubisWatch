@@ -28,6 +28,7 @@ type mockStorage struct {
 	channels   map[string]*core.AlertChannel
 	rules      map[string]*core.AlertRule
 	workspaces map[string]*core.Workspace
+	journeys   map[string]*core.JourneyConfig
 }
 
 func newMockStorage() *mockStorage {
@@ -37,6 +38,7 @@ func newMockStorage() *mockStorage {
 		channels:   make(map[string]*core.AlertChannel),
 		rules:      make(map[string]*core.AlertRule),
 		workspaces: make(map[string]*core.Workspace),
+		journeys:   make(map[string]*core.JourneyConfig),
 	}
 }
 
@@ -132,7 +134,7 @@ func (m *mockStorage) ListStatusPagesNoCtx() ([]*core.StatusPage, error) {
 }
 func (m *mockStorage) SaveStatusPageNoCtx(page *core.StatusPage) error        { return nil }
 func (m *mockStorage) DeleteStatusPageNoCtx(id string) error                  { return nil }
-func (m *mockStorage) GetJourneyNoCtx(id string) (*core.JourneyConfig, error) { return nil, nil }
+func (m *mockStorage) GetJourneyNoCtx(id string) (*core.JourneyConfig, error) { return m.journeys[id], nil }
 func (m *mockStorage) ListJourneysNoCtx(ws string, offset, limit int) ([]*core.JourneyConfig, error) {
 	return nil, nil
 }
