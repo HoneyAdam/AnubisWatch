@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -133,10 +132,23 @@ func (m *mockStorage) ListStatusPagesNoCtx() ([]*core.StatusPage, error) {
 }
 func (m *mockStorage) SaveStatusPageNoCtx(page *core.StatusPage) error { return nil }
 func (m *mockStorage) DeleteStatusPageNoCtx(id string) error           { return nil }
+func (m *mockStorage) GetJourneyNoCtx(id string) (*core.JourneyConfig, error) { return nil, nil }
+func (m *mockStorage) ListJourneysNoCtx(ws string, offset, limit int) ([]*core.JourneyConfig, error) { return nil, nil }
+func (m *mockStorage) SaveJourneyNoCtx(j *core.JourneyConfig) error { return nil }
+func (m *mockStorage) DeleteJourneyNoCtx(id string) error { return nil }
 
 // mockProbeEngine implements ProbeEngine interface
 type mockProbeEngine struct {
 	souls map[string]*core.Soul
+}
+
+func (p *mockProbeEngine) AssignSouls(souls []*core.Soul) {
+	if p.souls == nil {
+		p.souls = make(map[string]*core.Soul)
+	}
+	for _, soul := range souls {
+		p.souls[soul.ID] = soul
+	}
 }
 
 func (p *mockProbeEngine) GetStatus() *core.ProbeStatus {
@@ -506,12 +518,13 @@ func TestRequireAuth_MissingToken(t *testing.T) {
 	router := &Router{routes: make(map[string]map[string]Handler)}
 
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
-		store:  storage,
-		router: router,
-		auth:   auth,
-		alert:  &mockAlertManager{},
-		logger: newTestLogger(),
+		config:     core.ServerConfig{Host: "localhost", Port: 8080},
+		authConfig: core.AuthConfig{Enabled: true},
+		store:      storage,
+		router:     router,
+		auth:       auth,
+		alert:      &mockAlertManager{},
+		logger:     newTestLogger(),
 	}
 
 	handlerCalled := false
@@ -1360,12 +1373,13 @@ func TestHandleMe(t *testing.T) {
 	storage := newMockStorage()
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config:  core.ServerConfig{Host: "localhost", Port: 8080},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		config:     core.ServerConfig{Host: "localhost", Port: 8080},
+		authConfig: core.AuthConfig{Enabled: true},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/auth/me", server.requireAuth(server.handleMe))
@@ -1552,7 +1566,7 @@ func TestNewWebSocketServer(t *testing.T) {
 	if server.clients == nil {
 		t.Error("clients map should be initialized")
 	}
-	if server.upgrader == nil {
+	if server.upgrader.ReadBufferSize == 0 {
 		t.Error("upgrader should be initialized")
 	}
 	if server.broadcast == nil {
@@ -1625,7 +1639,7 @@ func TestWebSocketServer_BroadcastStats(t *testing.T) {
 	}
 
 	// Should not panic
-	server.BroadcastStats(stats)
+	server.BroadcastStats("default", stats)
 
 	// Give time for broadcast
 	time.Sleep(10 * time.Millisecond)
@@ -1651,28 +1665,31 @@ func TestWebSocketServer_HandleConnection(t *testing.T) {
 	server.HandleConnection(w, req)
 }
 
-func TestWSUpgrader_CheckOrigin(t *testing.T) {
-	upgrader := &WSUpgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-		CheckOrigin:     func(r *http.Request) bool { return true },
+func TestWebSocketServer_GetStats(t *testing.T) {
+	logger := newTestLogger()
+	server := NewWebSocketServer(logger)
+
+	stats := server.GetStats()
+	if stats == nil {
+		t.Error("GetStats should return stats map")
 	}
 
-	req := httptest.NewRequest("GET", "http://example.com", nil)
-	result := upgrader.CheckOrigin(req)
-
-	if !result {
-		t.Error("Expected CheckOrigin to return true")
+	clientCount, ok := stats["connected_clients"].(int)
+	if !ok {
+		t.Error("connected_clients should be an int")
+	}
+	if clientCount != 0 {
+		t.Errorf("Expected 0 clients, got %d", clientCount)
 	}
 }
 
-func TestWSConn_Structure(t *testing.T) {
-	conn := &WSConn{
-		closed: false,
-	}
+func TestWebSocketServer_GetClientCount(t *testing.T) {
+	logger := newTestLogger()
+	server := NewWebSocketServer(logger)
 
-	if conn.closed {
-		t.Error("WSConn should not be closed initially")
+	count := server.GetClientCount()
+	if count != 0 {
+		t.Errorf("Expected 0 clients, got %d", count)
 	}
 }
 
@@ -1743,15 +1760,6 @@ func TestWSMessage_Structure(t *testing.T) {
 }
 
 // Additional tests for uncovered methods
-
-func TestWebSocketServer_GetStats(t *testing.T) {
-	server := NewWebSocketServer(newTestLogger())
-
-	stats := server.GetStats()
-	if stats == nil {
-		t.Error("Expected stats to be returned")
-	}
-}
 
 // REST Server handler tests for uncovered methods
 
@@ -2084,208 +2092,6 @@ func TestHandleListJudgments(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
 	}
-}
-
-// GRPC Server tests
-
-func TestNewGRPCServer(t *testing.T) {
-	logger := newTestLogger()
-	config := core.ServerConfig{Host: "localhost", Port: 9090}
-
-	server := NewGRPCServer(config, logger)
-
-	if server == nil {
-		t.Fatal("NewGRPCServer returned nil")
-	}
-	if server.config.Host != "localhost" {
-		t.Errorf("Expected Host localhost, got %s", server.config.Host)
-	}
-}
-
-func TestGRPCServer_RegisterServices(t *testing.T) {
-	logger := newTestLogger()
-	config := core.ServerConfig{Host: "localhost", Port: 9090}
-	server := NewGRPCServer(config, logger)
-
-	soulService := &mockSoulService{}
-	judgmentService := &mockJudgmentService{}
-	alertService := &mockAlertService{}
-	clusterService := &mockClusterService{}
-
-	server.RegisterServices(soulService, judgmentService, alertService, clusterService)
-
-	if server.soulService == nil {
-		t.Error("soulService should be set")
-	}
-	if server.judgmentService == nil {
-		t.Error("judgmentService should be set")
-	}
-	if server.alertService == nil {
-		t.Error("alertService should be set")
-	}
-	if server.clusterService == nil {
-		t.Error("clusterService should be set")
-	}
-}
-
-func TestGRPCServer_Start(t *testing.T) {
-	logger := newTestLogger()
-	config := core.ServerConfig{Host: "127.0.0.1", Port: 19091}
-	server := NewGRPCServer(config, logger)
-
-	err := server.Start()
-	if err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	// Give server time to start
-	time.Sleep(10 * time.Millisecond)
-
-	// Stop the server
-	ctx := context.Background()
-	server.Stop(ctx)
-}
-
-func TestGRPCServer_Stop(t *testing.T) {
-	logger := newTestLogger()
-	config := core.ServerConfig{Host: "127.0.0.1", Port: 19092}
-	server := NewGRPCServer(config, logger)
-
-	// Start server
-	err := server.Start()
-	if err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	time.Sleep(10 * time.Millisecond)
-
-	// Stop server
-	ctx := context.Background()
-	err = server.Stop(ctx)
-	if err != nil {
-		t.Errorf("Stop failed: %v", err)
-	}
-}
-
-func TestGRPCServer_Stop_NoListener(t *testing.T) {
-	logger := newTestLogger()
-	config := core.ServerConfig{Host: "localhost", Port: 9090}
-	server := NewGRPCServer(config, logger)
-
-	ctx := context.Background()
-	err := server.Stop(ctx)
-	if err != nil {
-		t.Errorf("Stop should return nil when no listener: %v", err)
-	}
-}
-
-func TestGRPCServer_isStopped(t *testing.T) {
-	logger := newTestLogger()
-	config := core.ServerConfig{Host: "localhost", Port: 9090}
-	server := NewGRPCServer(config, logger)
-
-	// Initially listener is nil, so isStopped returns true
-	// This is expected behavior
-	if !server.isStopped() {
-		t.Error("Server should be stopped initially (no listener)")
-	}
-
-	// Stop without start should be safe
-	ctx := context.Background()
-	err := server.Stop(ctx)
-	if err != nil {
-		t.Errorf("Stop should return nil when no listener: %v", err)
-	}
-
-	// Should still be stopped
-	if !server.isStopped() {
-		t.Error("Server should be stopped after Stop() without Start()")
-	}
-}
-
-func TestGRPCServer_GetStats(t *testing.T) {
-	logger := newTestLogger()
-	config := core.ServerConfig{Host: "localhost", Port: 9090}
-	server := NewGRPCServer(config, logger)
-
-	stats := server.GetStats()
-	if stats == nil {
-		t.Error("Expected stats to be returned")
-	}
-	if stats["active_connections"] != 0 {
-		t.Errorf("Expected 0 active_connections, got %v", stats["active_connections"])
-	}
-	if stats["total_requests"] != 0 {
-		t.Errorf("Expected 0 total_requests, got %v", stats["total_requests"])
-	}
-}
-
-// Mock services for GRPC tests
-
-type mockSoulService struct{}
-
-func (m *mockSoulService) ListSouls(ctx context.Context, req *ListSoulsRequest) (*ListSoulsResponse, error) {
-	return &ListSoulsResponse{}, nil
-}
-func (m *mockSoulService) GetSoul(ctx context.Context, req *GetSoulRequest) (*SoulResponse, error) {
-	return &SoulResponse{}, nil
-}
-func (m *mockSoulService) CreateSoul(ctx context.Context, req *CreateSoulRequest) (*SoulResponse, error) {
-	return &SoulResponse{}, nil
-}
-func (m *mockSoulService) UpdateSoul(ctx context.Context, req *UpdateSoulRequest) (*SoulResponse, error) {
-	return &SoulResponse{}, nil
-}
-func (m *mockSoulService) DeleteSoul(ctx context.Context, req *DeleteSoulRequest) (*DeleteResponse, error) {
-	return &DeleteResponse{}, nil
-}
-func (m *mockSoulService) ForceCheck(ctx context.Context, req *ForceCheckRequest) (*JudgmentResponse, error) {
-	return &JudgmentResponse{}, nil
-}
-
-type mockJudgmentService struct{}
-
-func (m *mockJudgmentService) GetJudgment(ctx context.Context, req *GetJudgmentRequest) (*JudgmentResponse, error) {
-	return &JudgmentResponse{}, nil
-}
-func (m *mockJudgmentService) ListJudgments(ctx context.Context, req *ListJudgmentsRequest) (*ListJudgmentsResponse, error) {
-	return &ListJudgmentsResponse{}, nil
-}
-
-type mockAlertService struct{}
-
-func (m *mockAlertService) ListChannels(ctx context.Context, req *ListChannelsRequest) (*ListChannelsResponse, error) {
-	return &ListChannelsResponse{}, nil
-}
-func (m *mockAlertService) CreateChannel(ctx context.Context, req *CreateChannelRequest) (*ChannelResponse, error) {
-	return &ChannelResponse{}, nil
-}
-func (m *mockAlertService) DeleteChannel(ctx context.Context, req *DeleteChannelRequest) (*DeleteResponse, error) {
-	return &DeleteResponse{}, nil
-}
-func (m *mockAlertService) ListRules(ctx context.Context, req *ListRulesRequest) (*ListRulesResponse, error) {
-	return &ListRulesResponse{}, nil
-}
-func (m *mockAlertService) CreateRule(ctx context.Context, req *CreateRuleRequest) (*RuleResponse, error) {
-	return &RuleResponse{}, nil
-}
-func (m *mockAlertService) DeleteRule(ctx context.Context, req *DeleteRuleRequest) (*DeleteResponse, error) {
-	return &DeleteResponse{}, nil
-}
-
-type mockClusterService struct{}
-
-func (m *mockClusterService) GetStatus(ctx context.Context, req *GetClusterStatusRequest) (*ClusterStatusResponse, error) {
-	return &ClusterStatusResponse{}, nil
-}
-func (m *mockClusterService) GetPeers(ctx context.Context, req *GetClusterPeersRequest) (*ClusterPeersResponse, error) {
-	return &ClusterPeersResponse{}, nil
-}
-func (m *mockClusterService) Join(ctx context.Context, req *JoinClusterRequest) (*JoinClusterResponse, error) {
-	return &JoinClusterResponse{}, nil
-}
-func (m *mockClusterService) Leave(ctx context.Context, req *LeaveClusterRequest) (*LeaveClusterResponse, error) {
-	return &LeaveClusterResponse{}, nil
 }
 
 // MCP Server Tests
@@ -2675,33 +2481,6 @@ func TestMCPServer_ServeHTTP_GET(t *testing.T) {
 	// Should not crash
 }
 
-// Tests for gRPC handleConnection
-func TestGRPCServer_handleConnection(t *testing.T) {
-	logger := newTestLogger()
-	server := NewGRPCServer(core.ServerConfig{Host: "127.0.0.1", Port: 0}, logger)
-
-	// Create a mock connection using net.Pipe (doesn't use TCP)
-	clientConn, serverConn := net.Pipe()
-
-	// Call handleConnection - should not panic and should close connection
-	done := make(chan bool)
-	go func() {
-		server.handleConnection(serverConn)
-		done <- true
-	}()
-
-	// Close client side to simulate disconnect
-	clientConn.Close()
-
-	// Wait for handleConnection to complete
-	select {
-	case <-done:
-		// Success - connection handled and closed
-	case <-time.After(2 * time.Second):
-		t.Error("handleConnection did not complete in time")
-	}
-}
-
 // Test handleCreateSoul with missing workspace
 func TestMCPServer_handleCreateSoul_NoWorkspace(t *testing.T) {
 	store := newMockStorage()
@@ -2786,7 +2565,7 @@ func TestWebSocketServer_BroadcastToEmptyRoom(t *testing.T) {
 
 	// Broadcast with no clients should not panic
 	server.BroadcastAlert(&core.AlertEvent{SoulID: "test-soul"})
-	server.BroadcastStats(map[string]interface{}{"test": "data"})
+	server.BroadcastStats("default", map[string]interface{}{"test": "data"})
 	server.BroadcastJudgment(&core.Judgment{SoulID: "test-soul"})
 }
 
@@ -3207,7 +2986,7 @@ func TestNewRESTServer(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, store, probe, alert, auth, cluster, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, logger)
 
 	if server == nil {
 		t.Fatal("Expected REST server to be created")
@@ -3235,7 +3014,7 @@ func TestRESTServer_StartStop(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, store, probe, alert, auth, cluster, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, logger)
 
 	// Start server in background
 	go func() {
@@ -3267,7 +3046,7 @@ func TestRESTServer_StopWithoutStart(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, store, probe, alert, auth, cluster, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, logger)
 
 	// Stop without start should return nil
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -3288,7 +3067,7 @@ func TestRESTServer_handleHealth(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, store, probe, alert, auth, cluster, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, logger)
 
 	rec := httptest.NewRecorder()
 	ctx := &Context{
@@ -3315,7 +3094,7 @@ func TestRESTServer_handleReady(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, store, probe, alert, auth, cluster, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, logger)
 
 	rec := httptest.NewRecorder()
 	ctx := &Context{
@@ -3342,7 +3121,7 @@ func TestRESTServer_handleMe(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, store, probe, alert, auth, cluster, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, logger)
 
 	rec := httptest.NewRecorder()
 	ctx := &Context{
@@ -3369,7 +3148,7 @@ func TestValidateJSONMiddleware(t *testing.T) {
 	auth := &mockAuthenticator{}
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
-	server := NewRESTServer(config, store, probe, alert, auth, cluster, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, logger)
 
 	handler := server.validateJSONMiddleware(func(ctx *Context) error {
 		return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
@@ -3455,7 +3234,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 	auth := &mockAuthenticator{}
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
-	server := NewRESTServer(config, store, probe, alert, auth, cluster, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, logger)
 
 	handler := server.rateLimitMiddleware(func(ctx *Context) error {
 		return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
@@ -3508,7 +3287,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 // TestRateLimitMiddleware_RateExceeded tests rate limiting when limit is exceeded
 func TestRateLimitMiddleware_RateExceeded(t *testing.T) {
 	store := newMockStorage()
-	server := NewRESTServer(core.ServerConfig{Port: 8080}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, newTestLogger())
+	server := NewRESTServer(core.ServerConfig{Port: 8080}, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, newTestLogger())
 
 	handler := server.rateLimitMiddleware(func(ctx *Context) error {
 		return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
@@ -3541,7 +3320,7 @@ func TestRateLimitMiddleware_RateExceeded(t *testing.T) {
 // TestHandleMCP_NotInitialized tests handleMCP when MCP server is nil
 func TestHandleMCP_NotInitialized(t *testing.T) {
 	store := newMockStorage()
-	server := NewRESTServer(core.ServerConfig{Port: 8080}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, newTestLogger())
+	server := NewRESTServer(core.ServerConfig{Port: 8080}, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, newTestLogger())
 
 	req := httptest.NewRequest("GET", "/mcp", nil)
 	rec := httptest.NewRecorder()
@@ -3551,7 +3330,7 @@ func TestHandleMCP_NotInitialized(t *testing.T) {
 	}
 
 	server.handleMCP(ctx)
-	
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("Expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
 	}
@@ -3561,7 +3340,7 @@ func TestHandleMCP_NotInitialized(t *testing.T) {
 func TestHandleMCP_Unauthorized(t *testing.T) {
 	store := newMockStorage()
 	mcpServer := NewMCPServer(store, nil, nil, newTestLogger())
-	server := NewRESTServer(core.ServerConfig{Port: 8080}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, newTestLogger())
+	server := NewRESTServer(core.ServerConfig{Port: 8080}, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, newTestLogger())
 	server.mcp = mcpServer
 
 	req := httptest.NewRequest("GET", "/mcp", nil)
@@ -3572,7 +3351,7 @@ func TestHandleMCP_Unauthorized(t *testing.T) {
 	}
 
 	server.handleMCP(ctx)
-	
+
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, rec.Code)
 	}
