@@ -29,6 +29,7 @@ import {
   BarChart,
   Bar
 } from 'recharts'
+import { EventsFeed } from '../components/EventsFeed'
 
 interface SystemStatus {
   name: string
@@ -438,6 +439,18 @@ export function Dashboard() {
                 )
               })}
             </div>
+          </div>
+
+          {/* Recent Events */}
+          <div className="bg-gradient-to-br from-gray-900 to-gray-800/50 border border-gray-700/50 rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Activity className="w-5 h-5 text-blue-400" />
+                Real-time Events
+              </h2>
+              <span className="text-xs text-gray-500">Live</span>
+            </div>
+            <EventsFeed maxEvents={5} />
           </div>
 
           {/* Recent Souls */}
