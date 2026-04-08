@@ -201,7 +201,8 @@ func (m *mockStorage) DeleteJourneyNoCtx(id string) error           { return nil
 
 // mockProbeEngine implements ProbeEngine interface
 type mockProbeEngine struct {
-	souls map[string]*core.Soul
+	souls           map[string]*core.Soul
+	forceCheckError bool
 }
 
 func (p *mockProbeEngine) AssignSouls(souls []*core.Soul) {
@@ -217,6 +218,9 @@ func (p *mockProbeEngine) GetStatus() *core.ProbeStatus {
 	return &core.ProbeStatus{Running: true, ActiveChecks: 0}
 }
 func (p *mockProbeEngine) ForceCheck(soulID string) (*core.Judgment, error) {
+	if p.forceCheckError {
+		return nil, fmt.Errorf("force check failed")
+	}
 	return &core.Judgment{ID: "judgment-1", SoulID: soulID, Status: core.SoulAlive}, nil
 }
 

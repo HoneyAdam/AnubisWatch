@@ -369,3 +369,443 @@ func TestHandleSoulLogs(t *testing.T) {
 		t.Error("Expected at least one log entry")
 	}
 }
+
+// TestHandleUpdateSoul_InvalidJSON tests update with invalid JSON
+func TestHandleUpdateSoul_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+	storage.SaveSoul(nil, &core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP})
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	// Invalid JSON body
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/souls/soul-1", bytes.NewBufferString("invalid json"))
+	ctx := &Context{
+		Request:   req,
+		Response:  rec,
+		Params:    map[string]string{"id": "soul-1"},
+		Workspace: "default",
+	}
+
+	server.handleUpdateSoul(ctx)
+	// Check response code - handlers may set error in context rather than return
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// TestHandleUpdateSoul_StorageError tests update when storage fails
+func TestHandleUpdateSoul_StorageError(t *testing.T) {
+	storage := &failingMockStorage{}
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	soul := core.Soul{Name: "Updated Soul", Type: core.CheckHTTP}
+	body, _ := json.Marshal(soul)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/souls/soul-1", bytes.NewBuffer(body))
+	ctx := &Context{
+		Request:   req,
+		Response:  rec,
+		Params:    map[string]string{"id": "soul-1"},
+		Workspace: "default",
+	}
+
+	server.handleUpdateSoul(ctx)
+	// Check response code
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+}
+
+// TestHandleForceCheck_ProbeError tests force check when probe fails
+func TestHandleForceCheck_ProbeError(t *testing.T) {
+	storage := newMockStorage()
+	storage.SaveSoul(nil, &core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP})
+
+	probe := &mockProbeEngine{forceCheckError: true}
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		probe:   probe,
+		cluster: &mockClusterManager{},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/souls/soul-1/check", nil)
+	ctx := &Context{
+		Request:  req,
+		Response: rec,
+		Params:   map[string]string{"id": "soul-1"},
+	}
+
+	server.handleForceCheck(ctx)
+	// Check response code
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+}
+
+// TestHandleListJudgments_StorageError tests listing judgments when storage fails
+func TestHandleListJudgments_StorageError(t *testing.T) {
+	storage := &failingMockStorage{}
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/souls/soul-1/judgments", nil)
+	ctx := &Context{
+		Request:  req,
+		Response: rec,
+		Params:   map[string]string{"id": "soul-1"},
+	}
+
+	server.handleListJudgments(ctx)
+	// Check response code
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+}
+
+// TestHandleCreateChannel_InvalidJSON tests creating channel with invalid JSON
+func TestHandleCreateChannel_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/channels", bytes.NewBufferString("invalid json"))
+	ctx := &Context{
+		Request:   req,
+		Response:  rec,
+		Workspace: "default",
+	}
+
+	server.handleCreateChannel(ctx)
+	// Check response code
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// TestHandleUpdateChannel_InvalidJSON tests updating channel with invalid JSON
+func TestHandleUpdateChannel_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+	storage.SaveChannelNoCtx(&core.AlertChannel{ID: "channel-1", Name: "Test Channel", Type: "email"})
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/channels/channel-1", bytes.NewBufferString("invalid json"))
+	ctx := &Context{
+		Request:   req,
+		Response:  rec,
+		Params:    map[string]string{"id": "channel-1"},
+		Workspace: "default",
+	}
+
+	server.handleUpdateChannel(ctx)
+	// Check response code
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// TestHandleCreateRule_InvalidJSON tests creating rule with invalid JSON
+func TestHandleCreateRule_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/rules", bytes.NewBufferString("invalid json"))
+	ctx := &Context{
+		Request:   req,
+		Response:  rec,
+		Workspace: "default",
+	}
+
+	server.handleCreateRule(ctx)
+	// Check response code
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// TestHandleUpdateRule_InvalidJSON tests updating rule with invalid JSON
+func TestHandleUpdateRule_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+	storage.SaveRuleNoCtx(&core.AlertRule{ID: "rule-1", Name: "Test Rule", Channels: []string{"channel-1"}})
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/rules/rule-1", bytes.NewBufferString("invalid json"))
+	ctx := &Context{
+		Request:   req,
+		Response:  rec,
+		Params:    map[string]string{"id": "rule-1"},
+		Workspace: "default",
+	}
+
+	server.handleUpdateRule(ctx)
+	// Check response code
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// TestHandleCreateWorkspace_InvalidJSON tests creating workspace with invalid JSON
+func TestHandleCreateWorkspace_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/workspaces", bytes.NewBufferString("invalid json"))
+	ctx := &Context{
+		Request:  req,
+		Response: rec,
+	}
+
+	server.handleCreateWorkspace(ctx)
+	// Check response code
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// TestHandleCreateStatusPage_InvalidJSON tests creating status page with invalid JSON
+func TestHandleCreateStatusPage_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/status-pages", bytes.NewBufferString("invalid json"))
+	ctx := &Context{
+		Request:   req,
+		Response:  rec,
+		Workspace: "default",
+	}
+
+	server.handleCreateStatusPage(ctx)
+	// Check response code
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// TestHandleUpdateStatusPage_InvalidJSON tests updating status page with invalid JSON
+func TestHandleUpdateStatusPage_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("PUT", "/api/status-pages/page-1", bytes.NewBufferString("invalid json"))
+	ctx := &Context{
+		Request:   req,
+		Response:  rec,
+		Params:    map[string]string{"id": "page-1"},
+		Workspace: "default",
+	}
+
+	server.handleUpdateStatusPage(ctx)
+	// Check response code
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// TestHandleClusterStatus_NotLeader tests cluster status when not leader
+func TestHandleClusterStatus_NotLeader(t *testing.T) {
+	storage := newMockStorage()
+
+	cluster := &mockClusterManager{}
+	cluster.isLeader = false
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: cluster,
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/cluster/status", nil)
+	ctx := &Context{
+		Request:  req,
+		Response: rec,
+	}
+
+	err := server.handleClusterStatus(ctx)
+	if err != nil {
+		t.Fatalf("handleClusterStatus failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+// TestHandleClusterPeers_NotLeader tests cluster peers when not leader
+func TestHandleClusterPeers_NotLeader(t *testing.T) {
+	storage := newMockStorage()
+
+	cluster := &mockClusterManager{}
+	cluster.isLeader = false
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: cluster,
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/cluster/peers", nil)
+	ctx := &Context{
+		Request:  req,
+		Response: rec,
+	}
+
+	server.handleClusterPeers(ctx)
+	// This handler doesn't check for leader status, it just returns peer info
+	// The actual API might require leader in real implementation
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+// TestHandleListChannels_StorageError tests listing channels when storage fails
+func TestHandleListChannels_StorageError(t *testing.T) {
+	// Note: This handler uses s.alert.ListChannels(), not store
+	// Skipping as it requires alert manager setup
+	t.Skip("Skipped - handler uses alert manager, not storage")
+}
+
+// TestHandleListRules_StorageError tests listing rules when storage fails
+func TestHandleListRules_StorageError(t *testing.T) {
+	// Note: This handler uses s.alert.ListRules(), not store
+	// Skipping as it requires alert manager setup
+	t.Skip("Skipped - handler uses alert manager, not storage")
+}
+
+// TestHandleListWorkspaces_StorageError tests listing workspaces when storage fails
+func TestHandleListWorkspaces_StorageError(t *testing.T) {
+	storage := &failingMockStorage{}
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/workspaces", nil)
+	ctx := &Context{
+		Request:  req,
+		Response: rec,
+	}
+
+	server.handleListWorkspaces(ctx)
+	// Check response code
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+}
+
+// TestHandleListStatusPages_StorageError tests listing status pages when storage fails
+func TestHandleListStatusPages_StorageError(t *testing.T) {
+	storage := &failingMockStorage{}
+
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/status-pages", nil)
+	ctx := &Context{
+		Request:  req,
+		Response: rec,
+	}
+
+	server.handleListStatusPages(ctx)
+	// Check response code
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+}
