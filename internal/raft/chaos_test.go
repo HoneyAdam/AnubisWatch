@@ -1,368 +1,403 @@
 package raft
 
-// Chaos testing for Raft consensus
+// Real chaos tests for Raft consensus
 // These tests verify cluster resilience under various failure scenarios
 
 import (
 	"fmt"
-	"os"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
 
-// ChaosTestRunner manages chaos test scenarios
-type ChaosTestRunner struct {
-	nodes     []*Node
-	transports []*TestTransport
-	mu        sync.RWMutex
-	stopCh    chan struct{}
-	stopped   atomic.Bool
-}
+// createChaosTestCluster creates a multi-node cluster for chaos testing
+func createChaosTestCluster(t *testing.T, nodeCount int) ([]*Node, func()) {
+	nodes := make([]*Node, nodeCount)
+	cleanups := make([]func(), nodeCount)
 
-// TestTransport wraps Transport for chaos testing
-type TestTransport struct {
-	id          string
-	partitioned bool
-	delay       time.Duration
-	dropRate    float64 // 0.0 - 1.0
-	mu          sync.RWMutex
-}
+	for i := 0; i < nodeCount; i++ {
+		cfg := core.RaftConfig{
+			NodeID:           fmt.Sprintf("chaos-node-%d", i),
+			BindAddr:         fmt.Sprintf("127.0.0.1:%d", 17000+i),
+			AdvertiseAddr:    fmt.Sprintf("127.0.0.1:%d", 17000+i),
+			Bootstrap:        i == 0, // First node bootstraps
+			ElectionTimeout:  core.Duration{Duration: 200 * time.Millisecond},
+			HeartbeatTimeout: core.Duration{Duration: 100 * time.Millisecond},
+			CommitTimeout:    core.Duration{Duration: 50 * time.Millisecond},
+			MaxAppendEntries: 64,
+		}
 
-// NewChaosTestRunner creates a chaos test runner
-func NewChaosTestRunner() *ChaosTestRunner {
-	return &ChaosTestRunner{
-		nodes:      make([]*Node, 0),
-		transports: make([]*TestTransport, 0),
-		stopCh:     make(chan struct{}),
-	}
-}
-
-// AddNode adds a node to the chaos test
-func (c *ChaosTestRunner) AddNode(node *Node, transport *TestTransport) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.nodes = append(c.nodes, node)
-	c.transports = append(c.transports, transport)
-}
-
-// PartitionNetwork simulates network partition between node groups
-func (c *ChaosTestRunner) PartitionNetwork(group1 []string, group2 []string) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	// Mark transports as partitioned
-	for _, t := range c.transports {
-		inGroup1 := false
-		inGroup2 := false
-		for _, id := range group1 {
-			if t.id == id {
-				inGroup1 = true
-				break
+		// Add peers for all nodes
+		if i > 0 {
+			cfg.Peers = []core.RaftPeer{
+				{ID: "chaos-node-0", Address: "127.0.0.1:17000", Region: "default", Role: core.RoleVoter},
 			}
 		}
-		for _, id := range group2 {
-			if t.id == id {
-				inGroup2 = true
-				break
-			}
+
+		storage := NewInMemoryLogStore()
+		snapshot := NewInMemorySnapshotStore()
+		fsm := NewStorageFSM(NewInMemoryStorage())
+
+		node, err := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+		if err != nil {
+			t.Fatalf("Failed to create chaos test node %d: %v", i, err)
 		}
-		// Partition if in different groups
-		if inGroup1 || inGroup2 {
-			t.mu.Lock()
-			t.partitioned = true
-			t.mu.Unlock()
+
+		nodes[i] = node
+		cleanups[i] = func(n *Node) func() {
+			return func() { n.Stop() }
+		}(node)
+	}
+
+	cleanup := func() {
+		for _, c := range cleanups {
+			c()
 		}
 	}
+
+	return nodes, cleanup
 }
 
-// HealNetwork heals all network partitions
-func (c *ChaosTestRunner) HealNetwork() {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+// waitForLeader waits for a leader to be elected in the cluster
+func waitForLeader(t *testing.T, nodes []*Node, timeout time.Duration) *Node {
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
 
-	for _, t := range c.transports {
-		t.mu.Lock()
-		t.partitioned = false
-		t.mu.Unlock()
-	}
-}
-
-// KillNode stops a node and removes it from the cluster
-func (c *ChaosTestRunner) KillNode(nodeID string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for i, node := range c.nodes {
-		if node.nodeID == nodeID {
-			node.Stop()
-			// Remove from list
-			c.nodes = append(c.nodes[:i], c.nodes[i+1:]...)
-			c.transports = append(c.transports[:i], c.transports[i+1:]...)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("Timeout waiting for leader election after %v", timeout)
 			return nil
-		}
-	}
-	return fmt.Errorf("node %s not found", nodeID)
-}
-
-// RestartNode restarts a killed node
-func (c *ChaosTestRunner) RestartNode(nodeID string) error {
-	// Implementation would recreate and restart the node
-	return nil
-}
-
-// InjectLatency adds artificial latency to all network operations
-func (c *ChaosTestRunner) InjectLatency(duration time.Duration) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	for _, t := range c.transports {
-		t.mu.Lock()
-		t.delay = duration
-		t.mu.Unlock()
-	}
-}
-
-// InjectPacketLoss simulates packet loss
-func (c *ChaosTestRunner) InjectPacketLoss(rate float64) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	for _, t := range c.transports {
-		t.mu.Lock()
-		t.dropRate = rate
-		t.mu.Unlock()
-	}
-}
-
-// Stop stops the chaos test runner
-func (c *ChaosTestRunner) Stop() {
-	if c.stopped.CompareAndSwap(false, true) {
-		close(c.stopCh)
-		c.mu.RLock()
-		defer c.mu.RUnlock()
-
-		for _, node := range c.nodes {
-			node.Stop()
+		case <-ticker.C:
+			for _, node := range nodes {
+				if node.IsLeader() {
+					return node
+				}
+			}
 		}
 	}
 }
 
-// VerifyClusterHealth checks if the cluster is healthy
-func (c *ChaosTestRunner) VerifyClusterHealth() (bool, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+// waitForAllNodes waits for all nodes to see the leader
+func waitForAllNodes(t *testing.T, nodes []*Node, timeout time.Duration) {
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 
-	if len(c.nodes) == 0 {
-		return false, fmt.Errorf("no nodes in cluster")
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("Timeout waiting for all nodes to sync")
+		case <-ticker.C:
+			allHaveLeader := true
+			for _, node := range nodes {
+				if node.LeaderID() == "" {
+					allHaveLeader = false
+					break
+				}
+			}
+			if allHaveLeader {
+				return
+			}
+		}
 	}
+}
 
-	// Check if there's a leader
-	hasLeader := false
-	for _, node := range c.nodes {
+// countLeaders returns the number of nodes that think they are leader
+func countLeaders(nodes []*Node) int {
+	count := 0
+	for _, node := range nodes {
 		if node.IsLeader() {
-			hasLeader = true
+			count++
+		}
+	}
+	return count
+}
+
+// countActiveNodes returns the number of running nodes
+func countActiveNodes(nodes []*Node) int {
+	count := 0
+	for _, node := range nodes {
+		if node.running.Load() {
+			count++
+		}
+	}
+	return count
+}
+
+// TestChaos_SingleNodeFailure_Real tests cluster survives single node failure
+func TestChaos_SingleNodeFailure_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping chaos test in short mode")
+	}
+
+	nodes, cleanup := createChaosTestCluster(t, 5)
+	defer cleanup()
+
+	// Start all nodes
+	for i, node := range nodes {
+		if err := node.Start(); err != nil {
+			t.Fatalf("Failed to start node %d: %v", i, err)
+		}
+	}
+
+	// Wait for leader election
+	leader := waitForLeader(t, nodes, 5*time.Second)
+	t.Logf("Leader elected: %s", leader.nodeID)
+
+	// Wait for all nodes to see the leader
+	waitForAllNodes(t, nodes, 3*time.Second)
+
+	// Find a non-leader node to kill
+	killIndex := -1
+	for i, node := range nodes {
+		if !node.IsLeader() {
+			killIndex = i
+			break
+		}
+	}
+	if killIndex == -1 {
+		t.Fatal("Could not find non-leader node to kill")
+	}
+
+	t.Logf("Killing node: %s", nodes[killIndex].nodeID)
+	nodes[killIndex].Stop()
+
+	// Wait a bit
+	time.Sleep(1 * time.Second)
+
+	// Verify we still have a leader
+	newLeader := waitForLeader(t, nodes, 5*time.Second)
+	t.Logf("Leader after kill: %s", newLeader.nodeID)
+
+	// Verify only one leader
+	leaderCount := countLeaders(nodes)
+	if leaderCount != 1 {
+		t.Errorf("Expected 1 leader, got %d", leaderCount)
+	}
+
+	t.Log("✅ Single node failure test passed")
+}
+
+// TestChaos_LeaderFailure_Real tests cluster survives leader failure
+func TestChaos_LeaderFailure_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping chaos test in short mode")
+	}
+
+	nodes, cleanup := createChaosTestCluster(t, 5)
+	defer cleanup()
+
+	// Start all nodes
+	for i, node := range nodes {
+		if err := node.Start(); err != nil {
+			t.Fatalf("Failed to start node %d: %v", i, err)
+		}
+	}
+
+	// Wait for leader election
+	oldLeader := waitForLeader(t, nodes, 5*time.Second)
+	t.Logf("Initial leader: %s", oldLeader.nodeID)
+
+	// Wait for stability
+	waitForAllNodes(t, nodes, 3*time.Second)
+
+	// Kill the leader
+	t.Logf("Killing leader: %s", oldLeader.nodeID)
+	oldLeader.Stop()
+
+	// Wait for new leader election
+	newLeader := waitForLeader(t, nodes, 5*time.Second)
+	t.Logf("New leader elected: %s", newLeader.nodeID)
+
+	if newLeader.nodeID == oldLeader.nodeID {
+		t.Error("New leader should be different from old leader")
+	}
+
+	// Verify only one leader
+	leaderCount := countLeaders(nodes)
+	if leaderCount != 1 {
+		t.Errorf("Expected 1 leader, got %d", leaderCount)
+	}
+
+	t.Log("✅ Leader failure test passed")
+}
+
+// TestChaos_MultipleNodeFailures_Real tests cluster survives losing quorum
+func TestChaos_MultipleNodeFailures_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping chaos test in short mode")
+	}
+
+	// 5 nodes, kill 2 (keep quorum)
+	nodes, cleanup := createChaosTestCluster(t, 5)
+	defer cleanup()
+
+	// Start all nodes
+	for i, node := range nodes {
+		if err := node.Start(); err != nil {
+			t.Fatalf("Failed to start node %d: %v", i, err)
+		}
+	}
+
+	// Wait for leader
+	waitForLeader(t, nodes, 5*time.Second)
+	waitForAllNodes(t, nodes, 3*time.Second)
+
+	// Kill 2 non-leader nodes
+	killed := 0
+	for _, node := range nodes {
+		if !node.IsLeader() && killed < 2 {
+			t.Logf("Killing node: %s", node.nodeID)
+			node.Stop()
+			killed++
+		}
+	}
+
+	// Wait a bit
+	time.Sleep(1 * time.Second)
+
+	// Should still have a leader
+	var leaderFound *Node
+	for _, node := range nodes {
+		if node.IsLeader() && node.running.Load() {
+			leaderFound = node
 			break
 		}
 	}
 
-	if !hasLeader {
-		return false, fmt.Errorf("no leader elected")
+	if leaderFound == nil {
+		t.Error("Should have a leader after killing 2 nodes (quorum maintained)")
+	} else {
+		t.Logf("Leader still active: %s", leaderFound.nodeID)
 	}
 
-	return true, nil
+	t.Log("✅ Multiple node failures test passed")
 }
 
-// VerifyLogConsistency ensures all nodes have consistent logs
-func (c *ChaosTestRunner) VerifyLogConsistency() error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if len(c.nodes) == 0 {
-		return nil
+// TestChaos_LeaderElectionSpeed_Real measures leader election time
+func TestChaos_LeaderElectionSpeed_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping chaos test in short mode")
 	}
 
-	// Get log from first node as reference
-	referenceLog := c.nodes[0].log
-	referenceTerm := c.nodes[0].currentTerm
+	nodes, cleanup := createChaosTestCluster(t, 3)
+	defer cleanup()
 
-	for i, node := range c.nodes[1:] {
-		if node.currentTerm != referenceTerm {
-			return fmt.Errorf("node %d has different term: %d vs %d",
-				i+1, node.currentTerm, referenceTerm)
+	// Start first node (bootstrap)
+	if err := nodes[0].Start(); err != nil {
+		t.Fatalf("Failed to start bootstrap node: %v", err)
+	}
+
+	// Bootstrap node becomes leader immediately
+	time.Sleep(100 * time.Millisecond)
+	if !nodes[0].IsLeader() {
+		t.Error("Bootstrap node should be leader")
+	}
+
+	// Start other nodes
+	startTime := time.Now()
+	for i := 1; i < len(nodes); i++ {
+		if err := nodes[i].Start(); err != nil {
+			t.Fatalf("Failed to start node %d: %v", i, err)
 		}
+	}
 
-		if len(node.log) != len(referenceLog) {
-			return fmt.Errorf("node %d has different log length: %d vs %d",
-				i+1, len(node.log), len(referenceLog))
+	// Wait for all nodes to see the leader
+	waitForAllNodes(t, nodes, 3*time.Second)
+	elapsed := time.Since(startTime)
+
+	t.Logf("Leader election completed in %v", elapsed)
+	if elapsed > 2*time.Second {
+		t.Errorf("Leader election took too long: %v", elapsed)
+	}
+
+	t.Log("✅ Leader election speed test passed")
+}
+
+// TestChaos_TermConsistency_Real ensures all nodes agree on term
+func TestChaos_TermConsistency_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping chaos test in short mode")
+	}
+
+	nodes, cleanup := createChaosTestCluster(t, 3)
+	defer cleanup()
+
+	// Start all nodes
+	for i, node := range nodes {
+		if err := node.Start(); err != nil {
+			t.Fatalf("Failed to start node %d: %v", i, err)
 		}
+	}
 
-		// Check log entries match
-		for j, entry := range node.log {
-			if j >= len(referenceLog) {
-				break
+	// Wait for leader
+	waitForLeader(t, nodes, 5*time.Second)
+	waitForAllNodes(t, nodes, 3*time.Second)
+
+	// Wait a bit for terms to sync
+	time.Sleep(500 * time.Millisecond)
+
+	// Check term consistency
+	var maxTerm uint64
+	for _, node := range nodes {
+		if node.currentTerm > maxTerm {
+			maxTerm = node.currentTerm
+		}
+	}
+
+	// All nodes should have the same term (or close to it)
+	termMismatch := false
+	for _, node := range nodes {
+		if node.running.Load() && node.currentTerm < maxTerm {
+			t.Logf("Node %s has term %d, expected %d", node.nodeID, node.currentTerm, maxTerm)
+			termMismatch = true
+		}
+	}
+
+	if termMismatch {
+		t.Error("Term inconsistency detected")
+	}
+
+	t.Logf("All nodes at term %d", maxTerm)
+	t.Log("✅ Term consistency test passed")
+}
+
+// TestChaos_SplitVote_Real tests split vote scenario
+func TestChaos_SplitVote_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping chaos test in short mode")
+	}
+
+	// Start with 2 nodes (even number, can cause split votes)
+	nodes, cleanup := createChaosTestCluster(t, 2)
+	defer cleanup()
+
+	// Start both nodes simultaneously
+	var wg sync.WaitGroup
+	for i, node := range nodes {
+		wg.Add(1)
+		go func(idx int, n *Node) {
+			defer wg.Done()
+			if err := n.Start(); err != nil {
+				t.Errorf("Failed to start node %d: %v", idx, err)
 			}
-			refEntry := referenceLog[j]
-			if entry.Term != refEntry.Term || entry.Index != refEntry.Index {
-				return fmt.Errorf("node %d log entry %d mismatch: term=%d/%d index=%d/%d",
-					i+1, j, entry.Term, refEntry.Term, entry.Index, refEntry.Index)
-			}
-		}
+		}(i, node)
+	}
+	wg.Wait()
+
+	// Wait for leader (may take longer with 2 nodes)
+	leader := waitForLeader(t, nodes, 10*time.Second)
+	t.Logf("Leader elected despite split vote risk: %s", leader.nodeID)
+
+	// Verify only one leader
+	leaderCount := countLeaders(nodes)
+	if leaderCount != 1 {
+		t.Errorf("Expected 1 leader, got %d", leaderCount)
 	}
 
-	return nil
-}
-
-// === Chaos Test Scenarios ===
-
-// TestChaos_SingleNodeFailure tests cluster survives single node failure
-func TestChaos_SingleNodeFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping chaos test in short mode")
-	}
-
-	runner := NewChaosTestRunner()
-	defer runner.Stop()
-
-	// Create 5-node cluster (would need actual setup)
-	// This is a template for the test
-
-	t.Log("Chaos test: Single node failure")
-	t.Log("1. Start 5-node cluster")
-	t.Log("2. Wait for leader election")
-	t.Log("3. Kill one non-leader node")
-	t.Log("4. Verify cluster still has leader")
-	t.Log("5. Verify operations continue")
-	t.Log("6. Restart killed node")
-	t.Log("7. Verify node rejoins and catches up")
-}
-
-// TestChaos_LeaderFailure tests cluster survives leader failure
-func TestChaos_LeaderFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping chaos test in short mode")
-	}
-
-	t.Log("Chaos test: Leader failure")
-	t.Log("1. Start 5-node cluster")
-	t.Log("2. Wait for leader election")
-	t.Log("3. Kill leader node")
-	t.Log("4. Verify new leader elected within timeout")
-	t.Log("5. Verify operations continue")
-	t.Log("6. Restart old leader")
-	t.Log("7. Verify it rejoins as follower")
-}
-
-// TestChaos_NetworkPartition tests cluster handles network partition
-func TestChaos_LeaderPartition(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping chaos test in short mode")
-	}
-
-	t.Log("Chaos test: Leader network partition")
-	t.Log("1. Start 5-node cluster")
-	t.Log("2. Wait for leader election")
-	t.Log("3. Partition leader from majority (2 nodes)")
-	t.Log("4. Verify minority partition elects new leader")
-	t.Log("5. Verify majority partition is available")
-	t.Log("6. Heal partition")
-	t.Log("7. Verify leader steps down if needed")
-	t.Log("8. Verify log consistency across cluster")
-}
-
-// TestChaos_MultipleNodeFailures tests cluster survives multiple failures
-func TestChaos_MultipleNodeFailures(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping chaos test in short mode")
-	}
-
-	t.Log("Chaos test: Multiple node failures")
-	t.Log("1. Start 5-node cluster")
-	t.Log("2. Kill 2 nodes (maintain quorum)")
-	t.Log("3. Verify cluster remains available")
-	t.Log("4. Kill 1 more (lose quorum)")
-	t.Log("5. Verify cluster stops processing writes")
-	t.Log("6. Restart nodes to restore quorum")
-	t.Log("7. Verify cluster becomes available again")
-}
-
-// TestChaos_MembershipChange tests cluster handles membership changes
-func TestChaos_MembershipChange(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping chaos test in short mode")
-	}
-
-	t.Log("Chaos test: Membership changes")
-	t.Log("1. Start 3-node cluster")
-	t.Log("2. Add 2 new nodes via joint consensus")
-	t.Log("3. Verify cluster scales to 5 nodes")
-	t.Log("4. Remove 2 nodes via joint consensus")
-	t.Log("5. Verify cluster shrinks to 3 nodes")
-	t.Log("6. Verify log consistency throughout")
-}
-
-// TestChaos_HighLatency tests cluster handles high latency
-func TestChaos_HighLatency(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping chaos test in short mode")
-	}
-
-	t.Log("Chaos test: High latency network")
-	t.Log("1. Start 5-node cluster with normal latency")
-	t.Log("2. Inject 100ms latency between nodes")
-	t.Log("3. Verify leader election still works (slower)")
-	t.Log("4. Verify log replication completes")
-	t.Log("5. Restore normal latency")
-	t.Log("6. Verify cluster performance recovers")
-}
-
-// TestChaos_PacketLoss tests cluster handles packet loss
-func TestChaos_PacketLoss(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping chaos test in short mode")
-	}
-
-	t.Log("Chaos test: Packet loss")
-	t.Log("1. Start 5-node cluster")
-	t.Log("2. Inject 10% packet loss")
-	t.Log("3. Verify cluster remains stable")
-	t.Log("4. Increase to 25% packet loss")
-	t.Log("5. Verify cluster may degrade but not corrupt")
-	t.Log("6. Remove packet loss")
-	t.Log("7. Verify cluster recovers")
-}
-
-// TestChaos_CombinedScenarios tests multiple failures simultaneously
-func TestChaos_CombinedScenarios(t *testing.T) {
-	if os.Getenv("RUN_FULL_CHAOS") == "" {
-		t.Skip("Skipping full chaos test. Set RUN_FULL_CHAOS=1 to run")
-	}
-
-	t.Log("Chaos test: Combined scenarios (long running)")
-	t.Log("1. Run cluster for 10 minutes")
-	t.Log("2. Randomly inject failures:")
-	t.Log("   - Node kills/restarts")
-	t.Log("   - Network partitions")
-	t.Log("   - Latency spikes")
-	t.Log("   - Packet loss")
-	t.Log("3. Verify cluster integrity throughout")
-	t.Log("4. Verify no data loss")
-	t.Log("5. Verify eventual consistency")
-}
-
-// === Benchmarks ===
-
-// BenchmarkRaftLeaderElection measures leader election time
-func BenchmarkRaftLeaderElection(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		// Would measure time from node start to leader election
-	}
-}
-
-// BenchmarkRaftLogReplication measures log replication throughput
-func BenchmarkRaftLogReplication(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		// Would measure entries replicated per second
-	}
+	t.Log("✅ Split vote test passed")
 }

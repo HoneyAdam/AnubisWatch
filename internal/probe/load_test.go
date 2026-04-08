@@ -1,63 +1,56 @@
 package probe
 
-// Load testing for probe engine
-// Validates performance at scale: 1000 souls target
+// Real load tests for probe engine
+// Validates performance at scale: 100/500/1000 souls
 
 import (
 	"context"
 	"fmt"
-	"sync"
-	"sync/atomic"
+	"net/http"
+	"net/http/httptest"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
 
-// LoadTestRunner manages load test scenarios
-type LoadTestRunner struct {
-	engine      *Engine
-	souls       []*core.Soul
-	results     *LoadTestResults
-	stopCh      chan struct{}
-	ctx         context.Context
-	cancel      context.CancelFunc
+// createMockServer creates an HTTP server for load testing
+func createMockLoadServer(responseDelay time.Duration) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if responseDelay > 0 {
+			time.Sleep(responseDelay)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status": "ok", "timestamp": "2024-01-01T00:00:00Z"}`))
+	}))
 }
 
-// LoadTestResults tracks load test metrics
-type LoadTestResults struct {
-	TotalChecks      atomic.Int64
-	SuccessfulChecks atomic.Int64
-	FailedChecks     atomic.Int64
-	TotalDuration    atomic.Int64 // nanoseconds
-	MinDuration      atomic.Int64 // nanoseconds
-	MaxDuration      atomic.Int64 // nanoseconds
-	Errors           []error
-	mu               sync.RWMutex
-}
+// createLoadEngine creates an engine configured for load testing
+func createLoadEngine() *Engine {
+	registry := NewCheckerRegistry()
+	registry.Register(NewHTTPChecker())
+	registry.Register(NewTCPChecker())
+	registry.Register(NewDNSChecker())
 
-// NewLoadTestRunner creates a load test runner
-func NewLoadTestRunner(engine *Engine) *LoadTestRunner {
-	ctx, cancel := context.WithCancel(context.Background())
-	runner := &LoadTestRunner{
-		engine:  engine,
-		souls:   make([]*core.Soul, 0),
-		results: &LoadTestResults{
-			Errors: make([]error, 0),
-		},
-		stopCh: make(chan struct{}),
-		ctx:    ctx,
-		cancel: cancel,
+	opts := EngineOptions{
+		Registry:   registry,
+		NodeID:     "load-test-node",
+		Region:     "load-test",
+		Logger:     nil,
+		Config:     DefaultEngineConfig(),
 	}
-	runner.results.MinDuration.Store(1<<63 - 1)
-	return runner
+	opts.Config.MaxConcurrentChecks = 100
+
+	return NewEngine(opts)
 }
 
-// CreateHTTPSouls creates HTTP check souls for load testing
-func (r *LoadTestRunner) CreateHTTPSouls(count int, targetURL string) {
+// createHTTPSouls creates HTTP check souls for load testing
+func createHTTPSouls(count int, targetURL string) []*core.Soul {
+	souls := make([]*core.Soul, count)
 	for i := 0; i < count; i++ {
-		soul := &core.Soul{
-			ID:      fmt.Sprintf("load-test-http-%d", i),
+		souls[i] = &core.Soul{
+			ID:      fmt.Sprintf("load-http-%d", i),
 			Name:    fmt.Sprintf("Load Test HTTP %d", i),
 			Type:    core.CheckHTTP,
 			Target:  targetURL,
@@ -68,33 +61,34 @@ func (r *LoadTestRunner) CreateHTTPSouls(count int, targetURL string) {
 				ValidStatus: []int{200},
 			},
 		}
-		r.souls = append(r.souls, soul)
 	}
+	return souls
 }
 
-// CreateTCPSouls creates TCP check souls for load testing
-func (r *LoadTestRunner) CreateTCPSouls(count int, target string) {
+// createTCPSouls creates TCP check souls for load testing
+func createTCPSouls(count int, target string) []*core.Soul {
+	souls := make([]*core.Soul, count)
 	for i := 0; i < count; i++ {
-		soul := &core.Soul{
-			ID:      fmt.Sprintf("load-test-tcp-%d", i),
+		souls[i] = &core.Soul{
+			ID:      fmt.Sprintf("load-tcp-%d", i),
 			Name:    fmt.Sprintf("Load Test TCP %d", i),
 			Type:    core.CheckTCP,
 			Target:  target,
 			Weight:  core.Duration{Duration: 60 * time.Second},
 			Timeout: core.Duration{Duration: 10 * time.Second},
 		}
-		r.souls = append(r.souls, soul)
 	}
+	return souls
 }
 
-// CreateMixedSouls creates a mix of different check types
-func (r *LoadTestRunner) CreateMixedSouls(count int, httpURL, tcpTarget string) {
+// createMixedSouls creates a mix of different check types
+func createMixedSouls(count int, httpURL string) []*core.Soul {
+	souls := make([]*core.Soul, count)
 	for i := 0; i < count; i++ {
-		var soul *core.Soul
-		if i%3 == 0 {
-			// HTTP checks
-			soul = &core.Soul{
-				ID:      fmt.Sprintf("load-test-mixed-http-%d", i),
+		switch i % 3 {
+		case 0:
+			souls[i] = &core.Soul{
+				ID:      fmt.Sprintf("load-mixed-http-%d", i),
 				Name:    fmt.Sprintf("Load Test Mixed HTTP %d", i),
 				Type:    core.CheckHTTP,
 				Target:  httpURL,
@@ -105,20 +99,18 @@ func (r *LoadTestRunner) CreateMixedSouls(count int, httpURL, tcpTarget string) 
 					ValidStatus: []int{200},
 				},
 			}
-		} else if i%3 == 1 {
-			// TCP checks
-			soul = &core.Soul{
-				ID:      fmt.Sprintf("load-test-mixed-tcp-%d", i),
+		case 1:
+			souls[i] = &core.Soul{
+				ID:      fmt.Sprintf("load-mixed-tcp-%d", i),
 				Name:    fmt.Sprintf("Load Test Mixed TCP %d", i),
 				Type:    core.CheckTCP,
-				Target:  tcpTarget,
+				Target:  "localhost:80",
 				Weight:  core.Duration{Duration: 60 * time.Second},
 				Timeout: core.Duration{Duration: 10 * time.Second},
 			}
-		} else {
-			// DNS checks
-			soul = &core.Soul{
-				ID:      fmt.Sprintf("load-test-mixed-dns-%d", i),
+		default:
+			souls[i] = &core.Soul{
+				ID:      fmt.Sprintf("load-mixed-dns-%d", i),
 				Name:    fmt.Sprintf("Load Test Mixed DNS %d", i),
 				Type:    core.CheckDNS,
 				Target:  "anubis.watch",
@@ -126,216 +118,337 @@ func (r *LoadTestRunner) CreateMixedSouls(count int, httpURL, tcpTarget string) 
 				Timeout: core.Duration{Duration: 10 * time.Second},
 				DNS: &core.DNSConfig{
 					RecordType: "A",
-					Expected:   []string{"127.0.0.1"},
 				},
 			}
 		}
-		r.souls = append(r.souls, soul)
+	}
+	return souls
+}
+
+// getMemoryStats returns current memory usage
+func getMemoryStats() runtime.MemStats {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m
+}
+
+// TestLoad_100Souls_Real tests with 100 souls
+func TestLoad_100Souls_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping load test in short mode")
+	}
+
+	server := createMockLoadServer(10 * time.Millisecond)
+	defer server.Close()
+
+	engine := createLoadEngine()
+	defer engine.Stop()
+
+	souls := createHTTPSouls(100, server.URL)
+
+	// Record initial memory
+	memBefore := getMemoryStats()
+	startTime := time.Now()
+
+	// Assign souls
+	engine.AssignSouls(souls)
+
+	// Wait for first check cycle
+	time.Sleep(2 * time.Second)
+
+	elapsed := time.Since(startTime)
+	memAfter := getMemoryStats()
+	memUsed := memAfter.Alloc - memBefore.Alloc
+
+	status := engine.GetStatus()
+
+	t.Logf("✅ 100 souls loaded in %v", elapsed)
+	t.Logf("   Active checks: %d", status.ActiveChecks)
+	t.Logf("   Memory used: %d KB", memUsed/1024)
+	t.Logf("   Goroutines: %d", status.ChecksRunning)
+
+	if status.ActiveChecks != 100 {
+		t.Errorf("Expected 100 active checks, got %d", status.ActiveChecks)
+	}
+
+	// Verify no major memory leak
+	if memUsed > 100*1024*1024 { // 100MB
+		t.Errorf("High memory usage: %d MB", memUsed/1024/1024)
 	}
 }
 
-// Start assigns souls to engine and starts monitoring
-func (r *LoadTestRunner) Start() error {
-	if len(r.souls) == 0 {
-		return fmt.Errorf("no souls created for load test")
+// TestLoad_500Souls_Real tests with 500 souls
+func TestLoad_500Souls_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping load test in short mode")
 	}
-	r.engine.AssignSouls(r.souls)
-	return nil
+
+	server := createMockLoadServer(5 * time.Millisecond)
+	defer server.Close()
+
+	engine := createLoadEngine()
+	defer engine.Stop()
+
+	souls := createHTTPSouls(500, server.URL)
+
+	memBefore := getMemoryStats()
+	startTime := time.Now()
+
+	engine.AssignSouls(souls)
+
+	// Wait for stabilization
+	time.Sleep(3 * time.Second)
+
+	elapsed := time.Since(startTime)
+	memAfter := getMemoryStats()
+	memUsed := memAfter.Alloc - memBefore.Alloc
+
+	status := engine.GetStatus()
+
+	t.Logf("✅ 500 souls loaded in %v", elapsed)
+	t.Logf("   Active checks: %d", status.ActiveChecks)
+	t.Logf("   Memory used: %d KB", memUsed/1024)
+	t.Logf("   Total checks: %d", status.TotalChecks)
+
+	if status.ActiveChecks != 500 {
+		t.Errorf("Expected 500 active checks, got %d", status.ActiveChecks)
+	}
+
+	// Should have executed some checks
+	if status.TotalChecks < 500 {
+		t.Errorf("Expected at least 500 total checks, got %d", status.TotalChecks)
+	}
 }
 
-// WaitForChecks waits for specified number of checks to complete
-func (r *LoadTestRunner) WaitForChecks(minChecks int, timeout time.Duration) bool {
-	deadline := time.After(timeout)
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
+// TestLoad_1000Souls_Real tests with 1000 souls (production target)
+func TestLoad_1000Souls_Real(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping load test in short mode")
+	}
 
-	for {
-		select {
-		case <-deadline:
-			return false
-		case <-ticker.C:
-			if int(r.results.TotalChecks.Load()) >= minChecks {
-				return true
-			}
+	server := createMockLoadServer(2 * time.Millisecond)
+	defer server.Close()
+
+	engine := createLoadEngine()
+	defer engine.Stop()
+
+	souls := createHTTPSouls(1000, server.URL)
+
+	memBefore := getMemoryStats()
+	startTime := time.Now()
+
+	engine.AssignSouls(souls)
+
+	// Wait for checks to execute
+	time.Sleep(5 * time.Second)
+
+	elapsed := time.Since(startTime)
+	memAfter := getMemoryStats()
+	memUsed := memAfter.Alloc - memBefore.Alloc
+
+	status := engine.GetStatus()
+
+	t.Logf("✅ 1000 souls loaded in %v", elapsed)
+	t.Logf("   Active checks: %d", status.ActiveChecks)
+	t.Logf("   Memory used: %d MB", memUsed/1024/1024)
+	t.Logf("   Total checks: %d", status.TotalChecks)
+	t.Logf("   Failed checks: %d", status.FailedChecks)
+	t.Logf("   Checks running: %d", status.ChecksRunning)
+
+	// Validate production targets
+	if status.ActiveChecks != 1000 {
+		t.Errorf("Expected 1000 active checks, got %d", status.ActiveChecks)
+	}
+
+	// Memory should be reasonable (< 500MB for 1000 souls)
+	if memUsed > 500*1024*1024 {
+		t.Errorf("High memory usage: %d MB (target < 500MB)", memUsed/1024/1024)
+	}
+
+	// Should execute many checks
+	if status.TotalChecks < 1000 {
+		t.Errorf("Expected at least 1000 total checks, got %d", status.TotalChecks)
+	}
+
+	// Failure rate should be low (< 5%)
+	if status.TotalChecks > 0 {
+		failRate := float64(status.FailedChecks) / float64(status.TotalChecks) * 100
+		if failRate > 5 {
+			t.Errorf("High failure rate: %.2f%% (target < 5%%)", failRate)
 		}
+		t.Logf("   Failure rate: %.2f%%", failRate)
 	}
 }
 
-// Stop stops the load test and cleanup
-func (r *LoadTestRunner) Stop() {
-	r.cancel()
-	close(r.stopCh)
-	r.engine.Stop()
-}
-
-// GetResults returns load test results
-func (r *LoadTestRunner) GetResults() LoadTestMetrics {
-	return LoadTestMetrics{
-		TotalChecks:      r.results.TotalChecks.Load(),
-		SuccessfulChecks: r.results.SuccessfulChecks.Load(),
-		FailedChecks:     r.results.FailedChecks.Load(),
-		TotalDuration:    time.Duration(r.results.TotalDuration.Load()),
-		MinDuration:      time.Duration(r.results.MinDuration.Load()),
-		MaxDuration:      time.Duration(r.results.MaxDuration.Load()),
-		AvgDuration:      time.Duration(r.results.TotalDuration.Load() / r.results.TotalChecks.Load()),
-		SuccessRate:      float64(r.results.SuccessfulChecks.Load()) / float64(r.results.TotalChecks.Load()) * 100,
-	}
-}
-
-// LoadTestMetrics provides analyzed load test results
-type LoadTestMetrics struct {
-	TotalChecks      int64
-	SuccessfulChecks int64
-	FailedChecks     int64
-	TotalDuration    time.Duration
-	MinDuration      time.Duration
-	MaxDuration      time.Duration
-	AvgDuration      time.Duration
-	SuccessRate      float64
-}
-
-// === Load Test Scenarios ===
-
-// TestLoad_100Souls tests with 100 souls
-func TestLoad_100Souls(t *testing.T) {
+// TestLoad_MixedTypes_Real tests with mixed check types
+func TestLoad_MixedTypes_Real(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping load test in short mode")
 	}
 
-	t.Log("Load test: 100 souls")
-	t.Log("Target: Verify basic performance with 100 concurrent checks")
-	t.Log("Expected: All checks complete, <1s average response time")
+	server := createMockLoadServer(5 * time.Millisecond)
+	defer server.Close()
+
+	engine := createLoadEngine()
+	defer engine.Stop()
+
+	souls := createMixedSouls(300, server.URL)
+
+	startTime := time.Now()
+	engine.AssignSouls(souls)
+
+	time.Sleep(3 * time.Second)
+
+	elapsed := time.Since(startTime)
+	status := engine.GetStatus()
+
+	t.Logf("✅ 300 mixed souls loaded in %v", elapsed)
+	t.Logf("   Active checks: %d", status.ActiveChecks)
+	t.Logf("   Total checks: %d", status.TotalChecks)
+
+	if status.ActiveChecks != 300 {
+		t.Errorf("Expected 300 active checks, got %d", status.ActiveChecks)
+	}
 }
 
-// TestLoad_500Souls tests with 500 souls
-func TestLoad_500Souls(t *testing.T) {
+// TestLoad_ScaleUpDown_Real tests scaling up and down
+func TestLoad_ScaleUpDown_Real(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping load test in short mode")
 	}
 
-	t.Log("Load test: 500 souls")
-	t.Log("Target: Verify performance with 500 concurrent checks")
-	t.Log("Expected: All checks complete, <2s average response time")
+	server := createMockLoadServer(5 * time.Millisecond)
+	defer server.Close()
+
+	engine := createLoadEngine()
+	defer engine.Stop()
+
+	// Start with 100 souls
+	souls100 := createHTTPSouls(100, server.URL)
+	engine.AssignSouls(souls100)
+	time.Sleep(1 * time.Second)
+
+	status := engine.GetStatus()
+	t.Logf("Phase 1 - 100 souls: Active=%d", status.ActiveChecks)
+
+	// Scale to 500
+	souls500 := createHTTPSouls(500, server.URL)
+	engine.AssignSouls(souls500)
+	time.Sleep(2 * time.Second)
+
+	status = engine.GetStatus()
+	t.Logf("Phase 2 - 500 souls: Active=%d", status.ActiveChecks)
+
+	// Scale down to 200
+	souls200 := createHTTPSouls(200, server.URL)
+	engine.AssignSouls(souls200)
+	time.Sleep(2 * time.Second)
+
+	status = engine.GetStatus()
+	t.Logf("Phase 3 - 200 souls: Active=%d", status.ActiveChecks)
+
+	if status.ActiveChecks != 200 {
+		t.Errorf("Expected 200 active checks after scale down, got %d", status.ActiveChecks)
+	}
+
+	t.Log("✅ Scale up/down test passed")
 }
 
-// TestLoad_1000Souls tests with 1000 souls (main production target)
-func TestLoad_1000Souls(t *testing.T) {
+// TestLoad_ConcurrentChecks_Real tests concurrent execution
+func TestLoad_ConcurrentChecks_Real(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping load test in short mode")
 	}
 
-	t.Log("Load test: 1000 souls")
-	t.Log("Target: Verify production performance target")
-	t.Log("Expected: All checks complete, <3s average response time")
-	t.Log("Metrics to capture:")
-	t.Log("  - Memory usage growth")
-	t.Log("  - Goroutine count")
-	t.Log("  - Check latency distribution (p50, p95, p99)")
-	t.Log("  - Circuit breaker activation rate")
-}
+	// Slow server to create concurrent load
+	server := createMockLoadServer(100 * time.Millisecond)
+	defer server.Close()
 
-// TestLoad_MixedTypes tests with mixed check types
-func TestLoad_MixedTypes(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping load test in short mode")
-	}
+	engine := createLoadEngine()
+	defer engine.Stop()
 
-	t.Log("Load test: 1000 souls (mixed types)")
-	t.Log("Mix: 33% HTTP, 33% TCP, 33% DNS")
-	t.Log("Target: Verify performance with mixed workload")
-	t.Log("Expected: All checks complete, no type-specific degradation")
-}
+	// Create many souls that will check concurrently
+	souls := createHTTPSouls(200, server.URL)
+	engine.AssignSouls(souls)
 
-// TestLoad_Sustained tests sustained load over time
-func TestLoad_Sustained10Minutes(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping load test in short mode")
-	}
+	// Wait for concurrent execution
+	time.Sleep(2 * time.Second)
 
-	t.Log("Load test: Sustained 1000 souls for 10 minutes")
-	t.Log("Target: Verify stability over extended period")
-	t.Log("Expected:")
-	t.Log("  - No memory leaks")
-	t.Log("  - Consistent check latency")
-	t.Log("  - No goroutine leaks")
-	t.Log("  - CPU usage stable")
-}
+	status := engine.GetStatus()
 
-// TestLoad_Burst tests burst handling
-func TestLoad_Burst(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping load test in short mode")
-	}
+	t.Logf("✅ Concurrent execution test")
+	t.Logf("   Active checks: %d", status.ActiveChecks)
+	t.Logf("   Checks running: %d", status.ChecksRunning)
+	t.Logf("   Total checks: %d", status.TotalChecks)
 
-	t.Log("Load test: Burst to 2000 souls")
-	t.Log("Scenario: Scale from 1000 to 2000 souls instantly")
-	t.Log("Expected:")
-	t.Log("  - Graceful handling of burst")
-	t.Log("  - Semaphore limits respected")
-	t.Log("  - No deadlocks")
-	t.Log("  - Scale back to 1000 successfully")
-}
-
-// TestLoad_CircuitBreakerStress tests circuit breaker under load
-func TestLoad_CircuitBreakerStress(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping load test in short mode")
-	}
-
-	t.Log("Load test: Circuit breaker stress")
-	t.Log("Scenario: 1000 souls with 50% failing")
-	t.Log("Expected:")
-	t.Log("  - Circuit breakers activate appropriately")
-	t.Log("  - No race conditions")
-	t.Log("  - Recovery when failures stop")
-	t.Log("  - System remains stable")
-}
-
-// TestLoad_ConcurrentModifications tests concurrent soul modifications
-func TestLoad_ConcurrentModifications(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping load test in short mode")
-	}
-
-	t.Log("Load test: Concurrent soul modifications")
-	t.Log("Scenario: Modify 100 souls per second while checking 1000")
-	t.Log("Expected:")
-	t.Log("  - No race conditions")
-	t.Log("  - Consistent state")
-	t.Log("  - No crashes")
-}
-
-// === Benchmarks ===
-
-// BenchmarkEngine_10Souls benchmarks with 10 souls
-func BenchmarkEngine_10Souls(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		// Would run 10 souls for benchmark
+	// Should have some concurrent execution
+	if status.ChecksRunning > 50 {
+		t.Logf("   Good concurrency: %d checks running simultaneously", status.ChecksRunning)
 	}
 }
 
-// BenchmarkEngine_100Souls benchmarks with 100 souls
-func BenchmarkEngine_100Souls(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		// Would run 100 souls for benchmark
+// BenchmarkEngine_Small benchmarks with small load
+func BenchmarkEngine_Small(b *testing.B) {
+	server := createMockLoadServer(1 * time.Millisecond)
+	defer server.Close()
+
+	engine := createLoadEngine()
+	defer engine.Stop()
+
+	souls := createHTTPSouls(10, server.URL)
+	engine.AssignSouls(souls)
+
+	b.ResetTimer()
+	for b.Loop() {
+		_ = engine.GetStatus()
 	}
 }
 
-// BenchmarkEngine_1000Souls benchmarks with 1000 souls
-func BenchmarkEngine_1000Souls(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		// Would run 1000 souls for benchmark
+// BenchmarkEngine_Medium benchmarks with medium load
+func BenchmarkEngine_Medium(b *testing.B) {
+	server := createMockLoadServer(1 * time.Millisecond)
+	defer server.Close()
+
+	engine := createLoadEngine()
+	defer engine.Stop()
+
+	souls := createHTTPSouls(100, server.URL)
+	engine.AssignSouls(souls)
+
+	b.ResetTimer()
+	for b.Loop() {
+		_ = engine.GetStatus()
 	}
 }
 
-// BenchmarkChecker_HTTP benchmarks HTTP checker
-func BenchmarkChecker_HTTP(b *testing.B) {
+// BenchmarkEngine_Large benchmarks with large load
+func BenchmarkEngine_Large(b *testing.B) {
+	server := createMockLoadServer(1 * time.Millisecond)
+	defer server.Close()
+
+	engine := createLoadEngine()
+	defer engine.Stop()
+
+	souls := createHTTPSouls(1000, server.URL)
+	engine.AssignSouls(souls)
+
+	b.ResetTimer()
+	for b.Loop() {
+		_ = engine.GetStatus()
+	}
+}
+
+// BenchmarkHTTPChecker benchmarks HTTP checker performance
+func BenchmarkHTTPChecker_Real(b *testing.B) {
+	server := createMockLoadServer(0)
+	defer server.Close()
+
 	checker := NewHTTPChecker()
 	soul := &core.Soul{
 		ID:     "bench-http",
 		Name:   "Benchmark HTTP",
 		Type:   core.CheckHTTP,
-		Target: "http://localhost:8080/health",
+		Target: server.URL,
 		HTTP: &core.HTTPConfig{
 			Method:      "GET",
 			ValidStatus: []int{200},
@@ -344,36 +457,36 @@ func BenchmarkChecker_HTTP(b *testing.B) {
 
 	ctx := context.Background()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = checker.Judge(ctx, soul)
 	}
 }
 
-// BenchmarkChecker_TCP benchmarks TCP checker
-func BenchmarkChecker_TCP(b *testing.B) {
+// BenchmarkTCPChecker benchmarks TCP checker performance
+func BenchmarkTCPChecker_Real(b *testing.B) {
 	checker := NewTCPChecker()
 	soul := &core.Soul{
 		ID:     "bench-tcp",
 		Name:   "Benchmark TCP",
 		Type:   core.CheckTCP,
-		Target: "localhost:80",
+		Target: "8.8.8.8:53", // Google DNS
 	}
 
 	ctx := context.Background()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = checker.Judge(ctx, soul)
 	}
 }
 
-// BenchmarkChecker_DNS benchmarks DNS checker
-func BenchmarkChecker_DNS(b *testing.B) {
+// BenchmarkDNSChecker benchmarks DNS checker performance
+func BenchmarkDNSChecker_Real(b *testing.B) {
 	checker := NewDNSChecker()
 	soul := &core.Soul{
 		ID:     "bench-dns",
 		Name:   "Benchmark DNS",
 		Type:   core.CheckDNS,
-		Target: "anubis.watch",
+		Target: "google.com",
 		DNS: &core.DNSConfig{
 			RecordType: "A",
 		},
@@ -381,27 +494,7 @@ func BenchmarkChecker_DNS(b *testing.B) {
 
 	ctx := context.Background()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = checker.Judge(ctx, soul)
 	}
-}
-
-// === Performance Profiling Helpers ===
-
-// ProfileMemory captures memory profile during load test
-func ProfileMemory(t *testing.T, duration time.Duration) {
-	t.Logf("Capturing memory profile for %v...", duration)
-	// Would capture and log memory stats
-}
-
-// ProfileCPU captures CPU profile during load test
-func ProfileCPU(t *testing.T, duration time.Duration) {
-	t.Logf("Capturing CPU profile for %v...", duration)
-	// Would capture and log CPU stats
-}
-
-// ProfileGoroutines captures goroutine count during load test
-func ProfileGoroutines(t *testing.T, duration time.Duration) {
-	t.Logf("Capturing goroutine profile for %v...", duration)
-	// Would capture and log goroutine stats
 }
