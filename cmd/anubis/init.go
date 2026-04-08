@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -11,19 +13,6 @@ import (
 	"strings"
 	"time"
 )
-
-// initInteractive runs interactive configuration wizard
-func initInteractive() {
-	configPath := "../anubis.json"
-	// Check for --output flag
-	for i, arg := range os.Args {
-		if (arg == "--output" || arg == "-o") && i+1 < len(os.Args) {
-			configPath = os.Args[i+1]
-			break
-		}
-	}
-	initInteractiveWithPath(configPath)
-}
 
 // initInteractiveWithPath runs interactive wizard with specific config path
 func initInteractiveWithPath(configPath string) {
@@ -173,7 +162,10 @@ func initInteractiveWithPath(configPath string) {
 	})
 
 	// Write config file
-	configPath = "anubis.json"
+	// Use the provided configPath parameter (don't overwrite it)
+	if configPath == "" {
+		configPath = "anubis.json"
+	}
 	if _, err := os.Stat(configPath); err == nil {
 		overwrite := askBool(reader, fmt.Sprintf("%s already exists. Overwrite?", configPath), false)
 		if !overwrite {
@@ -442,14 +434,24 @@ func generateSecurePassword() string {
 	length := 16
 	result := make([]byte, length)
 	for i := range result {
-		result[i] = chars[time.Now().UnixNano()%int64(len(chars))]
-		time.Sleep(1 * time.Nanosecond)
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		if err != nil {
+			// Fallback to time-based (should never happen with crypto/rand)
+			result[i] = chars[time.Now().UnixNano()%int64(len(chars))]
+			continue
+		}
+		result[i] = chars[n.Int64()]
 	}
 	return string(result)
 }
 
 func randomSuffix() string {
-	return fmt.Sprintf("%04d", time.Now().UnixNano()%10000)
+	n, err := rand.Int(rand.Reader, big.NewInt(10000))
+	if err != nil {
+		// Fallback (should never happen)
+		return fmt.Sprintf("%04d", time.Now().UnixNano()%10000)
+	}
+	return fmt.Sprintf("%04d", n.Int64())
 }
 
 func maskPassword(pass string) string {

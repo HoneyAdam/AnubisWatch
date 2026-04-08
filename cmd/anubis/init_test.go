@@ -119,12 +119,12 @@ func TestFindAvailablePort(t *testing.T) {
 // TestIsPortInUse tests isPortInUse function
 func TestIsPortInUse(t *testing.T) {
 	// Test with port 0 (should be invalid/in use)
-	inUse := isPortInUse(0)
+	_ = isPortInUse(0)
 	// Port 0 is special, behavior may vary
 
 	// Test with a high port that's likely not in use
 	highPort := 45000
-	inUse = isPortInUse(highPort)
+	inUse := isPortInUse(highPort)
 	if inUse {
 		t.Logf("Port %d appears to be in use (may be system dependent)", highPort)
 	}

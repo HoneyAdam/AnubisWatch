@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/acme"
@@ -20,7 +19,6 @@ type Handler struct {
 	repository    Repository
 	acmeManager   *acme.Manager
 	templateCache map[string]*Template
-	cacheMu       sync.RWMutex
 	defaultTheme  core.StatusPageTheme
 }
 

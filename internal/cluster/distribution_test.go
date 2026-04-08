@@ -92,6 +92,61 @@ func TestDistributor_checkAndRebalance(t *testing.T) {
 	d.checkAndRebalance()
 }
 
+func TestDistributor_checkAndRebalance_SingleNode(t *testing.T) {
+	d := NewDistributor("node-1", "us-east", StrategyRoundRobin, newTestLogger())
+
+	// Register only one node
+	d.RegisterNode("node-1", "us-east")
+
+	// Assign some souls
+	for i := 0; i < 5; i++ {
+		soul := &core.Soul{ID: fmt.Sprintf("soul-%d", i), Name: "Test Soul"}
+		d.AssignSoul(soul)
+	}
+
+	// Should return early without error (less than 2 nodes)
+	d.checkAndRebalance()
+
+	// Verify souls are still assigned
+	souls := d.GetSoulsForNode("node-1")
+	if len(souls) != 5 {
+		t.Errorf("Expected 5 souls, got %d", len(souls))
+	}
+}
+
+func TestDistributor_checkAndRebalance_NoRebalanceNeeded(t *testing.T) {
+	d := NewDistributor("node-1", "us-east", StrategyRoundRobin, newTestLogger())
+
+	// Register nodes
+	d.RegisterNode("node-1", "us-east")
+	d.RegisterNode("node-2", "us-west")
+
+	// Assign equal number of souls to both nodes by manipulating
+	for i := 0; i < 4; i++ {
+		soul := &core.Soul{ID: fmt.Sprintf("soul-%d", i), Name: "Test Soul"}
+		d.AssignSoul(soul)
+	}
+
+	// Balance is roughly even, so no rebalance should occur
+	d.checkAndRebalance()
+}
+
+func TestDistributor_checkAndRebalance_NoHealthyNodes(t *testing.T) {
+	d := NewDistributor("node-1", "us-east", StrategyRoundRobin, newTestLogger())
+
+	// Register nodes but mark them unhealthy
+	d.RegisterNode("node-1", "us-east")
+	d.RegisterNode("node-2", "us-west")
+
+	d.mu.Lock()
+	d.nodeLoads["node-1"].Healthy = false
+	d.nodeLoads["node-2"].Healthy = false
+	d.mu.Unlock()
+
+	// Should return early when no healthy nodes
+	d.checkAndRebalance()
+}
+
 func TestDistributor_executeMove(t *testing.T) {
 	d := NewDistributor("node-1", "us-east", StrategyRoundRobin, newTestLogger())
 
@@ -284,6 +339,40 @@ func TestDistributor_ReassignSoul(t *testing.T) {
 
 	// Note: The new assignment might be the same node if it's still the best choice
 	t.Logf("Original: %s, New: %s", originalNode, newNode)
+}
+
+func TestDistributor_ReassignSoul_NotAssigned(t *testing.T) {
+	d := NewDistributor("node-1", "us-east", StrategyRoundRobin, newTestLogger())
+
+	d.RegisterNode("node-1", "us-east")
+
+	// Try to reassign a soul that was never assigned
+	err := d.ReassignSoul("non-existent-soul")
+	if err == nil {
+		t.Error("Expected error when reassigning unassigned soul")
+	}
+}
+
+func TestDistributor_ReassignSoul_NoHealthyNodes(t *testing.T) {
+	d := NewDistributor("node-1", "us-east", StrategyRoundRobin, newTestLogger())
+
+	d.RegisterNode("node-1", "us-east")
+
+	soul := &core.Soul{
+		ID:   "soul-1",
+		Name: "Test Soul",
+	}
+
+	d.AssignSoul(soul)
+
+	// Unregister the only node (marks it unhealthy)
+	d.UnregisterNode("node-1")
+
+	// Try to reassign - should fail since no healthy nodes
+	err := d.ReassignSoul("soul-1")
+	if err == nil {
+		t.Error("Expected error when reassigning with no healthy nodes")
+	}
 }
 
 func TestDistributor_GetSoulsForNode(t *testing.T) {

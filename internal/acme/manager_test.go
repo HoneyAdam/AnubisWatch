@@ -2217,7 +2217,7 @@ func TestManager_ObtainCertificate_Cached(t *testing.T) {
 		t.Errorf("GetCertificate failed: %v", err)
 	}
 	if cert == nil {
-		t.Error("Expected cached certificate")
+		t.Fatal("Expected cached certificate")
 	}
 	if cert.Domain != "cached.example.com" {
 		t.Errorf("Expected domain cached.example.com, got %s", cert.Domain)

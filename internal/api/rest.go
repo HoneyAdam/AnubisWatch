@@ -17,7 +17,6 @@ import (
 // RESTServer implements the HTTP REST API
 // The scribes record the judgments on papyrus scrolls
 type RESTServer struct {
-	mu         sync.RWMutex
 	config     core.ServerConfig
 	authConfig core.AuthConfig
 	router     *Router

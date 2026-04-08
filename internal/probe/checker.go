@@ -91,11 +91,6 @@ func RegisterChecker(c Checker) {
 	globalRegistry.Register(c)
 }
 
-// baseChecker provides common utilities for all checkers
-type baseChecker struct {
-	checkType core.CheckType
-}
-
 // failJudgment creates a failed judgment with the given error
 func failJudgment(soul *core.Soul, err error) *core.Judgment {
 	return &core.Judgment{

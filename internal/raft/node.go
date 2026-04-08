@@ -1,12 +1,10 @@
 package raft
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,9 +26,7 @@ type Node struct {
 	mu          sync.RWMutex
 	state       core.RaftState
 	currentTerm uint64
-	preVoteTerm uint64 // Term for pre-vote (separate from currentTerm)
 	votedFor    string
-	preVotedFor string // Candidate we pre-voted for
 	log         []core.RaftLogEntry
 	commitIndex uint64
 	lastApplied uint64
@@ -89,14 +85,10 @@ type Peer struct {
 	Address      string
 	Region       string
 	Role         core.RaftRole
-	conn         net.Conn
-	tlsConn      *tls.Conn
 	nextIndex    uint64
 	matchIndex   uint64
 	lastContact  time.Time
 	heartbeatRTT time.Duration
-	inflight     atomic.Uint64
-	mu           sync.RWMutex
 }
 
 // applyFuture represents a future result of applying a command

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -43,6 +44,9 @@ func (s *RESTServer) handleCreateJourney(ctx *Context) error {
 func (s *RESTServer) handleGetJourney(ctx *Context) error {
 	id := ctx.Params["id"]
 	journey, err := s.store.GetJourneyNoCtx(id)
+	if err == nil && journey == nil {
+		err = fmt.Errorf("journey not found")
+	}
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "journey not found")
 	}
@@ -82,6 +86,9 @@ func (s *RESTServer) handleRunJourney(ctx *Context) error {
 	id := ctx.Params["id"]
 
 	journey, err := s.store.GetJourneyNoCtx(id)
+	if err == nil && journey == nil {
+		err = fmt.Errorf("journey not found")
+	}
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "journey not found")
 	}

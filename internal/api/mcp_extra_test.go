@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -338,5 +339,70 @@ func TestMCPServer_handleGetPrompt_UnknownPrompt(t *testing.T) {
 	// Should return error for unknown prompt
 	if resp.Error == nil {
 		t.Error("Expected error for unknown prompt")
+	}
+}
+
+// Test handleReadResource with error from handler
+func TestMCPServer_handleReadResource_HandlerError(t *testing.T) {
+	store := newMockStorage()
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	// Register a resource that returns error
+	server.RegisterResource(MCPResource{
+		URI:         "test://error",
+		Name:        "Error Resource",
+		Description: "A resource that returns error",
+		Handler: func() (interface{}, error) {
+			return nil, fmt.Errorf("resource handler error")
+		},
+	})
+
+	req := &MCPRequest{
+		ID:     1,
+		Method: "resources/read",
+		Params: json.RawMessage(`{"uri": "test://error"}`),
+	}
+	resp := server.handleReadResource(req)
+	if resp == nil {
+		t.Fatal("Expected non-nil response")
+	}
+	if resp.Error == nil {
+		t.Error("Expected error response")
+	}
+}
+
+// Test handleGetPrompt with handler error
+func TestMCPServer_handleGetPrompt_HandlerError(t *testing.T) {
+	store := newMockStorage()
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	// Register a prompt that returns error
+	server.RegisterPrompt(MCPPrompt{
+		Name:        "error_prompt",
+		Description: "A prompt that returns error",
+		Handler: func(args map[string]string) (string, error) {
+			return "", fmt.Errorf("prompt handler error")
+		},
+	})
+
+	req := &MCPRequest{
+		ID:     1,
+		Method: "prompts/get",
+		Params: json.RawMessage(`{"name": "error_prompt", "arguments": {}}`),
+	}
+	resp := server.handleGetPrompt(req)
+	if resp == nil {
+		t.Fatal("Expected non-nil response")
+	}
+	if resp.Error == nil {
+		t.Error("Expected error response")
 	}
 }

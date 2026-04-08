@@ -1330,7 +1330,6 @@ func TestCircuitBreaker_RecordFailure(t *testing.T) {
 // Test semaphore concurrency limiting
 func TestEngine_Semaphore_ConcurrencyLimit(t *testing.T) {
 	const maxConcurrent = 3
-	const totalSouls = 5
 
 	registry := NewCheckerRegistry()
 	engine := NewEngine(EngineOptions{

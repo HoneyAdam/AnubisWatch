@@ -30,7 +30,7 @@ func (s *RESTServer) buildSystemMetrics() string {
 
 	metrics := "# HELP anubis_build_info Build information\n"
 	metrics += "# TYPE anubis_build_info gauge\n"
-	metrics += fmt.Sprintf("anubis_build_info{version=\"dev\"} 1\n")
+	metrics += "anubis_build_info{version=\"dev\"} 1\n"
 
 	metrics += "# HELP anubis_memory_alloc_bytes Allocated memory in bytes\n"
 	metrics += "# TYPE anubis_memory_alloc_bytes gauge\n"

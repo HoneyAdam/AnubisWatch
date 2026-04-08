@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -71,6 +72,44 @@ func (m *mockStorage) GetJudgmentNoCtx(id string) (*core.Judgment, error) {
 func (m *mockStorage) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error) {
 	return []*core.Judgment{}, nil
 }
+func (m *mockStorage) SaveJudgment(ctx context.Context, j *core.Judgment) error {
+	m.judgments[j.ID] = j
+	return nil
+}
+
+// failingMockStorage is a mock that always returns errors
+type failingMockStorage struct{}
+
+func (m *failingMockStorage) GetSoulNoCtx(id string) (*core.Soul, error)                         { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) ListSoulsNoCtx(ws string, offset, limit int) ([]*core.Soul, error)   { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) SaveSoul(ctx context.Context, soul *core.Soul) error                { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) DeleteSoul(ctx context.Context, id string) error                    { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) GetJudgmentNoCtx(id string) (*core.Judgment, error)                 { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error) {
+	return nil, fmt.Errorf("storage error")
+}
+func (m *failingMockStorage) SaveJudgment(ctx context.Context, j *core.Judgment) error          { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) GetChannelNoCtx(id string) (*core.AlertChannel, error)             { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) ListChannelsNoCtx(ws string) ([]*core.AlertChannel, error)         { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) SaveChannelNoCtx(ch *core.AlertChannel) error                      { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) DeleteChannelNoCtx(id string) error                               { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) GetRuleNoCtx(id string) (*core.AlertRule, error)                   { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) ListRulesNoCtx(ws string) ([]*core.AlertRule, error)               { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) SaveRuleNoCtx(rule *core.AlertRule) error                          { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) DeleteRuleNoCtx(id string) error                                   { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) GetWorkspaceNoCtx(id string) (*core.Workspace, error)              { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) ListWorkspacesNoCtx() ([]*core.Workspace, error)                   { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) SaveWorkspaceNoCtx(ws *core.Workspace) error                       { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) DeleteWorkspaceNoCtx(id string) error                             { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) GetJourneyNoCtx(id string) (*core.JourneyConfig, error)            { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) ListJourneysNoCtx(ws string, offset, limit int) ([]*core.JourneyConfig, error) { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) SaveJourneyNoCtx(j *core.JourneyConfig) error                      { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) DeleteJourneyNoCtx(id string) error                               { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) GetStatsNoCtx(workspace string, start, end time.Time) (*core.Stats, error) { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) GetStatusPageNoCtx(id string) (*core.StatusPage, error)           { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) ListStatusPagesNoCtx() ([]*core.StatusPage, error)                 { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) SaveStatusPageNoCtx(page *core.StatusPage) error                   { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) DeleteStatusPageNoCtx(id string) error                            { return fmt.Errorf("storage error") }
 func (m *mockStorage) GetChannelNoCtx(id string) (*core.AlertChannel, error) {
 	return m.channels[id], nil
 }
@@ -198,9 +237,18 @@ func (a *mockAuthenticator) Login(email, password string) (*User, string, error)
 func (a *mockAuthenticator) Logout(token string) error { return nil }
 
 // mockClusterManager implements ClusterManager interface
-type mockClusterManager struct{}
+type mockClusterManager struct {
+	isLeader bool
+}
 
-func (m *mockClusterManager) IsLeader() bool    { return true }
+func (m *mockClusterManager) IsLeader() bool {
+	// If isLeader field exists and is false, return false
+	// Otherwise default to true
+	if m != nil {
+		return m.isLeader
+	}
+	return true
+}
 func (m *mockClusterManager) Leader() string    { return "test-node" }
 func (m *mockClusterManager) IsClustered() bool { return false }
 func (m *mockClusterManager) GetStatus() *ClusterStatus {
@@ -3403,4 +3451,31 @@ func TestOnJudgmentCallback_WithWebSocket(t *testing.T) {
 		Status: core.SoulAlive,
 	}
 	callback(judgment)
+}
+
+// TestHandleCreateSoul_InvalidJSON tests handleCreateSoul with invalid JSON
+func TestHandleCreateSoul_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   storage,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/api/v1/souls", server.requireAuth(server.handleCreateSoul))
+
+	req := httptest.NewRequest("POST", "/api/v1/souls", strings.NewReader("invalid json"))
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
 }

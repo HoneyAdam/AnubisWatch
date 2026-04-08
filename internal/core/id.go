@@ -132,26 +132,6 @@ func ParseULID(s string) (ULID, error) {
 // Crockford's Base32 alphabet (lowercase for encoding, uppercase accepted for decoding)
 const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-var ulidDecodeTable = func() map[byte]byte {
-	table := make(map[byte]byte)
-	for i := 0; i < len(ulidAlphabet); i++ {
-		c := ulidAlphabet[i]
-		table[c] = byte(i)
-		// Accept lowercase equivalents
-		if c >= 'A' && c <= 'Z' {
-			table[c+32] = byte(i)
-		}
-	}
-	// Accept I, L, O as aliases for 1, 1, 0 (per Crockford)
-	table['I'] = table['1']
-	table['i'] = table['1']
-	table['L'] = table['1']
-	table['l'] = table['1']
-	table['O'] = table['0']
-	table['o'] = table['0']
-	return table
-}()
-
 // ulidEncode encodes 16 bytes to 26 Crockford Base32 characters.
 func ulidEncode(src []byte) string {
 	if len(src) != 16 {

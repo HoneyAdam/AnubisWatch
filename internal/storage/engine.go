@@ -52,9 +52,6 @@ const (
 
 	// Maximum B+Tree order
 	maxBTreeOrder = 256
-
-	// Key separator for namespacing
-	keySeparator = "/"
 )
 
 // writeAheadLog provides crash recovery

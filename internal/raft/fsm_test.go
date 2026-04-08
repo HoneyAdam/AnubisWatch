@@ -965,10 +965,6 @@ func TestInMemorySnapshotSink_CloseIdempotent(t *testing.T) {
 	}
 }
 
-func mustMarshal(v interface{}) []byte {
-	data, _ := json.Marshal(v)
-	return data
-}
 
 func timeoutChan(d time.Duration) <-chan struct{} {
 	ch := make(chan struct{})
