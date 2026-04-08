@@ -70,7 +70,24 @@ func (m *mockStorage) GetJudgmentNoCtx(id string) (*core.Judgment, error) {
 	return m.judgments[id], nil
 }
 func (m *mockStorage) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error) {
-	return []*core.Judgment{}, nil
+	var result []*core.Judgment
+	for _, j := range m.judgments {
+		if j.SoulID == soulID && j.Timestamp.After(start) && j.Timestamp.Before(end) {
+			result = append(result, j)
+		}
+	}
+	// Sort by timestamp descending (newest first)
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[i].Timestamp.Before(result[j].Timestamp) {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
 }
 func (m *mockStorage) SaveJudgment(ctx context.Context, j *core.Judgment) error {
 	m.judgments[j.ID] = j
