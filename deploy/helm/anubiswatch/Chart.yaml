@@ -1,0 +1,17 @@
+apiVersion: v2
+name: anubiswatch
+description: AnubisWatch - Zero-dependency uptime monitoring platform
+type: application
+version: 1.0.0
+appVersion: "3.0.0"
+keywords:
+  - monitoring
+  - uptime
+  - raft
+  - egyptian
+home: https://anubis.watch
+sources:
+  - https://github.com/AnubisWatch/AnubisWatch
+maintainers:
+  - name: AnubisWatch Team
+    email: team@anubis.watch

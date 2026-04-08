@@ -1,0 +1,17 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "anubiswatch.fullname" . }}
+  labels:
+    {{- include "anubiswatch.labels" . | nindent 4 }}
+spec:
+  endpoints:
+    - port: http
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+      path: /metrics
+  selector:
+    matchLabels:
+      {{- include "anubiswatch.selectorLabels" . | nindent 6 }}
+{{- end }}

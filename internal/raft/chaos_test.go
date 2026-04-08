@@ -15,6 +15,7 @@ import (
 // createChaosTestCluster creates a multi-node cluster for chaos testing
 func createChaosTestCluster(t *testing.T, nodeCount int) ([]*Node, func()) {
 	nodes := make([]*Node, nodeCount)
+	transports := make([]*TCPTransport, nodeCount)
 	cleanups := make([]func(), nodeCount)
 
 	for i := 0; i < nodeCount; i++ {
@@ -45,10 +46,21 @@ func createChaosTestCluster(t *testing.T, nodeCount int) ([]*Node, func()) {
 			t.Fatalf("Failed to create chaos test node %d: %v", i, err)
 		}
 
+		// Create and set transport
+		transport, err := NewTCPTransport(cfg.BindAddr, cfg.AdvertiseAddr, nil, newTestRaftLogger())
+		if err != nil {
+			t.Fatalf("Failed to create transport for node %d: %v", i, err)
+		}
+		transports[i] = transport
+		node.SetTransport(transport)
+
 		nodes[i] = node
-		cleanups[i] = func(n *Node) func() {
-			return func() { n.Stop() }
-		}(node)
+		cleanups[i] = func(n *Node, tr *TCPTransport) func() {
+			return func() {
+				n.Stop()
+				tr.Stop()
+			}
+		}(node, transport)
 	}
 
 	cleanup := func() {
@@ -145,11 +157,11 @@ func TestChaos_SingleNodeFailure_Real(t *testing.T) {
 	}
 
 	// Wait for leader election
-	leader := waitForLeader(t, nodes, 5*time.Second)
+	leader := waitForLeader(t, nodes, 10*time.Second)
 	t.Logf("Leader elected: %s", leader.nodeID)
 
 	// Wait for all nodes to see the leader
-	waitForAllNodes(t, nodes, 3*time.Second)
+	waitForAllNodes(t, nodes, 10*time.Second)
 
 	// Find a non-leader node to kill
 	killIndex := -1

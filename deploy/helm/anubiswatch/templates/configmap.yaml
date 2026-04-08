@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "anubiswatch.configName" . }}
+  labels:
+    {{- include "anubiswatch.labels" . | nindent 4 }}
+data:
+  anubis.yaml: |
+    data_dir: {{ .Values.config.dataDir }}
+    log_level: {{ .Values.config.logLevel }}
+
+    server:
+      bind_addr: {{ .Values.config.server.bindAddr }}
+      {{- if .Values.config.server.tls.enabled }}
+      tls:
+        cert_file: {{ .Values.config.server.tls.certFile }}
+        key_file: {{ .Values.config.server.tls.keyFile }}
+      {{- end }}
+
+    {{- if .Values.config.raft.enabled }}
+    raft:
+      enabled: true
+      bind_addr: {{ .Values.config.raft.bindAddr }}
+      {{- if .Values.config.raft.advertiseAddr }}
+      advertise_addr: {{ .Values.config.raft.advertiseAddr }}
+      {{- end }}
+      election_timeout: {{ .Values.config.raft.electionTimeout }}
+      heartbeat_timeout: {{ .Values.config.raft.heartbeatTimeout }}
+    {{- end }}
+
+    storage:
+      path: {{ .Values.config.storage.path }}
+      retention_days: {{ .Values.config.storage.retentionDays }}
+
+    {{- if .Values.config.alerts.enabled }}
+    alerts:
+      enabled: true
+      {{- if .Values.config.alerts.smtp.enabled }}
+      smtp:
+        host: {{ .Values.config.alerts.smtp.host }}
+        port: {{ .Values.config.alerts.smtp.port }}
+        username: {{ .Values.config.alerts.smtp.username }}
+        from: {{ .Values.config.alerts.smtp.from }}
+      {{- end }}
+      {{- if .Values.config.alerts.webhook.enabled }}
+      webhook:
+        url: {{ .Values.config.alerts.webhook.url }}
+      {{- end }}
+    {{- end }}
+
+    {{- if .Values.config.acme.enabled }}
+    acme:
+      enabled: true
+      email: {{ .Values.config.acme.email }}
+      provider: {{ .Values.config.acme.provider }}
+    {{- end }}

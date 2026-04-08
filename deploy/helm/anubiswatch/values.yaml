@@ -1,0 +1,133 @@
+# Default values for AnubisWatch
+# This is a YAML-formatted file.
+
+image:
+  repository: anubiswatch/anubis
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# AnubisWatch configuration
+config:
+  # Data directory
+  dataDir: /data
+
+  # Log level: debug, info, warn, error
+  logLevel: info
+
+  # Server configuration
+  server:
+    bindAddr: 0.0.0.0:8080
+    tls:
+      enabled: false
+      certFile: ""
+      keyFile: ""
+
+  # Raft cluster configuration
+  raft:
+    enabled: true
+    bindAddr: 0.0.0.0:7946
+    advertiseAddr: ""
+    electionTimeout: 1s
+    heartbeatTimeout: 500ms
+
+  # Storage configuration
+  storage:
+    path: /data/anubis.db
+    retentionDays: 30
+
+  # Alert configuration
+  alerts:
+    enabled: true
+    smtp:
+      enabled: false
+      host: ""
+      port: 587
+      username: ""
+      password: ""
+      from: ""
+    webhook:
+      enabled: false
+      url: ""
+
+  # ACME/Let's Encrypt
+  acme:
+    enabled: false
+    email: ""
+    provider: letsencrypt
+
+# Service configuration
+service:
+  type: ClusterIP
+  httpPort: 8080
+  raftPort: 7946
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: anubiswatch.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Resources
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+# StatefulSet configuration
+statefulSet:
+  replicas: 3
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+
+# Persistence
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Node selector
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Monitoring
+monitoring:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+
+# Pod disruption budget
+pdb:
+  enabled: true
+  minAvailable: 2

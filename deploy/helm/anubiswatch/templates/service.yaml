@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "anubiswatch.fullname" . }}
+  labels:
+    {{- include "anubiswatch.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.httpPort }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "anubiswatch.selectorLabels" . | nindent 4 }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "anubiswatch.fullname" . }}-headless
+  labels:
+    {{- include "anubiswatch.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - port: {{ .Values.service.httpPort }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: {{ .Values.service.raftPort }}
+      targetPort: raft
+      protocol: TCP
+      name: raft
+  selector:
+    {{- include "anubiswatch.selectorLabels" . | nindent 4 }}

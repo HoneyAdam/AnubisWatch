@@ -1,0 +1,167 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: anubiswatch
+  labels:
+    app.kubernetes.io/name: anubiswatch
+    app.kubernetes.io/managed-by: kubectl
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: anubiswatch-config
+  namespace: anubiswatch
+data:
+  anubis.yaml: |
+    data_dir: /data
+    log_level: info
+    server:
+      bind_addr: 0.0.0.0:8080
+    raft:
+      enabled: true
+      bind_addr: 0.0.0.0:7946
+      election_timeout: 1s
+      heartbeat_timeout: 500ms
+    storage:
+      path: /data/anubis.db
+      retention_days: 30
+    alerts:
+      enabled: true
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anubiswatch
+  namespace: anubiswatch
+  labels:
+    app.kubernetes.io/name: anubiswatch
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: anubiswatch
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anubiswatch-headless
+  namespace: anubiswatch
+  labels:
+    app.kubernetes.io/name: anubiswatch
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+    - port: 7946
+      targetPort: 7946
+      protocol: TCP
+      name: raft
+  selector:
+    app.kubernetes.io/name: anubiswatch
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: anubiswatch
+  namespace: anubiswatch
+  labels:
+    app.kubernetes.io/name: anubiswatch
+spec:
+  serviceName: anubiswatch-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anubiswatch
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anubiswatch
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: anubis
+          image: anubiswatch/anubis:3.0.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/anubis
+          args:
+            - serve
+            - --config
+            - /etc/anubis/anubis.yaml
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: raft
+              containerPort: 7946
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/anubis
+              readOnly: true
+            - name: data
+              mountPath: /data
+          env:
+            - name: ANUBIS_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+      volumes:
+        - name: config
+          configMap:
+            name: anubiswatch-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: anubiswatch
+  namespace: anubiswatch
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anubiswatch

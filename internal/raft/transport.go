@@ -33,6 +33,7 @@ type TCPTransport struct {
 	logger   *slog.Logger
 	shutdown bool
 	doneCh   chan struct{}
+	stopOnce sync.Once
 }
 
 // RPCHandler handles incoming RPCs
@@ -88,19 +89,21 @@ func (t *TCPTransport) Start() error {
 
 // Stop stops the transport
 func (t *TCPTransport) Stop() error {
-	t.shutdown = true
-	if t.listener != nil {
-		t.listener.Close()
-	}
+	t.stopOnce.Do(func() {
+		t.shutdown = true
+		if t.listener != nil {
+			t.listener.Close()
+		}
 
-	t.connMu.Lock()
-	for _, conn := range t.connections {
-		conn.Close()
-	}
-	t.connections = make(map[string]net.Conn)
-	t.connMu.Unlock()
+		t.connMu.Lock()
+		for _, conn := range t.connections {
+			conn.Close()
+		}
+		t.connections = make(map[string]net.Conn)
+		t.connMu.Unlock()
 
-	close(t.doneCh)
+		close(t.doneCh)
+	})
 	return nil
 }
 
