@@ -639,3 +639,263 @@ func TestGenerateRandomString(t *testing.T) {
 		t.Log("Generated same random string (timing issue)")
 	}
 }
+
+// TestHealthMonitor_GetStatus tests getting health status
+func TestHealthMonitor_GetStatus(t *testing.T) {
+	cfg := Config{
+		LocalRegion: "test",
+		HealthCheck: HealthConfig{
+			Enabled:          true,
+			Interval:         time.Minute,
+			Timeout:          10 * time.Second,
+			FailureThreshold: 3,
+		},
+	}
+	storage := newMockStorage()
+	logger := newTestLogger()
+
+	manager, _ := NewManager(cfg, storage, logger)
+	hm := manager.GetHealthMonitor()
+
+	hm.AddRegion("region-1", "http://localhost:8081")
+
+	status, err := hm.GetStatus("region-1")
+	if err != nil {
+		t.Fatalf("Failed to get status: %v", err)
+	}
+
+	if status.RegionID != "region-1" {
+		t.Errorf("Expected region ID 'region-1', got %s", status.RegionID)
+	}
+
+	_, err = hm.GetStatus("non-existent")
+	if err == nil {
+		t.Error("Expected error for non-existent region")
+	}
+}
+
+// TestHealthMonitor_IsHealthy tests IsHealthy method
+func TestHealthMonitor_IsHealthy(t *testing.T) {
+	cfg := Config{
+		LocalRegion: "test",
+		HealthCheck: HealthConfig{
+			Enabled:          true,
+			Interval:         time.Minute,
+			FailureThreshold: 3,
+		},
+	}
+	storage := newMockStorage()
+	logger := newTestLogger()
+
+	manager, _ := NewManager(cfg, storage, logger)
+	hm := manager.GetHealthMonitor()
+
+	hm.AddRegion("region-1", "http://localhost:8081")
+
+	if !hm.IsHealthy("region-1") {
+		t.Error("Expected region to be healthy initially")
+	}
+
+	if hm.IsHealthy("non-existent") {
+		t.Error("Expected non-existent region to be unhealthy")
+	}
+}
+
+// TestHealthMonitor_GetHealthyRegions tests getting healthy regions
+func TestHealthMonitor_GetHealthyRegions(t *testing.T) {
+	cfg := Config{
+		LocalRegion: "test",
+		HealthCheck: HealthConfig{
+			Enabled:          true,
+			Interval:         time.Minute,
+			FailureThreshold: 3,
+		},
+	}
+	storage := newMockStorage()
+	logger := newTestLogger()
+
+	manager, _ := NewManager(cfg, storage, logger)
+	hm := manager.GetHealthMonitor()
+
+	hm.AddRegion("region-1", "http://localhost:8081")
+	hm.AddRegion("region-2", "http://localhost:8082")
+
+	healthy := hm.GetHealthyRegions()
+	if len(healthy) != 2 {
+		t.Errorf("Expected 2 healthy regions, got %d", len(healthy))
+	}
+}
+
+// TestHealthMonitor_GetUnhealthyRegions tests getting unhealthy regions
+func TestHealthMonitor_GetUnhealthyRegions(t *testing.T) {
+	cfg := Config{
+		LocalRegion: "test",
+		HealthCheck: HealthConfig{
+			Enabled:          true,
+			Interval:         time.Minute,
+			FailureThreshold: 3,
+		},
+	}
+	storage := newMockStorage()
+	logger := newTestLogger()
+
+	manager, _ := NewManager(cfg, storage, logger)
+	hm := manager.GetHealthMonitor()
+
+	hm.AddRegion("region-1", "http://localhost:8081")
+	hm.AddRegion("region-2", "http://localhost:8082")
+
+	// Initially all regions are healthy
+	unhealthy := hm.GetUnhealthyRegions()
+	if len(unhealthy) != 0 {
+		t.Errorf("Expected 0 unhealthy regions initially, got %d", len(unhealthy))
+	}
+}
+
+// TestHealthMonitor_GetAllStatuses tests getting all health statuses
+func TestHealthMonitor_GetAllStatuses(t *testing.T) {
+	cfg := Config{
+		LocalRegion: "test",
+		HealthCheck: HealthConfig{
+			Enabled:  true,
+			Interval: time.Minute,
+		},
+	}
+	storage := newMockStorage()
+	logger := newTestLogger()
+
+	manager, _ := NewManager(cfg, storage, logger)
+	hm := manager.GetHealthMonitor()
+
+	for i := 1; i <= 3; i++ {
+		hm.AddRegion(fmt.Sprintf("region-%d", i), fmt.Sprintf("http://localhost:808%d", i))
+	}
+
+	statuses := hm.GetAllStatuses()
+	if len(statuses) != 3 {
+		t.Errorf("Expected 3 statuses, got %d", len(statuses))
+	}
+}
+
+// TestHealthMonitor_RemoveRegion tests removing a region
+func TestHealthMonitor_RemoveRegion(t *testing.T) {
+	cfg := Config{
+		LocalRegion: "test",
+		HealthCheck: HealthConfig{
+			Enabled:  true,
+			Interval: time.Minute,
+		},
+	}
+	storage := newMockStorage()
+	logger := newTestLogger()
+
+	manager, _ := NewManager(cfg, storage, logger)
+	hm := manager.GetHealthMonitor()
+
+	hm.AddRegion("region-1", "http://localhost:8081")
+	hm.RemoveRegion("region-1")
+
+	_, err := hm.GetStatus("region-1")
+	if err == nil {
+		t.Error("Expected error after removing region")
+	}
+}
+
+// TestManager_GetRegionForNode tests getting region for a node
+func TestManager_GetRegionForNode(t *testing.T) {
+	cfg := Config{LocalRegion: "test"}
+	storage := newMockStorage()
+	logger := newTestLogger()
+
+	manager, _ := NewManager(cfg, storage, logger)
+
+	region := &Region{
+		ID:       "region-1",
+		Name:     "Test Region",
+		Endpoint: "http://localhost:8081",
+		Enabled:  true,
+	}
+	manager.RegisterRegion(context.Background(), region)
+	manager.RegisterNodeInRegion("node-1", "region-1")
+
+	regionID := manager.GetRegionForNode("node-1")
+	if regionID != "region-1" {
+		t.Errorf("Expected region 'region-1', got %s", regionID)
+	}
+
+	regionID = manager.GetRegionForNode("non-existent")
+	if regionID != "" {
+		t.Error("Expected empty string for non-existent node")
+	}
+}
+
+// TestManager_GetReplicationManager tests getting replication manager
+func TestManager_GetReplicationManager(t *testing.T) {
+	cfg := Config{LocalRegion: "test"}
+	storage := newMockStorage()
+	logger := newTestLogger()
+
+	manager, _ := NewManager(cfg, storage, logger)
+
+	rm := manager.GetReplicationManager()
+	if rm == nil {
+		t.Error("Expected replication manager to be returned")
+	}
+}
+
+// TestManager_GetRouter tests getting router
+func TestManager_GetRouter(t *testing.T) {
+	cfg := Config{LocalRegion: "test"}
+	storage := newMockStorage()
+	logger := newTestLogger()
+
+	manager, _ := NewManager(cfg, storage, logger)
+
+	router := manager.GetRouter()
+	if router == nil {
+		t.Error("Expected router to be returned")
+	}
+}
+
+// TestManager_GetHealthMonitor tests getting health monitor
+func TestManager_GetHealthMonitor(t *testing.T) {
+	cfg := Config{LocalRegion: "test"}
+	storage := newMockStorage()
+	logger := newTestLogger()
+
+	manager, _ := NewManager(cfg, storage, logger)
+
+	hm := manager.GetHealthMonitor()
+	if hm == nil {
+		t.Error("Expected health monitor to be returned")
+	}
+}
+
+// TestHealthMonitor_StartStop tests starting and stopping the health monitor
+func TestHealthMonitor_StartStop(t *testing.T) {
+	cfg := Config{
+		LocalRegion: "test",
+		HealthCheck: HealthConfig{
+			Enabled:  true,
+			Interval: time.Minute,
+			Timeout:  10 * time.Second,
+		},
+	}
+	storage := newMockStorage()
+	logger := newTestLogger()
+
+	manager, _ := NewManager(cfg, storage, logger)
+	hm := manager.GetHealthMonitor()
+
+	if hm == nil {
+		t.Fatal("Expected health monitor to be created")
+	}
+
+	ctx := context.Background()
+	hm.Start(ctx)
+
+	time.Sleep(10 * time.Millisecond)
+
+	hm.Stop(ctx)
+}
+
