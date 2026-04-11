@@ -134,6 +134,10 @@ func (m *failingMockStorage) GetJourneyNoCtx(id string) (*core.JourneyConfig, er
 func (m *failingMockStorage) ListJourneysNoCtx(ws string, offset, limit int) ([]*core.JourneyConfig, error) { return nil, fmt.Errorf("storage error") }
 func (m *failingMockStorage) SaveJourneyNoCtx(j *core.JourneyConfig) error                      { return fmt.Errorf("storage error") }
 func (m *failingMockStorage) DeleteJourneyNoCtx(id string) error                               { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) GetDashboardNoCtx(id string) (*core.CustomDashboard, error)        { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) ListDashboardsNoCtx() ([]*core.CustomDashboard, error)             { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) SaveDashboardNoCtx(d *core.CustomDashboard) error                  { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) DeleteDashboardNoCtx(id string) error                              { return fmt.Errorf("storage error") }
 func (m *failingMockStorage) GetStatsNoCtx(workspace string, start, end time.Time) (*core.Stats, error) { return nil, fmt.Errorf("storage error") }
 func (m *failingMockStorage) GetStatusPageNoCtx(id string) (*core.StatusPage, error)           { return nil, fmt.Errorf("storage error") }
 func (m *failingMockStorage) ListStatusPagesNoCtx() ([]*core.StatusPage, error)                 { return nil, fmt.Errorf("storage error") }
@@ -223,6 +227,16 @@ func (m *mockStorage) ListJourneysNoCtx(ws string, offset, limit int) ([]*core.J
 }
 func (m *mockStorage) SaveJourneyNoCtx(j *core.JourneyConfig) error { m.journeys[j.ID] = j; return nil }
 func (m *mockStorage) DeleteJourneyNoCtx(id string) error           { return nil }
+func (m *mockStorage) GetDashboardNoCtx(id string) (*core.CustomDashboard, error) {
+	return nil, fmt.Errorf("dashboard not found")
+}
+func (m *mockStorage) ListDashboardsNoCtx() ([]*core.CustomDashboard, error) {
+	return []*core.CustomDashboard{}, nil
+}
+func (m *mockStorage) SaveDashboardNoCtx(dashboard *core.CustomDashboard) error {
+	return nil
+}
+func (m *mockStorage) DeleteDashboardNoCtx(id string) error { return nil }
 
 // mockProbeEngine implements ProbeEngine interface
 type mockProbeEngine struct {

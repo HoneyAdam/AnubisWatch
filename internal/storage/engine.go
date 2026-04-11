@@ -1015,3 +1015,19 @@ func (db *CobaltDB) SaveStatusPageNoCtx(page *core.StatusPage) error {
 func (db *CobaltDB) DeleteStatusPageNoCtx(id string) error {
 	return db.DeleteStatusPage(id)
 }
+
+func (db *CobaltDB) SaveDashboardNoCtx(dashboard *core.CustomDashboard) error {
+	return db.SaveDashboard(dashboard)
+}
+
+func (db *CobaltDB) GetDashboardNoCtx(id string) (*core.CustomDashboard, error) {
+	return db.GetDashboard(id)
+}
+
+func (db *CobaltDB) ListDashboardsNoCtx() ([]*core.CustomDashboard, error) {
+	return db.ListDashboards()
+}
+
+func (db *CobaltDB) DeleteDashboardNoCtx(id string) error {
+	return db.DeleteDashboard(id)
+}

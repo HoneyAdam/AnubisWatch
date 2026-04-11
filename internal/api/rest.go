@@ -140,6 +140,12 @@ type Storage interface {
 	ListJourneysNoCtx(workspace string, offset, limit int) ([]*core.JourneyConfig, error)
 	SaveJourneyNoCtx(journey *core.JourneyConfig) error
 	DeleteJourneyNoCtx(id string) error
+
+	// Dashboard methods
+	GetDashboardNoCtx(id string) (*core.CustomDashboard, error)
+	ListDashboardsNoCtx() ([]*core.CustomDashboard, error)
+	SaveDashboardNoCtx(dashboard *core.CustomDashboard) error
+	DeleteDashboardNoCtx(id string) error
 }
 
 // ProbeEngine interface for probe operations
@@ -352,6 +358,15 @@ func (s *RESTServer) setupRoutes() {
 	s.router.Handle("POST", "/api/v1/journeys/:id/run", s.requireAuth(s.handleRunJourney))
 	s.router.Handle("GET", "/api/v1/journeys/:id/runs", s.requireAuth(s.handleListJourneyRuns))
 	s.router.Handle("GET", "/api/v1/journeys/:id/runs/:runId", s.requireAuth(s.handleGetJourneyRun))
+
+	// Dashboards endpoints
+	s.router.Handle("GET", "/api/v1/dashboards", s.requireAuth(s.handleListDashboards))
+	s.router.Handle("POST", "/api/v1/dashboards", s.requireAuth(s.handleCreateDashboard))
+	s.router.Handle("GET", "/api/v1/dashboards/:id", s.requireAuth(s.handleGetDashboard))
+	s.router.Handle("PUT", "/api/v1/dashboards/:id", s.requireAuth(s.handleUpdateDashboard))
+	s.router.Handle("DELETE", "/api/v1/dashboards/:id", s.requireAuth(s.handleDeleteDashboard))
+	s.router.Handle("POST", "/api/v1/dashboards/:id/query", s.requireAuth(s.handleDashboardQuery))
+	s.router.Handle("GET", "/api/v1/dashboards/templates", s.requireAuth(s.handleDashboardTemplates))
 
 	// MCP tools endpoint
 	s.router.Handle("GET", "/api/v1/mcp/tools", s.requireAuth(s.handleMCPTools))

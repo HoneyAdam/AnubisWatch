@@ -470,6 +470,22 @@ func (a *restStorageAdapter) DeleteJourneyNoCtx(id string) error {
 	return a.store.DeleteJourneyNoCtx(id)
 }
 
+func (a *restStorageAdapter) GetDashboardNoCtx(id string) (*core.CustomDashboard, error) {
+	return a.store.GetDashboardNoCtx(id)
+}
+
+func (a *restStorageAdapter) ListDashboardsNoCtx() ([]*core.CustomDashboard, error) {
+	return a.store.ListDashboardsNoCtx()
+}
+
+func (a *restStorageAdapter) SaveDashboardNoCtx(dashboard *core.CustomDashboard) error {
+	return a.store.SaveDashboardNoCtx(dashboard)
+}
+
+func (a *restStorageAdapter) DeleteDashboardNoCtx(id string) error {
+	return a.store.DeleteDashboardNoCtx(id)
+}
+
 // clusterAdapter adapts cluster.Manager to api.ClusterManager interface
 type clusterAdapter struct {
 	mgr *cluster.Manager

@@ -993,3 +993,47 @@ func (db *CobaltDB) GetUptimeHistory(soulID string, days int) ([]core.UptimeDay,
 
 	return uptimeDays, nil
 }
+
+func (db *CobaltDB) SaveDashboard(dashboard *core.CustomDashboard) error {
+	key := fmt.Sprintf("default/dashboards/%s", dashboard.ID)
+	data, err := json.Marshal(dashboard)
+	if err != nil {
+		return err
+	}
+	return db.Put(key, data)
+}
+
+func (db *CobaltDB) GetDashboard(id string) (*core.CustomDashboard, error) {
+	key := fmt.Sprintf("default/dashboards/%s", id)
+	data, err := db.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	var dashboard core.CustomDashboard
+	if err := json.Unmarshal(data, &dashboard); err != nil {
+		return nil, err
+	}
+	return &dashboard, nil
+}
+
+func (db *CobaltDB) ListDashboards() ([]*core.CustomDashboard, error) {
+	results, err := db.PrefixScan("default/dashboards/")
+	if err != nil {
+		return nil, err
+	}
+
+	var dashboards []*core.CustomDashboard
+	for _, data := range results {
+		var dashboard core.CustomDashboard
+		if err := json.Unmarshal(data, &dashboard); err != nil {
+			continue
+		}
+		dashboards = append(dashboards, &dashboard)
+	}
+	return dashboards, nil
+}
+
+func (db *CobaltDB) DeleteDashboard(id string) error {
+	key := fmt.Sprintf("default/dashboards/%s", id)
+	return db.Delete(key)
+}

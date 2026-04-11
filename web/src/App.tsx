@@ -8,6 +8,8 @@ import { Alerts } from './pages/Alerts'
 import { Journeys } from './pages/Journeys'
 import { Cluster } from './pages/Cluster'
 import { StatusPages } from './pages/StatusPages'
+import { Dashboards } from './pages/Dashboards'
+import { DashboardDetail } from './pages/DashboardDetail'
 import { Settings } from './pages/Settings'
 import { Login } from './pages/Login'
 import { WebSocketProvider } from './hooks/useWebSocket'
@@ -46,6 +48,9 @@ function App() {
             <Route path="/journeys" element={<Journeys />} />
             <Route path="/cluster" element={<Cluster />} />
             <Route path="/status-pages" element={<StatusPages />} />
+            <Route path="/dashboards" element={<Dashboards />} />
+            <Route path="/dashboards/:id" element={<DashboardDetail />} />
+            <Route path="/dashboards/new" element={<DashboardDetail />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Route>

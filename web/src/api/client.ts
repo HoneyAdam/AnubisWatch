@@ -218,3 +218,22 @@ export interface User {
   workspace: string
   created_at?: string
 }
+
+export interface CustomDashboard {
+  id: string
+  name: string
+  description?: string
+  widgets: WidgetConfig[]
+  refresh_sec: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface WidgetConfig {
+  id: string
+  title: string
+  type: 'line_chart' | 'bar_chart' | 'gauge' | 'stat' | 'table'
+  grid: { x: number; y: number; width: number; height: number }
+  query: { source: string; metric: string; filters?: Record<string, string>; time_range: string; aggregation?: string }
+  thresholds?: { value: number; color: string; op: string }[]
+}

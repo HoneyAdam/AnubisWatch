@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { api, ApiResponse, Soul, Judgment, AlertChannel, AlertRule, Workspace, Stats, ClusterStatus, StatusPage, User } from './client'
+import { api, ApiResponse, Soul, Judgment, AlertChannel, AlertRule, Workspace, Stats, ClusterStatus, StatusPage, User, CustomDashboard, WidgetConfig } from './client'
 
 // Generic hook for API calls
 function useApi<T>(
@@ -312,6 +312,56 @@ export function useStatusPages() {
 // Workspaces API hooks
 export function useWorkspaces() {
   return useApi<Workspace[]>(() => api.get<Workspace[]>('/workspaces'))
+}
+
+// Dashboards API hooks
+export function useDashboards() {
+  const [data, setData] = useState<CustomDashboard[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchDashboards = useCallback(async () => {
+    setLoading(true)
+    try {
+      const result = await api.get<CustomDashboard[]>('/dashboards')
+      setData(result)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchDashboards()
+  }, [fetchDashboards])
+
+  const createDashboard = async (dashboard: Omit<CustomDashboard, 'id'>) => {
+    const result = await api.post<CustomDashboard>('/dashboards', dashboard)
+    await fetchDashboards()
+    return result
+  }
+
+  const updateDashboard = async (id: string, dashboard: Partial<CustomDashboard>) => {
+    const result = await api.put<CustomDashboard>(`/dashboards/${id}`, dashboard)
+    await fetchDashboards()
+    return result
+  }
+
+  const deleteDashboard = async (id: string) => {
+    await api.delete(`/dashboards/${id}`)
+    await fetchDashboards()
+  }
+
+  return {
+    dashboards: data || [],
+    loading,
+    error,
+    refetch: fetchDashboards,
+    createDashboard,
+    updateDashboard,
+    deleteDashboard,
+  }
 }
 
 // Auth API hooks
