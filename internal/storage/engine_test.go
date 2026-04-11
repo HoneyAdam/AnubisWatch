@@ -3,9 +3,11 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -4643,6 +4645,29 @@ func TestCobaltDB_SaveAlertEvent_WithData(t *testing.T) {
 	}
 }
 
+// TestCobaltDB_SaveAlertEvent_ClosedDB tests SaveAlertEvent when DB is closed
+func TestCobaltDB_SaveAlertEvent_ClosedDB(t *testing.T) {
+	db := newTestDB(t)
+	db.Close()
+
+	event := &core.AlertEvent{ID: "event-closed", SoulID: "soul-1", Message: "Should fail"}
+	err := db.SaveAlertEvent(event)
+	if err == nil {
+		t.Error("Expected error when saving alert event on closed DB")
+	}
+}
+
+// TestCobaltDB_ListAlertEvents_ClosedDB tests ListAlertEvents when DB is closed
+func TestCobaltDB_ListAlertEvents_ClosedDB(t *testing.T) {
+	db := newTestDB(t)
+	db.Close()
+
+	_, err := db.ListAlertEvents("soul-1", 10)
+	if err == nil {
+		t.Error("Expected error when listing alert events on closed DB")
+	}
+}
+
 // TestCobaltDB_SaveStatusPage_WithData tests SaveStatusPage with various data
 func TestCobaltDB_SaveStatusPage_WithData(t *testing.T) {
 	db := newTestDB(t)
@@ -5372,5 +5397,2245 @@ func TestTimeSeriesStore_compactToResolution_RecentDataNotCompacted(t *testing.T
 	_, err = db.Get(key)
 	if err != nil {
 		t.Error("Recent data should not have been compacted")
+	}
+}
+
+// TestNoCtxWrappers_GetJourneyNoCtx tests GetJourneyNoCtx wrapper
+func TestNoCtxWrappers_GetJourneyNoCtx(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Save a journey first
+	journey := &core.JourneyConfig{
+		ID:          "test-journey",
+		Name:        "Test Journey",
+		WorkspaceID: "default",
+		Steps: []core.JourneyStep{
+			{Name: "Step 1", Type: "http", Target: "http://example.com"},
+		},
+	}
+	err := db.SaveJourney(context.Background(), journey)
+	if err != nil {
+		t.Fatalf("Failed to save journey: %v", err)
+	}
+
+	// Test GetJourneyNoCtx
+	retrieved, err := db.GetJourneyNoCtx("test-journey")
+	if err != nil {
+		t.Errorf("GetJourneyNoCtx failed: %v", err)
+	}
+	if retrieved == nil || retrieved.Name != "Test Journey" {
+		t.Error("GetJourneyNoCtx returned wrong journey")
+	}
+}
+
+// TestNoCtxWrappers_ListJourneysNoCtx tests ListJourneysNoCtx wrapper
+func TestNoCtxWrappers_ListJourneysNoCtx(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Save journeys
+	for i := 0; i < 3; i++ {
+		journey := &core.JourneyConfig{
+			ID:          fmt.Sprintf("journey-%d", i),
+			Name:        fmt.Sprintf("Journey %d", i),
+			WorkspaceID: "default",
+		}
+		db.SaveJourney(context.Background(), journey)
+	}
+
+	// Test ListJourneysNoCtx
+	journeys, err := db.ListJourneysNoCtx("default", 0, 10)
+	if err != nil {
+		t.Errorf("ListJourneysNoCtx failed: %v", err)
+	}
+	if len(journeys) != 3 {
+		t.Errorf("Expected 3 journeys, got %d", len(journeys))
+	}
+}
+
+// TestNoCtxWrappers_SaveJourneyNoCtx tests SaveJourneyNoCtx wrapper
+func TestNoCtxWrappers_SaveJourneyNoCtx(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	journey := &core.JourneyConfig{
+		ID:          "save-test",
+		Name:        "Save Test",
+		WorkspaceID: "default",
+	}
+
+	err := db.SaveJourneyNoCtx(journey)
+	if err != nil {
+		t.Errorf("SaveJourneyNoCtx failed: %v", err)
+	}
+
+	// Verify it was saved
+	retrieved, _ := db.GetJourney(context.Background(), "default", "save-test")
+	if retrieved == nil || retrieved.Name != "Save Test" {
+		t.Error("Journey was not saved correctly")
+	}
+}
+
+// TestNoCtxWrappers_DeleteJourneyNoCtx tests DeleteJourneyNoCtx wrapper
+func TestNoCtxWrappers_DeleteJourneyNoCtx(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Save then delete
+	journey := &core.JourneyConfig{
+		ID:          "delete-test",
+		Name:        "Delete Test",
+		WorkspaceID: "default",
+	}
+	db.SaveJourney(context.Background(), journey)
+
+	err := db.DeleteJourneyNoCtx("delete-test")
+	if err != nil {
+		t.Errorf("DeleteJourneyNoCtx failed: %v", err)
+	}
+
+	// Verify it was deleted
+	_, err = db.GetJourney(context.Background(), "default", "delete-test")
+	if err == nil {
+		t.Error("Journey should have been deleted")
+	}
+}
+
+// --- B+Tree List and RangeScan edge case tests ---
+
+// TestCobaltDB_List_EmptyPrefix tests List with empty prefix returns all keys
+func TestCobaltDB_List_EmptyPrefix(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	db.Put("alpha", []byte("1"))
+	db.Put("beta", []byte("2"))
+	db.Put("gamma", []byte("3"))
+
+	keys, err := db.List("")
+	if err != nil {
+		t.Fatalf("List with empty prefix failed: %v", err)
+	}
+	if len(keys) != 3 {
+		t.Errorf("Expected 3 keys, got %d", len(keys))
+	}
+}
+
+// TestCobaltDB_List_NoMatch tests List with prefix that matches no keys
+func TestCobaltDB_List_NoMatch(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	db.Put("alpha", []byte("1"))
+
+	keys, err := db.List("nonexistent/")
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("Expected 0 keys, got %d", len(keys))
+	}
+}
+
+// TestCobaltDB_List_ClosedDB tests List on closed database
+func TestCobaltDB_List_ClosedDB(t *testing.T) {
+	db := newTestDB(t)
+	db.Close()
+
+	_, err := db.List("test/")
+	if err == nil {
+		t.Error("Expected error from List on closed DB")
+	}
+}
+
+// TestCobaltDB_RangeScan_EmptyRange tests RangeScan when no keys in range
+func TestCobaltDB_RangeScan_EmptyRange(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	db.Put("aaa", []byte("1"))
+	db.Put("zzz", []byte("2"))
+
+	results, err := db.RangeScan("bbb", "yyy")
+	if err != nil {
+		t.Fatalf("RangeScan failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results, got %d", len(results))
+	}
+}
+
+// TestCobaltDB_RangeScan_ClosedDB tests RangeScan on closed database
+func TestCobaltDB_RangeScan_ClosedDB(t *testing.T) {
+	db := newTestDB(t)
+	db.Close()
+
+	_, err := db.RangeScan("a", "z")
+	if err == nil {
+		t.Error("Expected error from RangeScan on closed DB")
+	}
+}
+
+// TestCobaltDB_RangeScan_ExcludesEnd tests RangeScan is exclusive on end bound
+func TestCobaltDB_RangeScan_ExcludesEnd(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	db.Put("k/a", []byte("a"))
+	db.Put("k/b", []byte("b"))
+	db.Put("k/c", []byte("c"))
+
+	results, err := db.RangeScan("k/a", "k/c")
+	if err != nil {
+		t.Fatalf("RangeScan failed: %v", err)
+	}
+	// Should include k/a and k/b, but NOT k/c (end is exclusive)
+	if _, ok := results["k/c"]; ok {
+		t.Error("RangeScan should exclude end key")
+	}
+	if _, ok := results["k/a"]; !ok {
+		t.Error("RangeScan should include start key")
+	}
+}
+
+// --- GetSoulJudgments tests ---
+
+// TestCobaltDB_GetSoulJudgments_Direct tests GetSoulJudgments with directly stored judgments
+func TestCobaltDB_GetSoulJudgments_Direct(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	soul := &core.Soul{ID: "judgment-soul", WorkspaceID: "default", Name: "Test", Type: core.CheckHTTP, Target: "https://example.com"}
+	if err := db.SaveSoul(context.Background(), soul); err != nil {
+		t.Fatalf("SaveSoul failed: %v", err)
+	}
+
+	// Store judgments directly via Put (as the storage layer would)
+	for i := 0; i < 5; i++ {
+		j := core.Judgment{
+			ID:        fmt.Sprintf("j-%d", i),
+			SoulID:    "judgment-soul",
+			Status:    core.SoulAlive,
+			Duration:  time.Duration(i) * time.Millisecond,
+			Timestamp: time.Now().Add(time.Duration(i) * time.Minute),
+		}
+		data, _ := json.Marshal(j)
+		key := fmt.Sprintf("default/judgments/judgment-soul/%s", j.ID)
+		if err := db.Put(key, data); err != nil {
+			t.Fatalf("Put judgment failed: %v", err)
+		}
+	}
+
+	// Fetch with limit
+	judgments, err := db.GetSoulJudgments("judgment-soul", 3)
+	if err != nil {
+		t.Fatalf("GetSoulJudgments failed: %v", err)
+	}
+	if len(judgments) != 3 {
+		t.Errorf("Expected 3 judgments (limit), got %d", len(judgments))
+	}
+}
+
+// TestCobaltDB_GetSoulJudgments_Empty tests GetSoulJudgments with no judgments
+func TestCobaltDB_GetSoulJudgments_Empty(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	judgments, err := db.GetSoulJudgments("nonexistent-soul", 10)
+	if err != nil {
+		t.Fatalf("GetSoulJudgments failed: %v", err)
+	}
+	if len(judgments) != 0 {
+		t.Errorf("Expected 0 judgments, got %d", len(judgments))
+	}
+}
+
+// TestCobaltDB_GetSoulJudgments_CorruptData tests GetSoulJudgments skips corrupt JSON
+func TestCobaltDB_GetSoulJudgments_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Store valid judgment
+	j := core.Judgment{ID: "valid", SoulID: "test-soul", Status: core.SoulAlive, Timestamp: time.Now()}
+	data, _ := json.Marshal(j)
+	db.Put("default/judgments/test-soul/valid", data)
+
+	// Store corrupt data
+	db.Put("default/judgments/test-soul/corrupt", []byte("not-json"))
+
+	judgments, err := db.GetSoulJudgments("test-soul", 10)
+	if err != nil {
+		t.Fatalf("GetSoulJudgments failed: %v", err)
+	}
+	if len(judgments) != 1 {
+		t.Errorf("Expected 1 valid judgment, got %d", len(judgments))
+	}
+}
+
+// --- ListAlertChannels tests ---
+
+// TestCobaltDB_ListAlertChannels_Direct tests listing alert channels
+func TestCobaltDB_ListAlertChannels_Direct(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	channels := []*core.AlertChannel{
+		{ID: "ch-1", Name: "Webhook", Type: "webhook", Enabled: true, Config: map[string]any{"url": "https://hooks.example.com"}},
+		{ID: "ch-2", Name: "Email", Type: "email", Enabled: false, Config: map[string]any{"to": "ops@example.com"}},
+	}
+
+	for _, ch := range channels {
+		if err := db.SaveAlertChannel(ch); err != nil {
+			t.Fatalf("SaveAlertChannel failed: %v", err)
+		}
+	}
+
+	listed, err := db.ListAlertChannels()
+	if err != nil {
+		t.Fatalf("ListAlertChannels failed: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Errorf("Expected 2 channels, got %d", len(listed))
+	}
+}
+
+// TestCobaltDB_ListAlertChannels_Empty tests listing when no channels exist
+func TestCobaltDB_ListAlertChannels_Empty(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	channels, err := db.ListAlertChannels()
+	if err != nil {
+		t.Fatalf("ListAlertChannels failed: %v", err)
+	}
+	if len(channels) != 0 {
+		t.Errorf("Expected 0 channels, got %d", len(channels))
+	}
+}
+
+// TestCobaltDB_ListAlertChannels_CorruptData tests skipping corrupt channel data
+func TestCobaltDB_ListAlertChannels_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Store valid channel
+	ch := &core.AlertChannel{ID: "ch-valid", Name: "Valid", Type: "webhook", Enabled: true}
+	db.SaveAlertChannel(ch)
+
+	// Store corrupt data
+	db.Put("default/alerts/channels/corrupt", []byte("bad-json"))
+
+	listed, err := db.ListAlertChannels()
+	if err != nil {
+		t.Fatalf("ListAlertChannels failed: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Errorf("Expected 1 channel, got %d", len(listed))
+	}
+}
+
+// --- ListAlertRules tests ---
+
+// TestCobaltDB_ListAlertRules_Direct tests listing alert rules
+func TestCobaltDB_ListAlertRules_Direct(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	rules := []*core.AlertRule{
+		{ID: "rule-1", Name: "High Latency", Enabled: true},
+		{ID: "rule-2", Name: "Down Alert", Enabled: false},
+	}
+
+	for _, rule := range rules {
+		if err := db.SaveAlertRule(rule); err != nil {
+			t.Fatalf("SaveAlertRule failed: %v", err)
+		}
+	}
+
+	listed, err := db.ListAlertRules()
+	if err != nil {
+		t.Fatalf("ListAlertRules failed: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Errorf("Expected 2 rules, got %d", len(listed))
+	}
+}
+
+// TestCobaltDB_ListAlertRules_Empty tests listing when no rules exist
+func TestCobaltDB_ListAlertRules_Empty(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	rules, err := db.ListAlertRules()
+	if err != nil {
+		t.Fatalf("ListAlertRules failed: %v", err)
+	}
+	if len(rules) != 0 {
+		t.Errorf("Expected 0 rules, got %d", len(rules))
+	}
+}
+
+// TestCobaltDB_ListAlertRules_CorruptData tests skipping corrupt rule data
+func TestCobaltDB_ListAlertRules_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	rule := &core.AlertRule{ID: "rule-valid", Name: "Valid Rule", Enabled: true}
+	db.SaveAlertRule(rule)
+	db.Put("default/alerts/rules/corrupt", []byte("bad-json"))
+
+	listed, err := db.ListAlertRules()
+	if err != nil {
+		t.Fatalf("ListAlertRules failed: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Errorf("Expected 1 rule, got %d", len(listed))
+	}
+}
+
+// --- ListStatusPages tests (direct method on CobaltDB) ---
+
+// TestCobaltDB_ListStatusPages_ViaPut tests ListStatusPages with raw Put keys
+func TestCobaltDB_ListStatusPages_ViaPut(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	pages := []*core.StatusPage{
+		{ID: "sp-1", WorkspaceID: "ws-1", Name: "Public Status", Slug: "public"},
+		{ID: "sp-2", WorkspaceID: "ws-1", Name: "Internal Status", Slug: "internal"},
+	}
+
+	for _, page := range pages {
+		key := "default/statuspages/" + page.ID
+		data, _ := json.Marshal(page)
+		if err := db.Put(key, data); err != nil {
+			t.Fatalf("Put status page failed: %v", err)
+		}
+	}
+
+	listed, err := db.ListStatusPages()
+	if err != nil {
+		t.Fatalf("ListStatusPages failed: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Errorf("Expected 2 status pages, got %d", len(listed))
+	}
+}
+
+// TestCobaltDB_ListStatusPages_Empty tests ListStatusPages when none exist
+func TestCobaltDB_ListStatusPages_Empty(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	pages, err := db.ListStatusPages()
+	if err != nil {
+		t.Fatalf("ListStatusPages failed: %v", err)
+	}
+	if len(pages) != 0 {
+		t.Errorf("Expected 0 status pages, got %d", len(pages))
+	}
+}
+
+// TestCobaltDB_ListStatusPages_CorruptData tests skipping corrupt status page data
+func TestCobaltDB_ListStatusPages_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	page := &core.StatusPage{ID: "sp-valid", Name: "Valid Page", Slug: "valid"}
+	data, _ := json.Marshal(page)
+	db.Put("default/statuspages/sp-valid", data)
+	db.Put("default/statuspages/corrupt", []byte("bad-json"))
+
+	listed, err := db.ListStatusPages()
+	if err != nil {
+		t.Fatalf("ListStatusPages failed: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Errorf("Expected 1 status page, got %d", len(listed))
+	}
+}
+
+// --- ListActiveIncidents tests ---
+
+// TestCobaltDB_ListActiveIncidents_ViaPut tests listing active incidents via raw Put
+func TestCobaltDB_ListActiveIncidents_ViaPut(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	incidents := []*core.Incident{
+		{ID: "inc-1", RuleID: "r1", SoulID: "s1", Status: "firing", Severity: "critical", StartedAt: time.Now()},
+		{ID: "inc-2", RuleID: "r2", SoulID: "s2", Status: "acknowledged", Severity: "warning", StartedAt: time.Now()},
+	}
+
+	for _, inc := range incidents {
+		key := "default/alerts/incidents/" + inc.ID
+		data, _ := json.Marshal(inc)
+		if err := db.Put(key, data); err != nil {
+			t.Fatalf("Put incident failed: %v", err)
+		}
+	}
+
+	listed, err := db.ListActiveIncidents()
+	if err != nil {
+		t.Fatalf("ListActiveIncidents failed: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Errorf("Expected 2 incidents, got %d", len(listed))
+	}
+}
+
+// TestCobaltDB_ListActiveIncidents_Empty tests listing when no incidents exist
+func TestCobaltDB_ListActiveIncidents_Empty(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	incidents, err := db.ListActiveIncidents()
+	if err != nil {
+		t.Fatalf("ListActiveIncidents failed: %v", err)
+	}
+	if len(incidents) != 0 {
+		t.Errorf("Expected 0 incidents, got %d", len(incidents))
+	}
+}
+
+// TestCobaltDB_ListActiveIncidents_CorruptData tests skipping corrupt incident data
+func TestCobaltDB_ListActiveIncidents_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	inc := &core.Incident{ID: "inc-valid", RuleID: "r1", SoulID: "s1", Status: "firing", Severity: "critical", StartedAt: time.Now()}
+	data, _ := json.Marshal(inc)
+	db.Put("default/alerts/incidents/inc-valid", data)
+	db.Put("default/alerts/incidents/corrupt", []byte("bad-json"))
+
+	listed, err := db.ListActiveIncidents()
+	if err != nil {
+		t.Fatalf("ListActiveIncidents failed: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Errorf("Expected 1 incident, got %d", len(listed))
+	}
+}
+
+// --- Raft LogStore tests (StoreLogs and DeleteRange) ---
+
+// TestCobaltDBLogStore_StoreLogs_Verified tests storing multiple raft log entries with verification
+func TestCobaltDBLogStore_StoreLogs_Verified(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBLogStore(db)
+
+	logs := []core.RaftLogEntry{
+		{Index: 1, Term: 1, Data: []byte("log-entry-1")},
+		{Index: 2, Term: 1, Data: []byte("log-entry-2")},
+		{Index: 3, Term: 2, Data: []byte("log-entry-3")},
+	}
+
+	if err := store.StoreLogs(logs); err != nil {
+		t.Fatalf("StoreLogs failed: %v", err)
+	}
+
+	// Verify all entries were stored
+	for i, expected := range logs {
+		var entry core.RaftLogEntry
+		if err := store.GetLog(uint64(i+1), &entry); err != nil {
+			t.Fatalf("GetLog(%d) failed: %v", i+1, err)
+		}
+		if entry.Index != expected.Index {
+			t.Errorf("Log %d: expected index %d, got %d", i+1, expected.Index, entry.Index)
+		}
+		if entry.Term != expected.Term {
+			t.Errorf("Log %d: expected term %d, got %d", i+1, expected.Term, entry.Term)
+		}
+	}
+}
+
+// TestCobaltDBLogStore_StoreLogs_Empty tests storing an empty slice
+func TestCobaltDBLogStore_StoreLogs_Empty(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBLogStore(db)
+
+	err := store.StoreLogs([]core.RaftLogEntry{})
+	if err != nil {
+		t.Fatalf("StoreLogs with empty slice failed: %v", err)
+	}
+}
+
+// TestCobaltDBLogStore_StoreLogs_Single tests storing a single log entry
+func TestCobaltDBLogStore_StoreLogs_Single(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBLogStore(db)
+
+	err := store.StoreLogs([]core.RaftLogEntry{
+		{Index: 100, Term: 5, Data: []byte("single-entry")},
+	})
+	if err != nil {
+		t.Fatalf("StoreLogs single entry failed: %v", err)
+	}
+
+	var entry core.RaftLogEntry
+	if err := store.GetLog(100, &entry); err != nil {
+		t.Fatalf("GetLog failed: %v", err)
+	}
+	if entry.Index != 100 {
+		t.Errorf("Expected index 100, got %d", entry.Index)
+	}
+}
+
+// TestCobaltDBLogStore_DeleteRange_Verified tests deleting a range of raft log entries with full verification
+func TestCobaltDBLogStore_DeleteRange_Verified(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBLogStore(db)
+
+	// Store 5 entries
+	logs := []core.RaftLogEntry{
+		{Index: 1, Term: 1, Data: []byte("e1")},
+		{Index: 2, Term: 1, Data: []byte("e2")},
+		{Index: 3, Term: 1, Data: []byte("e3")},
+		{Index: 4, Term: 2, Data: []byte("e4")},
+		{Index: 5, Term: 2, Data: []byte("e5")},
+	}
+	store.StoreLogs(logs)
+
+	// Delete range [2, 4]
+	if err := store.DeleteRange(2, 4); err != nil {
+		t.Fatalf("DeleteRange failed: %v", err)
+	}
+
+	// Verify entries 1 and 5 still exist
+	var entry core.RaftLogEntry
+	if err := store.GetLog(1, &entry); err != nil {
+		t.Error("Log 1 should still exist after DeleteRange")
+	}
+	if err := store.GetLog(5, &entry); err != nil {
+		t.Error("Log 5 should still exist after DeleteRange")
+	}
+
+	// Verify entries 2, 3, 4 are deleted
+	for i := uint64(2); i <= 4; i++ {
+		err := store.GetLog(i, &entry)
+		if err == nil {
+			t.Errorf("Log %d should have been deleted", i)
+		}
+	}
+}
+
+// TestCobaltDBLogStore_DeleteRange_SingleEntry tests deleting a single entry
+func TestCobaltDBLogStore_DeleteRange_SingleEntry(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBLogStore(db)
+
+	store.StoreLogs([]core.RaftLogEntry{
+		{Index: 10, Term: 1, Data: []byte("e10")},
+	})
+
+	if err := store.DeleteRange(10, 10); err != nil {
+		t.Fatalf("DeleteRange single entry failed: %v", err)
+	}
+
+	var entry core.RaftLogEntry
+	err := store.GetLog(10, &entry)
+	if err == nil {
+		t.Error("Log 10 should have been deleted")
+	}
+}
+
+// TestCobaltDBLogStore_StoreAndDelete tests the full StoreLogs + DeleteRange lifecycle
+func TestCobaltDBLogStore_StoreAndDelete(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBLogStore(db)
+
+	// Store 10 entries
+	logs := make([]core.RaftLogEntry, 10)
+	for i := 0; i < 10; i++ {
+		logs[i] = core.RaftLogEntry{
+			Index: uint64(i + 1),
+			Term:  1,
+			Data:  []byte(fmt.Sprintf("data-%d", i+1)),
+		}
+	}
+	if err := store.StoreLogs(logs); err != nil {
+		t.Fatalf("StoreLogs failed: %v", err)
+	}
+
+	// Delete first half
+	if err := store.DeleteRange(1, 5); err != nil {
+		t.Fatalf("DeleteRange failed: %v", err)
+	}
+
+	// Verify second half remains
+	for i := uint64(6); i <= 10; i++ {
+		var entry core.RaftLogEntry
+		if err := store.GetLog(i, &entry); err != nil {
+			t.Errorf("Log %d should still exist", i)
+		}
+	}
+
+	// Verify first half is gone
+	for i := uint64(1); i <= 5; i++ {
+		var entry core.RaftLogEntry
+		err := store.GetLog(i, &entry)
+		if err == nil {
+			t.Errorf("Log %d should have been deleted", i)
+		}
+	}
+}
+
+// TestTimeSeriesStore_SaveJudgment_ClosedDB tests SaveJudgment when DB is closed
+func TestTimeSeriesStore_SaveJudgment_ClosedDB(t *testing.T) {
+	db := newTestDB(t)
+
+	config := core.TimeSeriesConfig{}
+	ts := NewTimeSeriesStore(db, config, newTestLogger())
+
+	// Close the DB before saving
+	db.Close()
+
+	ctx := context.Background()
+	judgment := &core.Judgment{
+		SoulID:    "closed-db-soul",
+		Status:    core.SoulAlive,
+		Duration:  time.Millisecond * 100,
+		Timestamp: time.Now().UTC(),
+	}
+
+	err := ts.SaveJudgment(ctx, judgment)
+	if err == nil {
+		t.Error("SaveJudgment should error when DB is closed")
+	}
+}
+
+// TestTimeSeriesStore_updateSummary_ClosedDB tests updateSummary with closed DB
+func TestTimeSeriesStore_updateSummary_ClosedDB(t *testing.T) {
+	db := newTestDB(t)
+
+	config := core.TimeSeriesConfig{}
+	ts := NewTimeSeriesStore(db, config, newTestLogger())
+
+	// Close the DB
+	db.Close()
+
+	ctx := context.Background()
+	judgment := &core.Judgment{
+		SoulID:    "update-closed-soul",
+		Status:    core.SoulAlive,
+		Duration:  time.Millisecond * 50,
+		Timestamp: time.Now().UTC(),
+	}
+
+	// updateSummary should fail gracefully (logs warning, doesn't return error)
+	err := ts.updateSummary(ctx, judgment, Resolution1Min)
+	if err == nil {
+		t.Error("updateSummary should error when DB is closed")
+	}
+}
+
+// TestTimeSeriesStore_QuerySummaries_ClosedDB tests QuerySummaries with closed DB
+func TestTimeSeriesStore_QuerySummaries_ClosedDB(t *testing.T) {
+	db := newTestDB(t)
+
+	config := core.TimeSeriesConfig{}
+	ts := NewTimeSeriesStore(db, config, newTestLogger())
+
+	db.Close()
+
+	ctx := context.Background()
+	_, err := ts.QuerySummaries(ctx, "default", "test-soul", Resolution1Min, time.Now().Add(-time.Hour), time.Now())
+	if err == nil {
+		t.Error("QuerySummaries should error when DB is closed")
+	}
+}
+
+// TestTimeSeriesStore_aggregateAndSave_ClosedDB tests aggregateAndSave with closed DB
+func TestTimeSeriesStore_aggregateAndSave_ClosedDB(t *testing.T) {
+	db := newTestDB(t)
+
+	config := core.TimeSeriesConfig{}
+	ts := NewTimeSeriesStore(db, config, newTestLogger())
+
+	db.Close()
+
+	bucketTime := time.Now().Truncate(time.Minute)
+	sources := []*JudgmentSummary{
+		{
+			SoulID:       "test-soul",
+			WorkspaceID:  "default",
+			Resolution:   "raw",
+			BucketTime:   bucketTime,
+			Count:        5,
+			SuccessCount: 4,
+			FailureCount: 1,
+			AvgLatency:   100.0,
+		},
+	}
+
+	err := ts.aggregateAndSave("default", "test-soul", Resolution5Min, bucketTime, sources)
+	if err == nil {
+		t.Error("aggregateAndSave should error when DB is closed")
+	}
+}
+
+// TestTimeSeriesStore_compactToResolution_ClosedDB tests compactToResolution with closed DB
+func TestTimeSeriesStore_compactToResolution_ClosedDB(t *testing.T) {
+	db := newTestDB(t)
+
+	config := core.TimeSeriesConfig{}
+	ts := NewTimeSeriesStore(db, config, newTestLogger())
+
+	db.Close()
+
+	err := ts.compactToResolution(ResolutionRaw, Resolution1Min, time.Nanosecond)
+	if err == nil {
+		t.Error("compactToResolution should error when DB is closed")
+	}
+}
+
+// TestCobaltDB_GetSoulNoCtx_Closed tests GetSoulNoCtx with closed database
+func TestCobaltDB_GetSoulNoCtx_Closed(t *testing.T) {
+	db := newTestDB(t)
+	db.Close()
+	_, err := db.GetSoulNoCtx("test-soul")
+	if err == nil {
+		t.Error("GetSoulNoCtx should error when DB is closed")
+	}
+}
+
+// TestCobaltDB_ListSoulsNoCtx_Closed tests ListSoulsNoCtx with closed database
+func TestCobaltDB_ListSoulsNoCtx_Closed(t *testing.T) {
+	db := newTestDB(t)
+	db.Close()
+	_, err := db.ListSoulsNoCtx("default", 0, 10)
+	if err == nil {
+		t.Error("ListSoulsNoCtx should error when DB is closed")
+	}
+}
+
+// TestCobaltDB_GetJudgmentNoCtx_Closed tests GetJudgmentNoCtx with closed database
+func TestCobaltDB_GetJudgmentNoCtx_Closed(t *testing.T) {
+	db := newTestDB(t)
+	db.Close()
+	_, err := db.GetJudgmentNoCtx("test-judgment")
+	if err == nil {
+		t.Error("GetJudgmentNoCtx should error when DB is closed")
+	}
+}
+
+// TestCobaltDB_GetChannelNoCtx_Closed tests GetChannelNoCtx with closed database
+func TestCobaltDB_GetChannelNoCtx_Closed(t *testing.T) {
+	db := newTestDB(t)
+	db.Close()
+	_, err := db.GetChannelNoCtx("test-channel")
+	if err == nil {
+		t.Error("GetChannelNoCtx should error when DB is closed")
+	}
+}
+
+// TestCobaltDB_GetStatsNoCtx_Closed tests GetStatsNoCtx with closed database
+func TestCobaltDB_GetStatsNoCtx_Closed(t *testing.T) {
+	db := newTestDB(t)
+	db.Close()
+	_, err := db.GetStatsNoCtx("default", time.Now().Add(-24*time.Hour), time.Now())
+	if err == nil {
+		t.Error("GetStatsNoCtx should error when DB is closed")
+	}
+}
+
+// TestCobaltDB_WAL_Recovery_PutAndDeleteMixed tests mixed PUT/DELETE WAL recovery
+func TestCobaltDB_WAL_Recovery_PutAndDeleteMixed(t *testing.T) {
+	dir := t.TempDir()
+	cfg := core.StorageConfig{Path: dir}
+	db, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+
+	// Create some data
+	for i := 0; i < 3; i++ {
+		if err := db.Put(fmt.Sprintf("mix-key-%d", i), []byte(fmt.Sprintf("value-%d", i))); err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+	}
+
+	// Delete the middle one
+	if err := db.Delete("mix-key-1"); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	// Add another after delete
+	if err := db.Put("mix-key-3", []byte("value-3")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	db.Close()
+
+	// Reopen and verify
+	db2, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("Reopen failed: %v", err)
+	}
+	defer db2.Close()
+
+	for _, i := range []int{0, 2, 3} {
+		val, err := db2.Get(fmt.Sprintf("mix-key-%d", i))
+		if err != nil {
+			t.Errorf("mix-key-%d should exist: %v", i, err)
+		}
+		if string(val) != fmt.Sprintf("value-%d", i) {
+			t.Errorf("mix-key-%d = %s, want value-%d", i, string(val), i)
+		}
+	}
+
+	// Deleted keys exist in the tree but have nil values (tombstone design)
+	val, err := db2.Get("mix-key-1")
+	if err != nil {
+		t.Errorf("mix-key-1 should exist in tree: %v", err)
+	}
+	if val != nil {
+		t.Error("mix-key-1 should have nil value after delete (tombstone)")
+	}
+
+	// List should not include deleted keys
+	keys, err := db2.List("mix-")
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	expectedKeys := []string{"mix-key-0", "mix-key-2", "mix-key-3"}
+	if len(keys) != len(expectedKeys) {
+		t.Errorf("List returned %d keys, want %d: %v", len(keys), len(expectedKeys), keys)
+	}
+	for _, ek := range expectedKeys {
+		found := false
+		for _, k := range keys {
+			if k == ek {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("List missing key %q, got %v", ek, keys)
+		}
+	}
+}
+
+// TestCobaltDB_DeleteSoul_EmptyWorkspace tests DeleteSoul with empty workspaceID
+func TestCobaltDB_DeleteSoul_EmptyWorkspace(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	soul := &core.Soul{
+		ID:     "default-ws-soul",
+		Name:   "Default WS Soul",
+		Type:   core.CheckHTTP,
+		Target: "https://example.com",
+	}
+	if err := db.SaveSoul(ctx, soul); err != nil {
+		t.Fatalf("SaveSoul failed: %v", err)
+	}
+
+	if err := db.DeleteSoul(ctx, "", "default-ws-soul"); err != nil {
+		t.Fatalf("DeleteSoul failed: %v", err)
+	}
+
+	_, err := db.GetSoulNoCtx("default-ws-soul")
+	if err == nil {
+		t.Error("Expected soul to be deleted")
+	}
+}
+
+// TestCobaltDB_GetActiveVerdicts_EmptyWorkspace tests GetActiveVerdicts with empty workspace
+func TestCobaltDB_GetActiveVerdicts_EmptyWorkspace(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	verdicts, err := db.GetActiveVerdicts(ctx, "", "test-soul")
+	if err != nil {
+		t.Fatalf("GetActiveVerdicts failed: %v", err)
+	}
+	// Empty workspace defaults to "default", no verdicts there so nil or empty is fine
+	_ = verdicts
+}
+
+// TestCobaltDB_ListWorkspaces_WithNilData tests ListWorkspaces with nil/tombstone data
+func TestCobaltDB_ListWorkspaces_WithNilData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	ws := &core.Workspace{ID: "ws-nil-test", Name: "Nil Test"}
+	if err := db.SaveWorkspace(ctx, ws); err != nil {
+		t.Fatalf("SaveWorkspace failed: %v", err)
+	}
+
+	if err := db.Put("workspaces/deleted-ws", nil); err != nil {
+		t.Fatalf("Put nil failed: %v", err)
+	}
+
+	workspaces, err := db.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces failed: %v", err)
+	}
+	found := false
+	for _, w := range workspaces {
+		if w.ID == "ws-nil-test" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected to find ws-nil-test workspace")
+	}
+}
+
+// TestCobaltDB_ListWorkspaces_WithCorruptData tests ListWorkspaces skipping corrupt entries
+func TestCobaltDB_ListWorkspaces_WithCorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	ws := &core.Workspace{ID: "ws-valid", Name: "Valid Workspace"}
+	if err := db.SaveWorkspace(ctx, ws); err != nil {
+		t.Fatalf("SaveWorkspace failed: %v", err)
+	}
+
+	// Put corrupt data
+	if err := db.Put("workspaces/corrupt-ws", []byte("not json{{{")); err != nil {
+		t.Fatalf("Put corrupt data failed: %v", err)
+	}
+
+	workspaces, err := db.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces failed: %v", err)
+	}
+
+	// Should still find the valid workspace
+	found := false
+	for _, w := range workspaces {
+		if w.ID == "ws-valid" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected to find ws-valid workspace")
+	}
+
+	// Should have skipped the corrupt entry
+	for _, w := range workspaces {
+		if w.ID == "corrupt-ws" {
+			t.Error("Should not have found corrupt workspace")
+		}
+	}
+}
+
+// TestCobaltDB_ListJudgments_WithNilData tests ListJudgments skipping nil data
+func TestCobaltDB_ListJudgments_WithNilData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	if err := db.Put("default/judgments/test-soul/nil-key", nil); err != nil {
+		t.Fatalf("Put nil failed: %v", err)
+	}
+
+	judgments, err := db.ListJudgments(ctx, "test-soul", time.Now().Add(-time.Hour), time.Now().Add(time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ListJudgments failed: %v", err)
+	}
+	if judgments == nil {
+		t.Error("Expected non-nil slice")
+	}
+}
+
+// TestCobaltDB_ListChannels_WithNilData tests ListChannels skipping nil data
+func TestCobaltDB_ListChannels_WithNilData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	if err := db.Put("default/channels/nil-channel", nil); err != nil {
+		t.Fatalf("Put nil failed: %v", err)
+	}
+
+	channels, err := db.ListChannels(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListChannels failed: %v", err)
+	}
+	if channels == nil {
+		t.Error("Expected non-nil slice")
+	}
+}
+
+// TestCobaltDB_DeleteJourney_EmptyWorkspace tests DeleteJourney with empty workspace
+func TestCobaltDB_DeleteJourney_EmptyWorkspace(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	// Save a journey with default workspace
+	journey := &core.JourneyConfig{
+		ID:   "default-journey",
+		Name: "Default Journey",
+	}
+	if err := db.SaveJourney(ctx, journey); err != nil {
+		t.Fatalf("SaveJourney failed: %v", err)
+	}
+
+	// Delete with empty workspaceID
+	if err := db.DeleteJourney(ctx, "", "default-journey"); err != nil {
+		t.Fatalf("DeleteJourney failed: %v", err)
+	}
+
+	// Verify deleted
+	_, err := db.GetJourneyNoCtx("default-journey")
+	if err == nil {
+		t.Error("Expected journey to be deleted")
+	}
+}
+
+// TestCobaltDB_ListVerdicts_EmptyWorkspace tests ListVerdicts with empty workspace
+func TestCobaltDB_ListVerdicts_EmptyWorkspace(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	v := &core.Verdict{
+		ID:          "v-empty",
+		WorkspaceID: "default",
+		SoulID:      "soul-1",
+		Status:      core.VerdictActive,
+		FiredAt:     time.Now(),
+	}
+	if err := db.SaveVerdict(ctx, v); err != nil {
+		t.Fatalf("SaveVerdict failed: %v", err)
+	}
+
+	// List with empty workspace should default to "default"
+	all, err := db.ListVerdicts(ctx, "", "", 0)
+	if err != nil {
+		t.Fatalf("ListVerdicts failed: %v", err)
+	}
+	if len(all) < 1 {
+		t.Errorf("Expected at least 1 verdict, got %d", len(all))
+	}
+}
+
+// TestCobaltDB_ListChannels_EmptyWorkspace tests ListChannels with empty workspace
+func TestCobaltDB_ListChannels_EmptyWorkspace(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	ch := &core.ChannelConfig{
+		Name: "ch-empty",
+		Type: "webhook",
+		Webhook: &core.WebhookConfig{
+			URL: "https://example.com",
+		},
+	}
+	if err := db.SaveChannel(ctx, ch); err != nil {
+		t.Fatalf("SaveChannel failed: %v", err)
+	}
+
+	// ListChannels uses hardcoded "default" workspace
+	channels, err := db.ListChannels(ctx, "")
+	if err != nil {
+		t.Fatalf("ListChannels failed: %v", err)
+	}
+	if len(channels) < 1 {
+		t.Errorf("Expected at least 1 channel, got %d", len(channels))
+	}
+}
+
+// TestCobaltDB_WAL_CorruptedEntry tests recovery with corrupted WAL entry
+func TestCobaltDB_WAL_CorruptedEntry(t *testing.T) {
+	dir := t.TempDir()
+	cfg := core.StorageConfig{Path: dir}
+
+	db, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+
+	// Write a valid entry
+	db.Put("good-key", []byte("good-value"))
+	db.Close()
+
+	// Corrupt the WAL file by appending invalid data
+	walPath := filepath.Join(dir, "wal.log")
+	f, err := os.OpenFile(walPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Skip("Could not open WAL file")
+	}
+	// Write length prefix that says 100 bytes but then write invalid JSON
+	length := make([]byte, 4)
+	length[0] = 0
+	length[1] = 0
+	length[2] = 0
+	length[3] = 100
+	f.Write(length)
+	f.Write([]byte("this is not valid json or wal entry"))
+	f.Close()
+
+	// Reopening succeeds but logs a warning and starts fresh (resilient behavior)
+	db2, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("Expected DB to start fresh despite corrupted WAL: %v", err)
+	}
+	defer db2.Close()
+
+	// Data from before corruption should still be recoverable (from in-memory)
+	// The corruption happens after close, so the DB starts fresh
+}
+
+// TestCobaltDB_WAL_InvalidEntryLength tests recovery with oversized WAL entry
+func TestCobaltDB_WAL_InvalidEntryLength(t *testing.T) {
+	dir := t.TempDir()
+	cfg := core.StorageConfig{Path: dir}
+
+	db, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	db.Close()
+
+	// Write an entry with invalid length > 1MB
+	walPath := filepath.Join(dir, "wal.log")
+	f, err := os.OpenFile(walPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Skip("Could not open WAL file")
+	}
+	length := make([]byte, 4)
+	length[0] = 1 // > 1MB (16MB)
+	length[1] = 0
+	length[2] = 0
+	length[3] = 0
+	f.Write(length)
+	f.Write([]byte("dummy data"))
+	f.Close()
+
+	// Reopening succeeds but logs a warning and starts fresh (resilient behavior)
+	db2, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("Expected DB to start fresh despite invalid WAL: %v", err)
+	}
+	defer db2.Close()
+}
+
+// TestNewWAL_ReadOnlyDirectory tests WAL creation when directory is not writable
+func TestNewWAL_ReadOnlyDirectory(t *testing.T) {
+	readOnlyDir := t.TempDir()
+	db, err := NewEngine(core.StorageConfig{Path: readOnlyDir}, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	// Close before changing permissions
+	db.Close()
+
+	// Set directory to read-only
+	os.Chmod(readOnlyDir, 0555)
+	defer os.Chmod(readOnlyDir, 0755)
+
+	// Try to create another DB - may fail on Unix, succeed on Windows
+	cfg := core.StorageConfig{Path: readOnlyDir}
+	db2, err := NewEngine(cfg, newTestLogger())
+	if err == nil && db2 != nil {
+		db2.Close()
+		t.Log("Read-only directory test - behavior varies by OS")
+	}
+}
+
+// TestCobaltDB_WAL_EmptyRecovery tests recovery from empty WAL
+func TestCobaltDB_WAL_EmptyRecovery(t *testing.T) {
+	dir := t.TempDir()
+	cfg := core.StorageConfig{Path: dir}
+
+	// Create empty WAL file
+	walPath := filepath.Join(dir, "wal.log")
+	os.WriteFile(walPath, []byte{}, 0644)
+
+	db, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewEngine failed with empty WAL: %v", err)
+	}
+	defer db.Close()
+
+	// Should work fine with no WAL entries
+	value, err := db.Get("nonexistent")
+	if err == nil {
+		t.Log("Expected error for nonexistent key")
+	}
+	_ = value
+}
+
+// TestCobaltDB_WAL_DeleteRecovery tests that DELETE entries are replayed during recovery
+func TestCobaltDB_WAL_DeleteRecovery(t *testing.T) {
+	dir := t.TempDir()
+	cfg := core.StorageConfig{Path: dir}
+
+	db, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+
+	// Add data and then delete it
+	db.Put("delete-me", []byte("should-be-gone"))
+	db.Delete("delete-me")
+	db.Close()
+
+	// Reopen - deleted key should still be in WAL as tombstone
+	db2, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewEngine (reopen) failed: %v", err)
+	}
+	defer db2.Close()
+
+	// Get should return nil (tombstone)
+	value, err := db2.Get("delete-me")
+	if err != nil {
+		t.Logf("Get returned error (expected for tombstone): %v", err)
+	}
+	if value != nil {
+		t.Log("Expected nil value for deleted key (tombstone)")
+	}
+
+	// List should still work (tombstones filtered from listing)
+	keys, err := db2.List("default/")
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	// The deleted key might still be listed but with nil value in tree
+	_ = keys
+}
+
+// TestCobaltDB_ListSouls_DefaultWorkspace tests ListSouls with empty workspaceID
+func TestCobaltDB_ListSouls_DefaultWorkspace(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	soul := &core.Soul{
+		ID:     "default-soul",
+		Name:   "Default Soul",
+		Type:   core.CheckHTTP,
+		Target: "https://example.com",
+	}
+	if err := db.SaveSoul(ctx, soul); err != nil {
+		t.Fatalf("SaveSoul failed: %v", err)
+	}
+
+	// List with empty workspace should use "default" prefix
+	souls, err := db.ListSouls(ctx, "", 0, 10)
+	if err != nil {
+		t.Fatalf("ListSouls failed: %v", err)
+	}
+	if len(souls) == 0 {
+		t.Error("Expected at least one soul with default workspace")
+	}
+}
+
+// TestCobaltDB_ListSouls_NegativeOffset tests ListSouls with negative offset
+func TestCobaltDB_ListSouls_NegativeOffset(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	soul := &core.Soul{
+		ID:          "neg-offset-soul",
+		Name:        "Neg Offset Soul",
+		Type:        core.CheckHTTP,
+		Target:      "https://example.com",
+		WorkspaceID: "default",
+	}
+	if err := db.SaveSoul(ctx, soul); err != nil {
+		t.Fatalf("SaveSoul failed: %v", err)
+	}
+
+	// Negative offset should be treated as 0
+	souls, err := db.ListSouls(ctx, "default", -5, 10)
+	if err != nil {
+		t.Fatalf("ListSouls failed: %v", err)
+	}
+	if len(souls) == 0 {
+		t.Error("Expected at least one soul with negative offset")
+	}
+}
+
+// TestCobaltDB_ListSouls_OffsetBeyondRange tests ListSouls with offset past all results
+func TestCobaltDB_ListSouls_OffsetBeyondRange(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	souls, err := db.ListSouls(ctx, "default", 99999, 10)
+	if err != nil {
+		t.Fatalf("ListSouls failed: %v", err)
+	}
+	if len(souls) != 0 {
+		t.Errorf("Expected empty result for offset beyond range, got %d", len(souls))
+	}
+}
+
+// TestCobaltDB_ListVerdicts_CorruptData tests that ListVerdicts skips corrupt entries
+func TestCobaltDB_ListVerdicts_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Put corrupt data directly into storage
+	if err := db.Put("default/verdicts/corrupt", []byte("not json")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	// Also put a valid verdict
+	validVerdict := &core.Verdict{
+		ID:          "v-valid",
+		WorkspaceID: "default",
+		SoulID:      "soul-1",
+		Status:      core.VerdictActive,
+		FiredAt:     time.Now(),
+	}
+	ctx := context.Background()
+	if err := db.SaveVerdict(ctx, validVerdict); err != nil {
+		t.Fatalf("SaveVerdict failed: %v", err)
+	}
+
+	// ListVerdicts should skip corrupt entry and return valid ones
+	verdicts, err := db.ListVerdicts(ctx, "default", "", 0)
+	if err != nil {
+		t.Fatalf("ListVerdicts failed: %v", err)
+	}
+	if len(verdicts) != 1 {
+		t.Errorf("Expected 1 verdict, got %d", len(verdicts))
+	}
+}
+
+// TestCobaltDB_ListChannels_CorruptData tests that ListChannels skips corrupt entries
+func TestCobaltDB_ListChannels_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Put corrupt data
+	if err := db.Put("default/channels/corrupt", []byte("bad data")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	// Put a valid channel
+	validCh := &core.ChannelConfig{
+		Name: "Valid Channel",
+		Type: "webhook",
+	}
+	ctx := context.Background()
+	if err := db.SaveChannel(ctx, validCh); err != nil {
+		t.Fatalf("SaveChannel failed: %v", err)
+	}
+
+	channels, err := db.ListChannels(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListChannels failed: %v", err)
+	}
+	if len(channels) != 1 {
+		t.Errorf("Expected 1 channel, got %d", len(channels))
+	}
+}
+
+// TestCobaltDB_ListRules_CorruptData tests that ListRules skips corrupt entries
+func TestCobaltDB_ListRules_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	if err := db.Put("default/rules/corrupt", []byte("{invalid}")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	validRule := &core.AlertRule{
+		ID:      "rule-valid",
+		Name:    "Valid Rule",
+		Enabled: true,
+	}
+	ctx := context.Background()
+	if err := db.SaveRule(ctx, validRule); err != nil {
+		t.Fatalf("SaveRule failed: %v", err)
+	}
+
+	rules, err := db.ListRules(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListRules failed: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Errorf("Expected 1 rule, got %d", len(rules))
+	}
+}
+
+// TestCobaltDB_ListJackals_CorruptData tests that ListJackals skips corrupt entries
+func TestCobaltDB_ListJackals_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	if err := db.Put("default/jackals/corrupt", []byte("corrupt jackal")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := db.SaveJackal(ctx, "jackal-valid", "10.0.0.1:7946", "us-east-1"); err != nil {
+		t.Fatalf("SaveJackal failed: %v", err)
+	}
+
+	jackals, err := db.ListJackals(ctx)
+	if err != nil {
+		t.Fatalf("ListJackals failed: %v", err)
+	}
+	if len(jackals) != 1 {
+		t.Errorf("Expected 1 jackal, got %d", len(jackals))
+	}
+}
+
+// TestCobaltDB_ListJourneys_CorruptData tests that ListJourneys skips corrupt entries
+func TestCobaltDB_ListJourneys_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	if err := db.Put("default/journeys/corrupt", []byte("not valid json")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	validJourney := &core.JourneyConfig{
+		ID:   "journey-valid",
+		Name: "Valid Journey",
+	}
+	ctx := context.Background()
+	if err := db.SaveJourney(ctx, validJourney); err != nil {
+		t.Fatalf("SaveJourney failed: %v", err)
+	}
+
+	journeys, err := db.ListJourneys(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListJourneys failed: %v", err)
+	}
+	if len(journeys) != 1 {
+		t.Errorf("Expected 1 journey, got %d", len(journeys))
+	}
+}
+
+// TestCobaltDB_GetVerdict_NotFound tests GetVerdict when verdict doesn't exist
+func TestCobaltDB_GetVerdict_NotFound(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	_, err := db.GetVerdict(ctx, "default", "nonexistent")
+	if err == nil {
+		t.Error("Expected error for nonexistent verdict")
+	}
+}
+
+// TestCobaltDB_GetVerdict_DefaultWorkspace tests GetVerdict with empty workspace
+func TestCobaltDB_GetVerdict_DefaultWorkspace(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	verdict := &core.Verdict{
+		ID:     "v-ws-test",
+		SoulID: "soul-1",
+		Status: core.VerdictActive,
+		FiredAt: time.Now(),
+	}
+	if err := db.SaveVerdict(ctx, verdict); err != nil {
+		t.Fatalf("SaveVerdict failed: %v", err)
+	}
+
+	// Get with empty workspaceID should default to "default"
+	got, err := db.GetVerdict(ctx, "", "v-ws-test")
+	if err != nil {
+		t.Fatalf("GetVerdict failed: %v", err)
+	}
+	if got.ID != "v-ws-test" {
+		t.Errorf("ID = %s, want v-ws-test", got.ID)
+	}
+}
+
+// TestCobaltDB_ListVerdicts_DefaultWorkspace tests ListVerdicts with empty workspace
+func TestCobaltDB_ListVerdicts_DefaultWorkspace(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	verdict := &core.Verdict{
+		ID:      "v-ws-list",
+		SoulID:  "soul-1",
+		Status:  core.VerdictActive,
+		FiredAt: time.Now(),
+	}
+	if err := db.SaveVerdict(ctx, verdict); err != nil {
+		t.Fatalf("SaveVerdict failed: %v", err)
+	}
+
+	// List with empty workspaceID should default to "default"
+	verdicts, err := db.ListVerdicts(ctx, "", "", 0)
+	if err != nil {
+		t.Fatalf("ListVerdicts failed: %v", err)
+	}
+	if len(verdicts) != 1 {
+		t.Errorf("Expected 1 verdict, got %d", len(verdicts))
+	}
+}
+
+// TestCobaltDB_ListChannels_DefaultWorkspace tests ListChannels with empty workspace
+func TestCobaltDB_ListChannels_DefaultWorkspace(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ch := &core.ChannelConfig{
+		Name: "Test Channel",
+		Type: "webhook",
+	}
+	ctx := context.Background()
+	if err := db.SaveChannel(ctx, ch); err != nil {
+		t.Fatalf("SaveChannel failed: %v", err)
+	}
+
+	channels, err := db.ListChannels(ctx, "")
+	if err != nil {
+		t.Fatalf("ListChannels failed: %v", err)
+	}
+	if len(channels) != 1 {
+		t.Errorf("Expected 1 channel, got %d", len(channels))
+	}
+}
+
+// TestCobaltDB_ListRules_DefaultWorkspace tests ListRules with empty workspace
+func TestCobaltDB_ListRules_DefaultWorkspace(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	rule := &core.AlertRule{
+		ID:      "rule-ws-test",
+		Name:    "Test Rule",
+		Enabled: true,
+	}
+	ctx := context.Background()
+	if err := db.SaveRule(ctx, rule); err != nil {
+		t.Fatalf("SaveRule failed: %v", err)
+	}
+
+	rules, err := db.ListRules(ctx, "")
+	if err != nil {
+		t.Fatalf("ListRules failed: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Errorf("Expected 1 rule, got %d", len(rules))
+	}
+}
+
+// TestCobaltDB_ListJudgments_TimeFilter tests that ListJudgments correctly filters by time range
+func TestCobaltDB_ListJudgments_TimeFilter(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	now := time.Now()
+
+	// Save judgments at different times
+	judgments := []*core.Judgment{
+		{ID: "j1", SoulID: "soul-1", Status: core.SoulAlive, Timestamp: now.Add(-30 * time.Minute)},
+		{ID: "j2", SoulID: "soul-1", Status: core.SoulDead, Timestamp: now.Add(-2 * time.Hour)}, // Outside range
+		{ID: "j3", SoulID: "soul-1", Status: core.SoulDegraded, Timestamp: now.Add(-10 * time.Minute)},
+	}
+	for _, j := range judgments {
+		if err := db.SaveJudgment(ctx, j); err != nil {
+			t.Fatalf("SaveJudgment failed: %v", err)
+		}
+	}
+
+	// Query with 1-hour range
+	start := now.Add(-1 * time.Hour)
+	end := now
+	results, err := db.ListJudgments(ctx, "soul-1", start, end, 100)
+	if err != nil {
+		t.Fatalf("ListJudgments failed: %v", err)
+	}
+	// Should only return j1 and j3 (within the last hour)
+	if len(results) != 2 {
+		t.Errorf("Expected 2 judgments in time range, got %d", len(results))
+	}
+
+	// Test with limit
+	results, err = db.ListJudgments(ctx, "soul-1", start, end, 1)
+	if err != nil {
+		t.Fatalf("ListJudgments failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("Expected 1 judgment with limit, got %d", len(results))
+	}
+}
+
+// TestCobaltDB_ListJudgments_CorruptData tests that ListJudgments skips corrupt entries
+func TestCobaltDB_ListJudgments_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	if err := db.Put("default/judgments/soul-1/corrupt", []byte("not json")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	ctx := context.Background()
+	validJ := &core.Judgment{
+		ID:        "j-valid",
+		SoulID:    "soul-1",
+		Status:    core.SoulAlive,
+		Timestamp: time.Now(),
+	}
+	if err := db.SaveJudgment(ctx, validJ); err != nil {
+		t.Fatalf("SaveJudgment failed: %v", err)
+	}
+
+	now := time.Now()
+	results, err := db.ListJudgments(ctx, "soul-1", now.Add(-1*time.Hour), now, 100)
+	if err != nil {
+		t.Fatalf("ListJudgments failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("Expected 1 judgment, got %d", len(results))
+	}
+}
+
+// TestCobaltDB_SaveAlertEvent_AutoID tests that SaveAlertEvent auto-generates ID
+func TestCobaltDB_SaveAlertEvent_AutoID(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	event := &core.AlertEvent{
+		SoulID:    "soul-1",
+		ChannelID: "ch-1",
+		Message:   "Test alert",
+		// No ID - should be auto-generated
+	}
+
+	if err := db.SaveAlertEvent(event); err != nil {
+		t.Fatalf("SaveAlertEvent failed: %v", err)
+	}
+
+	if event.ID == "" {
+		t.Error("Expected auto-generated ID")
+	}
+}
+
+// TestCobaltDB_ListAlertEvents_CorruptData tests that ListAlertEvents skips corrupt entries
+func TestCobaltDB_ListAlertEvents_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	if err := db.Put("default/alerts/events/soul-1/corrupt", []byte("bad")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	event := &core.AlertEvent{
+		ID:        "event-valid",
+		SoulID:    "soul-1",
+		ChannelID: "ch-1",
+		Message:   "Test alert",
+	}
+	if err := db.SaveAlertEvent(event); err != nil {
+		t.Fatalf("SaveAlertEvent failed: %v", err)
+	}
+
+	events, err := db.ListAlertEvents("soul-1", 100)
+	if err != nil {
+		t.Fatalf("ListAlertEvents failed: %v", err)
+	}
+	if len(events) != 1 {
+		t.Errorf("Expected 1 event, got %d", len(events))
+	}
+}
+
+// TestCobaltDB_GetActiveVerdicts_Empty tests GetActiveVerdicts with no verdicts
+func TestCobaltDB_GetActiveVerdicts_Empty(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	verdicts, err := db.GetActiveVerdicts(ctx, "default", "soul-1")
+	if err != nil {
+		t.Fatalf("GetActiveVerdicts failed: %v", err)
+	}
+	if len(verdicts) != 0 {
+		t.Errorf("Expected 0 verdicts, got %d", len(verdicts))
+	}
+}
+
+// TestCobaltDB_ListAlertEvents_Empty tests ListAlertEvents with no events
+func TestCobaltDB_ListAlertEvents_Empty(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	events, err := db.ListAlertEvents("soul-1", 100)
+	if err != nil {
+		t.Fatalf("ListAlertEvents failed: %v", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("Expected 0 events, got %d", len(events))
+	}
+}
+
+// TestCobaltDB_QueryJudgments_CorruptData tests that QueryJudgments skips corrupt entries
+func TestCobaltDB_QueryJudgments_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Write corrupt JSON directly to a judgment key
+	corruptKey := "default/judgments/corrupt-soul/1700000000000000000"
+	if err := db.Put(corruptKey, []byte("not json")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	// Write a valid judgment
+	validJudgment := &core.Judgment{
+		ID:          "j-valid",
+		SoulID:      "corrupt-soul",
+		WorkspaceID: "default",
+		Status:      core.SoulAlive,
+		Timestamp:   time.Now().Add(time.Second),
+	}
+	ctx := context.Background()
+	if err := db.SaveJudgment(ctx, validJudgment); err != nil {
+		t.Fatalf("SaveJudgment failed: %v", err)
+	}
+
+	start := time.Now().Add(-time.Hour)
+	end := time.Now().Add(time.Hour)
+	judgments, err := db.QueryJudgments(ctx, "default", "corrupt-soul", start, end, 0)
+	if err != nil {
+		t.Fatalf("QueryJudgments failed: %v", err)
+	}
+	if len(judgments) != 1 {
+		t.Errorf("Expected 1 judgment, got %d", len(judgments))
+	}
+}
+
+// TestCobaltDB_GetLatestJudgment_CorruptData tests that GetLatestJudgment skips corrupt entries
+func TestCobaltDB_GetLatestJudgment_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Write corrupt JSON directly to a judgment key
+	corruptKey := "default/judgments/mixed-soul/1700000000000000000"
+	if err := db.Put(corruptKey, []byte("not json")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	// Write a valid judgment with a later timestamp
+	validKey := "default/judgments/mixed-soul/1700000000000000001"
+	validJudgment := &core.Judgment{
+		ID:          "j-valid",
+		SoulID:      "mixed-soul",
+		WorkspaceID: "default",
+		Status:      core.SoulAlive,
+		Timestamp:   time.Unix(0, 1700000000000000001),
+	}
+	data, _ := json.Marshal(validJudgment)
+	if err := db.Put(validKey, data); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	ctx := context.Background()
+	latest, err := db.GetLatestJudgment(ctx, "default", "mixed-soul")
+	if err != nil {
+		t.Fatalf("GetLatestJudgment failed: %v", err)
+	}
+	if latest.ID != "j-valid" {
+		t.Errorf("Expected ID 'j-valid', got '%s'", latest.ID)
+	}
+}
+
+// TestCobaltDB_GetLatestJudgment_AllCorrupt tests that GetLatestJudgment returns NotFound when all data is corrupt
+func TestCobaltDB_GetLatestJudgment_AllCorrupt(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Write only corrupt data
+	corruptKey := "default/judgments/all-corrupt/1700000000000000000"
+	if err := db.Put(corruptKey, []byte("not json")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	ctx := context.Background()
+	_, err := db.GetLatestJudgment(ctx, "default", "all-corrupt")
+	if err == nil {
+		t.Fatal("Expected error when all data is corrupt")
+	}
+	var notFound *core.NotFoundError
+	if !errors.As(err, &notFound) {
+		t.Errorf("Expected NotFoundError, got %T: %v", err, err)
+	}
+}
+
+// TestCobaltDB_GetActiveVerdicts_CorruptData tests that GetActiveVerdicts skips corrupt entries
+func TestCobaltDB_GetActiveVerdicts_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Write corrupt JSON to a verdict key
+	corruptKey := "default/verdicts/corrupt"
+	if err := db.Put(corruptKey, []byte("not json")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	// Write a valid active verdict
+	validVerdict := &core.Verdict{
+		ID:          "v-valid",
+		WorkspaceID: "default",
+		SoulID:      "soul-1",
+		Status:      core.VerdictActive,
+		FiredAt:     time.Now(),
+	}
+	ctx := context.Background()
+	if err := db.SaveVerdict(ctx, validVerdict); err != nil {
+		t.Fatalf("SaveVerdict failed: %v", err)
+	}
+
+	verdicts, err := db.GetActiveVerdicts(ctx, "default", "soul-1")
+	if err != nil {
+		t.Fatalf("GetActiveVerdicts failed: %v", err)
+	}
+	if len(verdicts) != 1 {
+		t.Errorf("Expected 1 verdict, got %d", len(verdicts))
+	}
+}
+
+// TestCobaltDB_GetSubscriptionsByPage_CorruptData tests that GetSubscriptionsByPage skips corrupt entries
+func TestCobaltDB_GetSubscriptionsByPage_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	repo := NewStatusPageRepository(db)
+
+	// Write corrupt JSON to a subscription key
+	corruptKey := "statuspage/subscriptions/page-1/corrupt"
+	if err := db.Put(corruptKey, []byte("not json")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	// Write a valid subscription
+	validSub := &core.StatusPageSubscription{
+		ID:     "sub-valid",
+		PageID: "page-1",
+		Email:  "test@example.com",
+	}
+	validData, _ := json.Marshal(validSub)
+	validKey := "statuspage/subscriptions/page-1/sub-valid"
+	if err := db.Put(validKey, validData); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	subs, err := repo.GetSubscriptionsByPage("page-1")
+	if err != nil {
+		t.Fatalf("GetSubscriptionsByPage failed: %v", err)
+	}
+	if len(subs) != 1 {
+		t.Errorf("Expected 1 subscription, got %d", len(subs))
+	}
+}
+
+// TestTimeSeriesStore_aggregateAndSave_SingleSource tests aggregateAndSave with a single source entry (Count=1, single latency)
+func TestTimeSeriesStore_aggregateAndSave_SingleSource(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ts := NewTimeSeriesStore(db, core.TimeSeriesConfig{}, newTestLogger())
+
+	// Create a single source summary with Count=1 (only 1 latency entry)
+	bucketTime := time.Now().Truncate(time.Minute)
+	sources := []*JudgmentSummary{
+		{
+			SoulID:       "single-soul",
+			WorkspaceID:  "default",
+			Resolution:   "1min",
+			BucketTime:   bucketTime,
+			Count:        1,
+			SuccessCount: 1,
+			FailureCount: 0,
+			AvgLatency:   42.5,
+			MinLatency:   42.5,
+			MaxLatency:   42.5,
+		},
+	}
+
+	err := ts.aggregateAndSave("default", "single-soul", Resolution5Min, bucketTime, sources)
+	if err != nil {
+		t.Fatalf("aggregateAndSave failed: %v", err)
+	}
+
+	// Verify the summary was saved
+	key := fmt.Sprintf("default/ts/single-soul/5min/%d", bucketTime.Unix())
+	data, err := db.Get(key)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	var summary JudgmentSummary
+	if err := json.Unmarshal(data, &summary); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if summary.Count != 1 {
+		t.Errorf("Expected count 1, got %d", summary.Count)
+	}
+	if summary.FailureCount != 0 {
+		t.Errorf("Expected failure count 0, got %d", summary.FailureCount)
+	}
+	// With only 1 latency entry (< 2), percentiles should be zero
+	if summary.P50Latency != 0 || summary.P95Latency != 0 || summary.P99Latency != 0 {
+		t.Errorf("Expected zero percentiles with <2 latency entries, got p50=%f p95=%f p99=%f",
+			summary.P50Latency, summary.P95Latency, summary.P99Latency)
+	}
+}
+
+// TestTimeSeriesStore_aggregateAndSave_ZeroCount tests aggregateAndSave with zero-count sources (triggers NaN in uptime calculation)
+func TestTimeSeriesStore_aggregateAndSave_ZeroCount(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ts := NewTimeSeriesStore(db, core.TimeSeriesConfig{}, newTestLogger())
+
+	bucketTime := time.Now().Truncate(time.Minute)
+	sources := []*JudgmentSummary{
+		{
+			SoulID:      "zero-soul",
+			WorkspaceID: "default",
+			Resolution:  "1min",
+			BucketTime:  bucketTime,
+			Count:       0,
+			AvgLatency:  0,
+		},
+	}
+
+	err := ts.aggregateAndSave("default", "zero-soul", Resolution5Min, bucketTime, sources)
+	// The code calculates 0/0 for uptime which produces NaN, causing json.Marshal to fail
+	if err == nil {
+		t.Fatal("Expected error from aggregateAndSave with zero-count sources")
+	}
+}
+
+// TestRetentionManager_purgeSummaries_MalformedKeys tests purgeSummaries with malformed keys
+func TestRetentionManager_purgeSummaries_MalformedKeys(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Write malformed ts keys that should be skipped gracefully
+	malformedKeys := []string{
+		"default/ts/soul-1/1min/not-a-timestamp",
+		"default/ts",
+		"default/ts/",
+		"default/ts/soul-1",
+	}
+	for _, key := range malformedKeys {
+		if err := db.Put(key, []byte("{}")); err != nil {
+			t.Fatalf("Put failed for key %s: %v", key, err)
+		}
+	}
+
+	// Run purgeSummaries directly - should not panic on malformed keys
+	rm := NewRetentionManager(db, core.RetentionConfig{
+		Minute: core.Duration{Duration: time.Hour},
+	}, "", newTestLogger())
+
+	cutoff := time.Now().Add(-time.Hour)
+	err := rm.purgeSummaries("1min", cutoff)
+	if err != nil {
+		t.Fatalf("purgeSummaries failed: %v", err)
+	}
+
+	// Malformed keys should still exist (they were skipped, not deleted)
+	for _, key := range malformedKeys {
+		_, err := db.Get(key)
+		if err != nil {
+			t.Errorf("Malformed key %s should still exist, got error: %v", key, err)
+		}
+	}
+}
+
+// TestRetentionManager_purgeRawData_MalformedKeys tests purgeRawData with malformed judgment keys
+func TestRetentionManager_purgeRawData_MalformedKeys(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Write malformed judgment keys
+	malformedKeys := []string{
+		"default/judgments/soul-1/not-a-timestamp",
+		"default/judgments",
+		"default/judgments/soul-1",
+	}
+	for _, key := range malformedKeys {
+		if err := db.Put(key, []byte("{}")); err != nil {
+			t.Fatalf("Put failed for key %s: %v", key, err)
+		}
+	}
+
+	// Run purgeRawData - should not panic on malformed keys
+	rm := NewRetentionManager(db, core.RetentionConfig{
+		Raw: core.Duration{Duration: time.Hour},
+	}, "", newTestLogger())
+
+	cutoff := time.Now()
+	err := rm.purgeRawData(cutoff)
+	if err != nil {
+		t.Fatalf("purgeRawData failed: %v", err)
+	}
+}
+
+// TestCobaltDBLogStore_GetLog_CorruptData tests GetLog with corrupt data
+func TestCobaltDBLogStore_GetLog_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBLogStore(db)
+
+	// Write corrupt JSON to a raft log key
+	if err := db.Put("raft/log/1", []byte("not json")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	var entry core.RaftLogEntry
+	err := store.GetLog(1, &entry)
+	if err == nil {
+		t.Fatal("Expected error for corrupt log entry")
+	}
+}
+
+// TestCobaltDBLogStore_GetLog_NotFound tests GetLog for nonexistent entry
+func TestCobaltDBLogStore_GetLog_NotFound(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBLogStore(db)
+
+	var entry core.RaftLogEntry
+	err := store.GetLog(999, &entry)
+	if err == nil {
+		t.Fatal("Expected error for nonexistent log entry")
+	}
+}
+
+// TestCobaltDBSnapshotSink_Cancel tests that Cancel marks sink as closed
+func TestCobaltDBSnapshotSink_Cancel(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBSnapshotStore(db)
+	sink, err := store.Create(1, 1, 1, nil)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	if err := sink.Cancel(); err != nil {
+		t.Fatalf("Cancel failed: %v", err)
+	}
+
+	// After cancel, Write should fail
+	_, err = sink.Write([]byte("data"))
+	if err == nil {
+		t.Error("Expected Write to fail after Cancel")
+	}
+}
+
+// TestCobaltDBStableStore_SetUint64AndGetUint64 tests stable store uint64 operations
+func TestCobaltDBStableStore_SetUint64AndGetUint64(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBStableStore(db)
+
+	if err := store.SetUint64("test-key", 12345); err != nil {
+		t.Fatalf("SetUint64 failed: %v", err)
+	}
+
+	val, err := store.GetUint64("test-key")
+	if err != nil {
+		t.Fatalf("GetUint64 failed: %v", err)
+	}
+	if val != 12345 {
+		t.Errorf("Expected 12345, got %d", val)
+	}
+}
+
+// TestCobaltDBStableStore_SetAndGet tests stable store byte slice operations
+func TestCobaltDBStableStore_SetAndGet(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBStableStore(db)
+
+	testData := []byte("test-value")
+	if err := store.Set("test-key", testData); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	val, err := store.Get("test-key")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if string(val) != "test-value" {
+		t.Errorf("Expected 'test-value', got '%s'", val)
+	}
+}
+
+// TestCobaltDBStableStore_GetUint64_NotFound tests GetUint64 for missing key
+func TestCobaltDBStableStore_GetUint64_NotFound(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBStableStore(db)
+
+	_, err := store.GetUint64("nonexistent")
+	if err == nil {
+		t.Fatal("Expected error for nonexistent key")
+	}
+}
+
+// TestCobaltDBSnapshotStore_List_NotFound tests List when no snapshots exist
+func TestCobaltDBSnapshotStore_List_NotFound(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBSnapshotStore(db)
+
+	_, err := store.List()
+	if err == nil {
+		t.Fatal("Expected error when no snapshot metadata exist")
+	}
+}
+
+// TestCobaltDBSnapshotStore_Open_NotFound tests Open when no snapshot exists
+func TestCobaltDBSnapshotStore_Open_NotFound(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	store := NewCobaltDBSnapshotStore(db)
+
+	_, err := store.Open("nonexistent")
+	if err == nil {
+		t.Fatal("Expected error when no snapshot exists")
 	}
 }

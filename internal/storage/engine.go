@@ -24,7 +24,8 @@ type CobaltDB struct {
 	logger     *slog.Logger
 	closed     bool
 	closedMu   sync.Mutex
-	btreeOrder int // Configurable B+Tree order
+	btreeOrder int    // Configurable B+Tree order
+	encryptor  *encryptor // AES-256-GCM encryption (nil if disabled)
 }
 
 // btreeIndex is an in-memory B+Tree index (simplified for Phase 1)
@@ -102,12 +103,24 @@ func NewEngine(config core.StorageConfig, logger *slog.Logger) (*CobaltDB, error
 		btreeOrder: btreeOrder,
 	}
 
+	// Initialize encryption if configured
+	var enc *encryptor
+	if config.Encryption.Enabled && config.Encryption.Key != "" {
+		var err error
+		enc, err = newEncryptor(config.Encryption.Key)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize encryption: %w", err)
+		}
+		logger.Info("Encryption enabled (AES-256-GCM)")
+	}
+
 	db := &CobaltDB{
 		path:       config.Path,
 		data:       index,
 		wal:        wal,
 		logger:     logger.With("component", "cobaltdb"),
 		btreeOrder: btreeOrder,
+		encryptor:  enc,
 	}
 
 	// Recover from WAL
@@ -167,7 +180,18 @@ func (db *CobaltDB) Get(key string) ([]byte, error) {
 		return nil, &core.NotFoundError{Entity: "key", ID: key}
 	}
 
-	return node.values[idx], nil
+	value := node.values[idx]
+
+	// Decrypt value if encryption is enabled
+	if db.encryptor != nil {
+		decrypted, err := db.encryptor.decrypt(value)
+		if err != nil {
+			return nil, fmt.Errorf("decryption failed: %w", err)
+		}
+		return decrypted, nil
+	}
+
+	return value, nil
 }
 
 // Put stores a key-value pair
@@ -179,8 +203,18 @@ func (db *CobaltDB) Put(key string, value []byte) error {
 	}
 	db.closedMu.Unlock()
 
+	// Encrypt value if encryption is enabled
+	storeValue := value
+	if db.encryptor != nil {
+		encrypted, err := db.encryptor.encrypt(value)
+		if err != nil {
+			return fmt.Errorf("encryption failed: %w", err)
+		}
+		storeValue = encrypted
+	}
+
 	// Write to WAL first
-	if err := db.wal.Append(key, value); err != nil {
+	if err := db.wal.Append(key, storeValue); err != nil {
 		return fmt.Errorf("WAL append failed: %w", err)
 	}
 
@@ -188,7 +222,7 @@ func (db *CobaltDB) Put(key string, value []byte) error {
 	defer db.data.mu.Unlock()
 
 	// Insert into B+Tree
-	if err := db.data.insert(key, value); err != nil {
+	if err := db.data.insert(key, storeValue); err != nil {
 		return err
 	}
 
@@ -582,12 +616,9 @@ func (db *CobaltDB) recoverFromWAL() error {
 	buf := make([]byte, 4)
 	for {
 		// Read length
-		_, err := f.Read(buf)
-		if err != nil {
-			if err.Error() == "EOF" {
-				break
-			}
-			return err
+		n, err := f.Read(buf)
+		if n == 0 && err != nil {
+			break
 		}
 
 		length := int(buf[0])<<24 | int(buf[1])<<16 | int(buf[2])<<8 | int(buf[3])
@@ -609,7 +640,15 @@ func (db *CobaltDB) recoverFromWAL() error {
 		// Replay operation
 		switch entry.Op {
 		case "PUT":
-			db.data.insert(entry.Key, entry.Value)
+			value := entry.Value
+			// If encryption is enabled, try to decrypt WAL entries (they were stored encrypted).
+			// If decryption fails, store raw value (pre-encryption migration).
+			if db.encryptor != nil && db.encryptor.isEncrypted(value) {
+				if decrypted, err := db.encryptor.decrypt(value); err == nil {
+					value = decrypted
+				}
+			}
+			db.data.insert(entry.Key, value)
 		case "DELETE":
 			db.data.insert(entry.Key, nil)
 		}

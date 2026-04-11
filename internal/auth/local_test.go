@@ -459,3 +459,82 @@ func TestCleanupExpiredSessions_Ticker(t *testing.T) {
 		t.Errorf("Valid token should still work: %v", err)
 	}
 }
+
+// TestLocalAuthenticator_SaveSessions_NoPath tests saveSessions with empty path
+func TestLocalAuthenticator_SaveSessions_NoPath(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	defer auth.Shutdown()
+
+	// Login to create a session
+	_, _, err := auth.Login("admin@anubis.watch", "admin")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+
+	// saveSessions should not panic with empty path
+	auth.saveSessions()
+}
+
+// TestLocalAuthenticator_Login_EmptyCredentials tests login with empty fields
+func TestLocalAuthenticator_Login_EmptyCredentials(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	defer auth.Shutdown()
+
+	tests := []struct {
+		email    string
+		password string
+	}{
+		{"", ""},
+		{"admin@anubis.watch", ""},
+		{"", "admin"},
+		{"wrong@email.com", "wrong"},
+		{"admin@anubis.watch", "wrong"},
+		{"wrong@email.com", "admin"},
+	}
+	for _, tt := range tests {
+		user, token, err := auth.Login(tt.email, tt.password)
+		if err == nil {
+			t.Errorf("Login(%q, %q) should fail", tt.email, tt.password)
+		}
+		if user != nil || token != "" {
+			t.Errorf("Login(%q, %q) should return nil user and empty token", tt.email, tt.password)
+		}
+	}
+}
+
+// TestLocalAuthenticator_Authenticate_InvalidToken tests authenticate with bad token
+func TestLocalAuthenticator_Authenticate_InvalidToken(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	defer auth.Shutdown()
+
+	// Non-existent token
+	_, err := auth.Authenticate("non-existent-token")
+	if err == nil {
+		t.Error("Expected error for invalid token")
+	}
+}
+
+// TestLocalAuthenticator_CleanupDone tests cleanup channel is closed on shutdown
+func TestLocalAuthenticator_CleanupDone(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+
+	// Shutdown should complete without hanging
+	auth.Shutdown()
+}
+
+// TestLocalAuthenticator_SaveSessions_WriteError tests saveSessions with unwritable path
+func TestLocalAuthenticator_SaveSessions_WriteError(t *testing.T) {
+	// Create a directory (not a file) as session path - will cause write error
+	tmpDir := t.TempDir()
+	auth := NewLocalAuthenticator(tmpDir+"/sessions.json", "admin@anubis.watch", "admin")
+	defer auth.Shutdown()
+
+	// Login to create a session
+	_, _, err := auth.Login("admin@anubis.watch", "admin")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+
+	// saveSessions should handle write error gracefully (no panic)
+	auth.saveSessions()
+}

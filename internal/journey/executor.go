@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/cookiejar"
 	"regexp"
 	"strconv"
 	"strings"
@@ -111,6 +113,12 @@ func (e *Executor) runJourneyLoop(ctx context.Context, journey *core.JourneyConf
 	}
 }
 
+// JourneyContext holds shared state across all steps in a journey run
+type JourneyContext struct {
+	Variables map[string]string
+	CookieJar http.CookieJar
+}
+
 // executeJourney executes a single journey run
 func (e *Executor) executeJourney(ctx context.Context, journey *core.JourneyConfig) {
 	startTime := time.Now()
@@ -134,15 +142,23 @@ func (e *Executor) executeJourney(ctx context.Context, journey *core.JourneyConf
 		run.Variables[k] = v
 	}
 
+	// Create shared journey context with cookie jar
+	jar, _ := cookiejar.New(nil)
+	journeyCtx := &JourneyContext{
+		Variables: run.Variables,
+		CookieJar: jar,
+	}
+
 	// Execute each step
 	allSuccess := true
 	for i, step := range journey.Steps {
-		stepResult := e.executeStep(ctx, step, run.Variables, i)
+		stepResult := e.executeStep(ctx, journeyCtx, step, i)
 		run.Steps = append(run.Steps, stepResult)
 
 		// Merge extracted variables
 		for k, v := range stepResult.Extracted {
 			run.Variables[k] = v
+			journeyCtx.Variables[k] = v
 		}
 
 		// Check if we should continue
@@ -182,7 +198,7 @@ func (e *Executor) executeJourney(ctx context.Context, journey *core.JourneyConf
 }
 
 // executeStep executes a single journey step
-func (e *Executor) executeStep(ctx context.Context, step core.JourneyStep, variables map[string]string, stepIndex int) core.JourneyStepResult {
+func (e *Executor) executeStep(ctx context.Context, jctx *JourneyContext, step core.JourneyStep, stepIndex int) core.JourneyStepResult {
 	result := core.JourneyStepResult{
 		Name:      step.Name,
 		StepIndex: stepIndex,
@@ -190,27 +206,100 @@ func (e *Executor) executeStep(ctx context.Context, step core.JourneyStep, varia
 	}
 
 	// Interpolate variables in target
-	target := e.interpolateVariables(step.Target, variables)
+	target := e.interpolateVariables(step.Target, jctx.Variables)
 
-	// Create a checker for this step
-	checker := e.getChecker(step.Type)
-	if checker == nil {
-		result.Status = core.SoulDead
-		result.Message = fmt.Sprintf("unknown step type: %s", step.Type)
-		return result
-	}
-
-	// Build soul configuration for this step
+	// Build soul configuration with interpolated variables
 	soul := &core.Soul{
 		Name:   step.Name,
 		Type:   step.Type,
 		Target: target,
 		Weight: step.Timeout,
-		HTTP:   step.HTTP,
-		TCP:    step.TCP,
-		UDP:    step.UDP,
-		DNS:    step.DNS,
-		TLS:    step.TLS,
+	}
+
+	// Interpolate and set HTTP config fields
+	if step.HTTP != nil {
+		httpCopy := *step.HTTP
+		httpCopy.Method = e.interpolateVariables(httpCopy.Method, jctx.Variables)
+		httpCopy.Body = e.interpolateVariables(httpCopy.Body, jctx.Variables)
+		httpCopy.BodyContains = e.interpolateVariables(httpCopy.BodyContains, jctx.Variables)
+		httpCopy.BodyRegex = e.interpolateVariables(httpCopy.BodyRegex, jctx.Variables)
+		httpCopy.JSONSchema = e.interpolateVariables(httpCopy.JSONSchema, jctx.Variables)
+		// Share the cookie jar across all HTTP steps in this journey
+		httpCopy.CookieJar = jctx.CookieJar
+		if httpCopy.Headers != nil {
+			interpolatedHeaders := make(map[string]string)
+			for k, v := range httpCopy.Headers {
+				interpolatedHeaders[k] = e.interpolateVariables(v, jctx.Variables)
+			}
+			httpCopy.Headers = interpolatedHeaders
+		}
+		if httpCopy.JSONPath != nil {
+			interpolatedJSONPath := make(map[string]string)
+			for k, v := range httpCopy.JSONPath {
+				interpolatedJSONPath[k] = e.interpolateVariables(v, jctx.Variables)
+			}
+			httpCopy.JSONPath = interpolatedJSONPath
+		}
+		if httpCopy.ResponseHeaders != nil {
+			interpolatedRespHeaders := make(map[string]string)
+			for k, v := range httpCopy.ResponseHeaders {
+				interpolatedRespHeaders[k] = e.interpolateVariables(v, jctx.Variables)
+			}
+			httpCopy.ResponseHeaders = interpolatedRespHeaders
+		}
+		soul.HTTP = &httpCopy
+	}
+
+	// Interpolate and set TCP config fields
+	if step.TCP != nil {
+		tcpCopy := *step.TCP
+		tcpCopy.BannerMatch = e.interpolateVariables(tcpCopy.BannerMatch, jctx.Variables)
+		tcpCopy.Send = e.interpolateVariables(tcpCopy.Send, jctx.Variables)
+		tcpCopy.ExpectRegex = e.interpolateVariables(tcpCopy.ExpectRegex, jctx.Variables)
+		soul.TCP = &tcpCopy
+	}
+
+	// Interpolate and set UDP config fields
+	if step.UDP != nil {
+		udpCopy := *step.UDP
+		udpCopy.SendHex = e.interpolateVariables(udpCopy.SendHex, jctx.Variables)
+		udpCopy.ExpectContains = e.interpolateVariables(udpCopy.ExpectContains, jctx.Variables)
+		soul.UDP = &udpCopy
+	}
+
+	// Interpolate and set DNS config fields
+	if step.DNS != nil {
+		dnsCopy := *step.DNS
+		dnsCopy.RecordType = e.interpolateVariables(dnsCopy.RecordType, jctx.Variables)
+		if dnsCopy.Nameservers != nil {
+			for i, ns := range dnsCopy.Nameservers {
+				dnsCopy.Nameservers[i] = e.interpolateVariables(ns, jctx.Variables)
+			}
+		}
+		if dnsCopy.Expected != nil {
+			for i, exp := range dnsCopy.Expected {
+				dnsCopy.Expected[i] = e.interpolateVariables(exp, jctx.Variables)
+			}
+		}
+		soul.DNS = &dnsCopy
+	}
+
+	// Interpolate and set TLS config fields
+	if step.TLS != nil {
+		tlsCopy := *step.TLS
+		tlsCopy.MinProtocol = e.interpolateVariables(tlsCopy.MinProtocol, jctx.Variables)
+		tlsCopy.ExpectedIssuer = e.interpolateVariables(tlsCopy.ExpectedIssuer, jctx.Variables)
+		for i, san := range tlsCopy.ExpectedSAN {
+			tlsCopy.ExpectedSAN[i] = e.interpolateVariables(san, jctx.Variables)
+		}
+		soul.TLS = &tlsCopy
+	}
+
+	checker := e.getChecker(step.Type)
+	if checker == nil {
+		result.Status = core.SoulDead
+		result.Message = fmt.Sprintf("unknown step type: %s", step.Type)
+		return result
 	}
 
 	if err := checker.Validate(soul); err != nil {

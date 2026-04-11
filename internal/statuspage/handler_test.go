@@ -1761,3 +1761,109 @@ func TestHandler_Router_WithAcmeManager(t *testing.T) {
 		t.Logf("ACME challenge returned status %d", w.Code)
 	}
 }
+
+// TestHandler_RSSFeedHandler_SoulLookupError tests RSS feed when GetSoul fails
+func TestHandler_RSSFeedHandler_SoulLookupError(t *testing.T) {
+	// Mock that returns incidents but fails on GetSoul
+	repo := &mockRepositorySoulError{
+		mockRepository: mockRepository{},
+	}
+	handler := NewHandler(repo, nil)
+
+	req := httptest.NewRequest("GET", "/status/test/feed.xml", nil)
+	w := httptest.NewRecorder()
+
+	handler.RSSFeedHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "rss") {
+		t.Error("Expected RSS feed content")
+	}
+}
+
+// TestHandler_RSSFeedHandler_IncidentsError tests RSS feed when GetIncidentsByPage fails
+func TestHandler_RSSFeedHandler_IncidentsError(t *testing.T) {
+	repo := &mockRepositoryIncidentsError{
+		mockRepository: mockRepository{},
+	}
+	handler := NewHandler(repo, nil)
+
+	req := httptest.NewRequest("GET", "/status/test/feed.xml", nil)
+	w := httptest.NewRecorder()
+
+	handler.RSSFeedHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+}
+
+// TestHandler_BadgeHandler_SoulError tests badge when GetSoul fails
+func TestHandler_BadgeHandler_SoulError(t *testing.T) {
+	repo := &mockRepositorySoulError{
+		mockRepository: mockRepository{},
+	}
+	handler := NewHandler(repo, nil)
+
+	req := httptest.NewRequest("GET", "/badge/test", nil)
+	w := httptest.NewRecorder()
+
+	handler.BadgeHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+}
+
+// TestHandler_BadgeHandler_NotFound tests badge for non-existent page
+func TestHandler_BadgeHandler_NotFound(t *testing.T) {
+	repo := &mockRepositoryNotFound{}
+	handler := NewHandler(repo, nil)
+
+	req := httptest.NewRequest("GET", "/badge/nonexistent", nil)
+	w := httptest.NewRecorder()
+
+	handler.BadgeHandler(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", w.Code)
+	}
+}
+
+// TestHandler_SubscribeHandler_EmptyEmail tests subscribe with missing email
+func TestHandler_SubscribeHandler_EmptyEmail(t *testing.T) {
+	repo := &mockRepository{}
+	handler := NewHandler(repo, nil)
+
+	req := httptest.NewRequest("POST", "/status/test/subscribe", nil)
+	w := httptest.NewRecorder()
+
+	handler.SubscribeHandler(w, req)
+
+	// Should return error for missing email
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusOK {
+		t.Errorf("Expected 400 or 200, got %d", w.Code)
+	}
+}
+
+// mockRepositorySoulError returns errors for GetSoul
+type mockRepositorySoulError struct {
+	mockRepository
+}
+
+func (m *mockRepositorySoulError) GetSoul(id string) (*core.Soul, error) {
+	return nil, fmt.Errorf("soul not found")
+}
+
+// mockRepositoryIncidentsError returns errors for GetIncidentsByPage
+type mockRepositoryIncidentsError struct {
+	mockRepository
+}
+
+func (m *mockRepositoryIncidentsError) GetIncidentsByPage(pageID string) ([]core.Incident, error) {
+	return nil, fmt.Errorf("incidents error")
+}

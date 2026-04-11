@@ -103,6 +103,24 @@ func TestSMTPChecker_Validate_Valid(t *testing.T) {
 	}
 }
 
+func TestSMTPChecker_Validate_InsecureSkipVerify(t *testing.T) {
+	checker := NewSMTPChecker()
+
+	soul := &core.Soul{
+		ID:     "test-smtp",
+		Name:   "Test SMTP",
+		Type:   core.CheckSMTP,
+		Target: "localhost:587",
+		SMTP:   &core.SMTPConfig{InsecureSkipVerify: true},
+	}
+
+	// Should pass validation (just logs a warning)
+	err := checker.Validate(soul)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+}
+
 func TestSMTPChecker_Judge_Basic(t *testing.T) {
 	// Create mock SMTP server
 	server := newMockSMTPServer(t, func(conn net.Conn) {
@@ -449,6 +467,23 @@ func TestIMAPChecker_Validate_Valid(t *testing.T) {
 		Name:   "Test IMAP",
 		Type:   core.CheckIMAP,
 		Target: "localhost:143",
+	}
+
+	err := checker.Validate(soul)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+}
+
+func TestIMAPChecker_Validate_InsecureSkipVerify(t *testing.T) {
+	checker := NewIMAPChecker()
+
+	soul := &core.Soul{
+		ID:     "test-imap",
+		Name:   "Test IMAP",
+		Type:   core.CheckIMAP,
+		Target: "localhost:993",
+		IMAP:   &core.IMAPConfig{InsecureSkipVerify: true},
 	}
 
 	err := checker.Validate(soul)
@@ -1063,5 +1098,98 @@ func TestSMTPChecker_Judge_ContextTimeout(t *testing.T) {
 	}
 	if judgment != nil && judgment.Status != core.SoulDead {
 		t.Errorf("Expected dead status, got %v", judgment.Status)
+	}
+}
+
+// TestSMTPChecker_Judge_AUTHPlain tests AUTH PLAIN mechanism
+func TestSMTPChecker_Judge_AUTHPlain(t *testing.T) {
+	server := newMockSMTPServer(t, func(conn net.Conn) {
+		defer conn.Close()
+		conn.Write([]byte("220 smtp.example.com ESMTP\r\n"))
+
+		reader := bufio.NewReader(conn)
+		reader.ReadString('\n') // Read EHLO
+
+		// Advertise AUTH with PLAIN only (no LOGIN)
+		conn.Write([]byte("250-smtp.example.com\r\n"))
+		conn.Write([]byte("250-AUTH PLAIN\r\n"))
+		conn.Write([]byte("250 SIZE 1024\r\n"))
+
+		// Read AUTH PLAIN command
+		authCmd, _ := reader.ReadString('\n')
+		if strings.HasPrefix(authCmd, "AUTH PLAIN") {
+			// Send 235 success
+			conn.Write([]byte("235 2.7.0 Authentication successful\r\n"))
+		}
+
+		reader.ReadString('\n') // Read QUIT
+	})
+	defer server.Close()
+
+	checker := NewSMTPChecker()
+
+	soul := &core.Soul{
+		ID:     "test-smtp-plain",
+		Name:   "Test SMTP AUTH PLAIN",
+		Type:   core.CheckSMTP,
+		Target: server.Addr(),
+		SMTP: &core.SMTPConfig{
+			EHLODomain: "test.local",
+			Auth: &core.AuthCreds{
+				Username: "testuser",
+				Password: "testpass",
+			},
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	// AUTH PLAIN should succeed
+	if judgment.Status != core.SoulAlive {
+		t.Errorf("Expected status Alive, got %s", judgment.Status)
+	}
+}
+
+// TestSMTPChecker_Judge_AUTHUnknownMechanism tests AUTH available but no known mechanism
+func TestSMTPChecker_Judge_AUTHUnknownMechanism(t *testing.T) {
+	server := newMockSMTPServer(t, func(conn net.Conn) {
+		defer conn.Close()
+		conn.Write([]byte("220 smtp.example.com ESMTP\r\n"))
+
+		reader := bufio.NewReader(conn)
+		reader.ReadString('\n') // Read EHLO
+
+		// Advertise AUTH with CRAM-MD5 only (not LOGIN or PLAIN)
+		conn.Write([]byte("250-smtp.example.com\r\n"))
+		conn.Write([]byte("250-AUTH CRAM-MD5\r\n"))
+		conn.Write([]byte("250 SIZE 1024\r\n"))
+	})
+	defer server.Close()
+
+	checker := NewSMTPChecker()
+
+	soul := &core.Soul{
+		ID:     "test-smtp-unknown-auth",
+		Name:   "Test SMTP AUTH Unknown",
+		Type:   core.CheckSMTP,
+		Target: server.Addr(),
+		SMTP: &core.SMTPConfig{
+			EHLODomain: "test.local",
+			Auth: &core.AuthCreds{
+				Username: "testuser",
+				Password: "testpass",
+			},
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	// AUTH requested but no known mechanism
+	if judgment.Status != core.SoulDead {
+		t.Errorf("Expected status Dead, got %s", judgment.Status)
 	}
 }

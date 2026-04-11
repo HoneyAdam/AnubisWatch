@@ -399,8 +399,9 @@ func SaveConfig(path string, config *Config) error {
 func GenerateDefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Host: "0.0.0.0",
-			Port: 8443,
+			Host:     "0.0.0.0",
+			Port:     8443,
+			GRPCPort: 9090,
 			TLS: TLSServerConfig{
 				Enabled:  true,
 				AutoCert: true,

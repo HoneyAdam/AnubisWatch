@@ -311,3 +311,227 @@ func TestCacheExistsAfterExpiration(t *testing.T) {
 		t.Error("Expected key1 to not exist after expiration")
 	}
 }
+
+// TestCacheCleanup tests manual cleanup of expired items
+func TestCacheCleanup(t *testing.T) {
+	c := New(100, time.Hour)
+
+	// Add items with different TTLs
+	c.Set("key1", "value1", 1*time.Millisecond)
+	c.Set("key2", "value2", time.Hour)
+	c.Set("key3", "value3", 1*time.Millisecond)
+
+	// Verify all exist initially
+	if !c.Exists("key1") || !c.Exists("key2") || !c.Exists("key3") {
+		t.Error("Expected all keys to exist initially")
+	}
+
+	// Wait for short TTL items to expire
+	time.Sleep(10 * time.Millisecond)
+
+	// Trigger cleanup
+	c.cleanup()
+
+	// Verify expired items are removed
+	if c.Exists("key1") {
+		t.Error("Expected key1 to be cleaned up")
+	}
+	if c.Exists("key3") {
+		t.Error("Expected key3 to be cleaned up")
+	}
+	if !c.Exists("key2") {
+		t.Error("Expected key2 to still exist")
+	}
+
+	// Verify size
+	if c.Size() != 1 {
+		t.Errorf("Expected size 1 after cleanup, got %d", c.Size())
+	}
+}
+
+// TestCacheCleanup_NoExpired tests cleanup with no expired items
+func TestCacheCleanup_NoExpired(t *testing.T) {
+	c := New(100, time.Hour)
+
+	// Add items with long TTLs
+	c.Set("key1", "value1", time.Hour)
+	c.Set("key2", "value2", time.Hour)
+
+	// Trigger cleanup
+	c.cleanup()
+
+	// Verify all items still exist
+	if !c.Exists("key1") || !c.Exists("key2") {
+		t.Error("Expected all keys to still exist")
+	}
+
+	if c.Size() != 2 {
+		t.Errorf("Expected size 2, got %d", c.Size())
+	}
+}
+
+// TestCacheCleanup_EmptyCache tests cleanup on empty cache
+func TestCacheCleanup_EmptyCache(t *testing.T) {
+	c := New(100, time.Hour)
+
+	// Trigger cleanup on empty cache - should not panic
+	c.cleanup()
+
+	if c.Size() != 0 {
+		t.Errorf("Expected size 0, got %d", c.Size())
+	}
+}
+
+// TestNewTyped tests creating a typed cache
+func TestNewTyped(t *testing.T) {
+	// Create a typed cache for strings
+	c := NewTyped[string](100, time.Minute)
+
+	if c == nil {
+		t.Fatal("Expected typed cache to be created")
+	}
+
+	if c.maxSize != 100 {
+		t.Errorf("Expected maxSize 100, got %d", c.maxSize)
+	}
+}
+
+// TestTypedCache_Get tests getting from typed cache
+func TestTypedCache_Get(t *testing.T) {
+	c := NewTyped[string](100, time.Minute)
+
+	// Set a value using the underlying cache
+	c.Cache.Set("key1", "value1", time.Minute)
+
+	// Get using typed method
+	val, found := c.Get("key1")
+	if !found {
+		t.Error("Expected key1 to be found")
+	}
+	if val != "value1" {
+		t.Errorf("Expected 'value1', got %v", val)
+	}
+
+	// Try to get non-existent key
+	_, found = c.Get("nonexistent")
+	if found {
+		t.Error("Expected nonexistent key to not be found")
+	}
+}
+
+// TestTypedCache_Get_WrongType tests getting wrong type from typed cache
+func TestTypedCache_Get_WrongType(t *testing.T) {
+	c := NewTyped[string](100, time.Minute)
+
+	// Set an integer value directly (bypassing type safety)
+	c.Cache.Set("key1", 123, time.Minute)
+
+	// Get using typed method - should return empty value and false
+	val, found := c.Get("key1")
+	if found {
+		t.Error("Expected type mismatch to return not found")
+	}
+	if val != "" {
+		t.Errorf("Expected empty string, got %v", val)
+	}
+}
+
+// TestTypedCache_Set tests setting in typed cache
+func TestTypedCache_Set(t *testing.T) {
+	c := NewTyped[string](100, time.Minute)
+
+	// Set using typed method
+	c.Set("key1", "value1", time.Minute)
+
+	// Verify via underlying cache
+	val, found := c.Cache.Get("key1")
+	if !found {
+		t.Error("Expected key1 to be found in underlying cache")
+	}
+	if val != "value1" {
+		t.Errorf("Expected 'value1', got %v", val)
+	}
+
+	// Verify via typed Get
+	val2, found2 := c.Get("key1")
+	if !found2 {
+		t.Error("Expected key1 to be found via typed Get")
+	}
+	if val2 != "value1" {
+		t.Errorf("Expected 'value1', got %v", val2)
+	}
+}
+
+// TestTypedCache_Set_Overwrite tests overwriting in typed cache
+func TestTypedCache_Set_Overwrite(t *testing.T) {
+	c := NewTyped[string](100, time.Minute)
+
+	c.Set("key1", "value1", time.Minute)
+	c.Set("key1", "value2", time.Minute)
+
+	val, found := c.Get("key1")
+	if !found {
+		t.Fatal("Expected key1 to be found")
+	}
+	if val != "value2" {
+		t.Errorf("Expected 'value2', got %v", val)
+	}
+}
+
+// TestTypedCache_Expiration tests typed cache expiration
+func TestTypedCache_Expiration(t *testing.T) {
+	c := NewTyped[string](100, time.Hour)
+
+	c.Set("key1", "value1", 1*time.Millisecond)
+
+	// Should exist immediately
+	_, found := c.Get("key1")
+	if !found {
+		t.Error("Expected key1 to exist immediately")
+	}
+
+	// Wait for expiration
+	time.Sleep(10 * time.Millisecond)
+
+	// Should not exist after expiration
+	_, found = c.Get("key1")
+	if found {
+		t.Error("Expected key1 to not exist after expiration")
+	}
+}
+
+// TestTypedCache_IntType tests typed cache with int type
+func TestTypedCache_IntType(t *testing.T) {
+	c := NewTyped[int](100, time.Minute)
+
+	c.Set("count", 42, time.Minute)
+
+	val, found := c.Get("count")
+	if !found {
+		t.Fatal("Expected count to be found")
+	}
+	if val != 42 {
+		t.Errorf("Expected 42, got %v", val)
+	}
+}
+
+// TestTypedCache_StructType tests typed cache with struct type
+func TestTypedCache_StructType(t *testing.T) {
+	type TestStruct struct {
+		Name  string
+		Value int
+	}
+
+	c := NewTyped[TestStruct](100, time.Minute)
+
+	original := TestStruct{Name: "test", Value: 123}
+	c.Set("struct1", original, time.Minute)
+
+	val, found := c.Get("struct1")
+	if !found {
+		t.Fatal("Expected struct1 to be found")
+	}
+	if val.Name != "test" || val.Value != 123 {
+		t.Errorf("Expected {test, 123}, got %v", val)
+	}
+}

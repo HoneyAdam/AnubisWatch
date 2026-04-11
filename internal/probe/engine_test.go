@@ -3,7 +3,10 @@ package probe
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -1504,3 +1507,455 @@ func TestEngine_AssignSouls_RegionFiltering(t *testing.T) {
 		t.Error("Expected soul-eu to NOT be assigned (region mismatch)")
 	}
 }
+
+// TestRetryWithBackoff_SuccessFirstTry tests immediate success
+func TestRetryWithBackoff_SuccessFirstTry(t *testing.T) {
+	callCount := 0
+	err := retryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
+		callCount++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected 1 call, got %d", callCount)
+	}
+}
+
+// TestRetryWithBackoff_SuccessAfterRetries tests success after failures
+func TestRetryWithBackoff_SuccessAfterRetries(t *testing.T) {
+	callCount := 0
+	err := retryWithBackoff(context.Background(), 5, time.Millisecond, func() error {
+		callCount++
+		if callCount < 3 {
+			return fmt.Errorf("temporary failure")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 calls, got %d", callCount)
+	}
+}
+
+// TestRetryWithBackoff_AllRetriesExhausted tests all retries failing
+func TestRetryWithBackoff_AllRetriesExhausted(t *testing.T) {
+	callCount := 0
+	expectedErr := fmt.Errorf("permanent failure")
+	err := retryWithBackoff(context.Background(), 3, time.Millisecond, func() error {
+		callCount++
+		return expectedErr
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 calls, got %d", callCount)
+	}
+	if !strings.Contains(err.Error(), "failed after 3 retries") {
+		t.Errorf("expected retry count in error message, got: %v", err)
+	}
+	if !errors.Is(err, expectedErr) {
+		t.Errorf("expected wrapped error to be %v, got: %v", expectedErr, err)
+	}
+}
+
+// TestRetryWithBackoff_ContextCancelled tests context cancellation before retry
+func TestRetryWithBackoff_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	callCount := 0
+	cancel() // Cancel immediately
+
+	err := retryWithBackoff(ctx, 5, time.Millisecond, func() error {
+		callCount++
+		return fmt.Errorf("failure")
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected 1 call, got %d", callCount)
+	}
+}
+
+// TestRetryWithBackoff_ContextCancelledDuringWait tests context cancellation during backoff wait
+func TestRetryWithBackoff_ContextCancelledDuringWait(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	callCount := 0
+
+	err := retryWithBackoff(ctx, 5, 50*time.Millisecond, func() error {
+		callCount++
+		if callCount > 1 {
+			cancel()
+		}
+		return fmt.Errorf("failure")
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got: %v", err)
+	}
+}
+
+// TestEngine_SetOnJudgment tests the SetOnJudgment callback
+func TestEngine_SetOnJudgment(t *testing.T) {
+	opts := EngineOptions{
+		NodeID:  "test-node",
+		Region:  "test-region",
+		Store:   &mockProbeStorage{},
+		Alerter: &mockProbeAlerter{},
+		Logger:  newTestProbeLogger(),
+	}
+	engine := NewEngine(opts)
+
+	called := false
+	engine.SetOnJudgment(func(j *core.Judgment) {
+		called = true
+	})
+
+	// Verify the callback was registered without panicking
+	_ = called
+}
+
+// TestCircuitBreaker_IsOpen_AllStates tests all isOpen branches
+func TestCircuitBreaker_IsOpen_AllStates(t *testing.T) {
+	engine := NewEngine(EngineOptions{
+		Registry: NewCheckerRegistry(),
+		NodeID:   "test-node",
+		Region:   "test-region",
+		Logger:   newTestProbeLogger(),
+		Config: EngineConfig{
+			CircuitBreaker: CircuitBreakerConfig{
+				Enabled:          true,
+				FailureThreshold: 3,
+				SuccessThreshold: 2,
+				Timeout:          200 * time.Millisecond,
+			},
+		},
+	})
+
+	soulID := "test-is-open"
+	cb := engine.getCircuitBreaker(soulID)
+	cfg := engine.Config().CircuitBreaker
+
+	// 1. State closed - should return false
+	result := cb.isOpen(cfg)
+	if result {
+		t.Error("isOpen should return false for closed state")
+	}
+
+	// 2. Open the circuit (3 failures)
+	for i := 0; i < 3; i++ {
+		engine.recordFailure(soulID)
+	}
+
+	// 3. State open, timeout NOT elapsed - should return true
+	result = cb.isOpen(cfg)
+	if !result {
+		t.Error("isOpen should return true for open state before timeout")
+	}
+
+	// 4. Wait for timeout to elapse, should transition to half-open
+	time.Sleep(250 * time.Millisecond)
+	result = cb.isOpen(cfg)
+	if result {
+		t.Error("isOpen should return false after timeout elapsed (half-open)")
+	}
+
+	// 5. State half-open - should return false
+	result = cb.isOpen(cfg)
+	if result {
+		t.Error("isOpen should return false for half-open state")
+	}
+}
+
+// TestCircuitBreaker_IsOpen_DoubleCheck tests the double-check pattern in isOpen
+func TestCircuitBreaker_IsOpen_DoubleCheck(t *testing.T) {
+	engine := NewEngine(EngineOptions{
+		Registry: NewCheckerRegistry(),
+		NodeID:   "test-node",
+		Region:   "test-region",
+		Logger:   newTestProbeLogger(),
+		Config: EngineConfig{
+			CircuitBreaker: CircuitBreakerConfig{
+				Enabled:          true,
+				FailureThreshold: 3,
+				SuccessThreshold: 2,
+				Timeout:          100 * time.Millisecond,
+			},
+		},
+	})
+
+	soulID := "test-double-check"
+	cb := engine.getCircuitBreaker(soulID)
+
+	// Open the circuit
+	for i := 0; i < 3; i++ {
+		engine.recordFailure(soulID)
+	}
+
+	// Force state to half-open (simulating another goroutine already transitioned)
+	cb.mu.Lock()
+	cb.state = "half-open"
+	cb.mu.Unlock()
+
+	// Wait for timeout
+	time.Sleep(150 * time.Millisecond)
+
+	// isOpen on half-open should return false
+	result := cb.isOpen(engine.Config().CircuitBreaker)
+	if result {
+		t.Error("isOpen should return false for half-open state")
+	}
+}
+
+// Test regionMatches with no matching region (covers return false path)
+func TestEngine_regionMatches(t *testing.T) {
+	tests := []struct {
+		name       string
+		probeRegion string
+		soulRegions []string
+		expected   bool
+	}{
+		{"empty regions", "us-east-1", nil, true},
+		{"matching region", "us-east-1", []string{"us-east-1", "eu-west-1"}, true},
+		{"no match", "eu-west-1", []string{"us-east-1", "us-west-2"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := &Engine{region: tt.probeRegion}
+			result := engine.regionMatches(tt.soulRegions)
+			if result != tt.expected {
+				t.Errorf("regionMatches(%v) with region=%q = %v, want %v",
+					tt.soulRegions, tt.probeRegion, result, tt.expected)
+			}
+		})
+	}
+}
+
+// Test GetSoulStatus success path with existing soul
+func TestEngine_GetSoulStatus_ExistingSoul(t *testing.T) {
+	engine := newTestEngine(t)
+
+	soul := &core.Soul{
+		ID:      "test-http-status",
+		Name:    "Test HTTP Status",
+		Type:    core.CheckHTTP,
+		Target:  "https://example.com",
+		Enabled: true,
+		HTTP: &core.HTTPConfig{
+			Method:      "GET",
+			ValidStatus: []int{200},
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	runner := &soulRunner{
+		soul:       soul,
+		lastStatus: core.SoulAlive,
+	}
+	engine.mu.Lock()
+	engine.souls[soul.ID] = runner
+	engine.mu.Unlock()
+
+	status, err := engine.GetSoulStatus(soul.ID)
+	if err != nil {
+		t.Fatalf("GetSoulStatus failed: %v", err)
+	}
+	if *status != core.SoulAlive {
+		t.Errorf("Expected status %s, got %s", core.SoulAlive, *status)
+	}
+}
+
+// Test judgeSoul with circuit breaker open (covers early return skip path)
+func TestEngine_judgeSoul_CircuitBreakerOpen(t *testing.T) {
+	engine := NewEngine(EngineOptions{
+		Registry: NewCheckerRegistry(),
+		NodeID:   "test-node",
+		Region:   "test-region",
+		Store:    &mockProbeStorage{},
+		Alerter:  &mockProbeAlerter{},
+		Logger:   newTestProbeLogger(),
+		Config: EngineConfig{
+			CircuitBreaker: CircuitBreakerConfig{
+				Enabled:          true,
+				FailureThreshold: 2,
+				SuccessThreshold: 2,
+				Timeout:          10 * time.Second, // Long timeout so circuit stays open
+			},
+		},
+	})
+
+	soul := &core.Soul{
+		ID:     "cb-open-soul",
+		Name:   "CB Open",
+		Type:   core.CheckHTTP,
+		Target: "https://example.com",
+		HTTP:   &core.HTTPConfig{Method: "GET", ValidStatus: []int{200}},
+	}
+
+	// Record enough failures to open circuit
+	for i := 0; i < 2; i++ {
+		engine.recordFailure(soul.ID)
+	}
+
+	// Verify circuit is open
+	cb := engine.getCircuitBreaker(soul.ID)
+	cb.mu.RLock()
+	state := cb.state
+	cb.mu.RUnlock()
+	if state != "open" {
+		t.Fatalf("Expected circuit open, got %s", state)
+	}
+
+	runner := &soulRunner{soul: soul}
+	ctx := context.Background()
+
+	// Should skip check due to open circuit
+	engine.judgeSoul(ctx, runner)
+
+	// No stats should have been incremented (check was skipped)
+	stats := engine.Stats()
+	if stats["total_checks"].(int64) != 0 {
+		t.Errorf("Expected 0 total checks (skipped), got %d", stats["total_checks"])
+	}
+}
+
+// Test judgeSoul with context already cancelled (covers ctx.Done in semaphore select)
+func TestEngine_judgeSoul_ContextCancelled(t *testing.T) {
+	engine := NewEngine(EngineOptions{
+		Registry: NewCheckerRegistry(),
+		NodeID:   "test-node",
+		Region:   "test-region",
+		Store:    &mockProbeStorage{},
+		Alerter:  &mockProbeAlerter{},
+		Logger:   newTestProbeLogger(),
+		Config: EngineConfig{
+			MaxConcurrentChecks: 1, // Small semaphore
+		},
+	})
+
+	// Pre-fill the semaphore so acquire blocks
+	engine.semaphore <- struct{}{}
+
+	soul := &core.Soul{
+		ID:     "ctx-cancel-soul",
+		Name:   "Ctx Cancel",
+		Type:   core.CheckHTTP,
+		Target: "https://example.com",
+		HTTP:   &core.HTTPConfig{Method: "GET", ValidStatus: []int{200}},
+	}
+
+	runner := &soulRunner{soul: soul}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel before calling judgeSoul
+
+	// Should return via ctx.Done in semaphore select since semaphore is full
+	engine.judgeSoul(ctx, runner)
+
+	// No checks should have run
+	stats := engine.Stats()
+	if stats["total_checks"].(int64) != 0 {
+		t.Errorf("Expected 0 total checks (cancelled), got %d", stats["total_checks"])
+	}
+}
+
+// Test TriggerImmediate with context cancelled
+func TestEngine_TriggerImmediate_ContextCancelled(t *testing.T) {
+	engine := newTestEngine(t)
+
+	// Register a custom checker that blocks waiting on context
+	ctxChecker := &contextAwareChecker{}
+	engine.registry.Register(ctxChecker)
+
+	soul := &core.Soul{
+		ID:      "ctx-cancel-trigger",
+		Name:    "Ctx Cancel Trigger",
+		Type:    "ctx-check",
+		Target:  "localhost:1",
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	engine.mu.Lock()
+	engine.souls[soul.ID] = &soulRunner{soul: soul}
+	engine.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel before trigger
+
+	// Should fail due to context cancellation
+	_, err := engine.TriggerImmediate(ctx, soul.ID)
+	if err == nil {
+		t.Error("Expected error from cancelled context")
+	}
+}
+
+type contextAwareChecker struct{}
+
+func (c *contextAwareChecker) Type() core.CheckType { return "ctx-check" }
+func (c *contextAwareChecker) Judge(ctx context.Context, soul *core.Soul) (*core.Judgment, error) {
+	// Check context immediately
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	return &core.Judgment{Status: core.SoulAlive}, nil
+}
+func (c *contextAwareChecker) Validate(soul *core.Soul) error { return nil }
+
+// Test judgeSoul with checker error path (records failure)
+func TestEngine_judgeSoul_CheckerError(t *testing.T) {
+	// Use a mock checker that returns an error
+	engine := NewEngine(EngineOptions{
+		Registry: NewCheckerRegistry(),
+		NodeID:   "test-node",
+		Region:   "test-region",
+		Store:    &mockProbeStorage{},
+		Alerter:  &mockProbeAlerter{},
+		Logger:   newTestProbeLogger(),
+	})
+
+	// Register a custom checker that always errors
+	errorChecker := &errorMockChecker{}
+	engine.registry.Register(errorChecker)
+
+	soul := &core.Soul{
+		ID:      "error-checker-soul",
+		Name:    "Error Checker",
+		Type:    "error-check",
+		Target:  "localhost:1",
+		Timeout: core.Duration{Duration: 100 * time.Millisecond},
+	}
+
+	runner := &soulRunner{
+		soul:       soul,
+		lastStatus: core.SoulUnknown,
+	}
+	ctx := context.Background()
+
+	// Should not panic, should record failure
+	engine.judgeSoul(ctx, runner)
+
+	// Should have recorded a failure
+	stats := engine.Stats()
+	if stats["failed_checks"].(int64) < 1 {
+		t.Errorf("Expected at least 1 failed check, got %d", stats["failed_checks"])
+	}
+}
+
+type errorMockChecker struct{}
+
+func (c *errorMockChecker) Type() core.CheckType { return "error-check" }
+func (c *errorMockChecker) Judge(ctx context.Context, soul *core.Soul) (*core.Judgment, error) {
+	return nil, fmt.Errorf("simulated checker error")
+}
+func (c *errorMockChecker) Validate(soul *core.Soul) error { return nil }

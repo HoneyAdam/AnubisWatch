@@ -48,9 +48,10 @@ type LoggingConfig struct {
 
 // ServerConfig defines server settings
 type ServerConfig struct {
-	Host string          `json:"host" yaml:"host"`
-	Port int             `json:"port" yaml:"port"`
-	TLS  TLSServerConfig `json:"tls" yaml:"tls"`
+	Host     string          `json:"host" yaml:"host"`
+	Port     int             `json:"port" yaml:"port"`
+	GRPCPort int             `json:"grpc_port" yaml:"grpc_port"`
+	TLS      TLSServerConfig `json:"tls" yaml:"tls"`
 }
 
 // TLSServerConfig defines TLS settings

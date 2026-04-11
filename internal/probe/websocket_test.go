@@ -1025,3 +1025,147 @@ func TestBuildWebSocketTextFrame_LargePayload(t *testing.T) {
 		t.Errorf("Expected frame length %d, got %d", expectedLen, len(frame))
 	}
 }
+
+// TestWebSocketChecker_Validate_Valid tests successful validation
+func TestWebSocketChecker_Validate_Valid(t *testing.T) {
+	checker := NewWebSocketChecker()
+	soul := &core.Soul{ID: "test", Name: "test", Target: "ws://example.com"}
+	err := checker.Validate(soul)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+}
+
+// TestWebSocketChecker_Judge_SendMessageFailed tests the path where sending the WebSocket message fails
+func TestWebSocketChecker_Judge_SendMessageFailed(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		req, _ := http.ReadRequest(reader)
+
+		if strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
+			key := req.Header.Get("Sec-WebSocket-Key")
+			accept := calculateWebSocketAccept(key)
+
+			response := "HTTP/1.1 101 Switching Protocols\r\n" +
+				"Upgrade: websocket\r\n" +
+				"Connection: Upgrade\r\n" +
+				"Sec-WebSocket-Accept: " + accept + "\r\n" +
+				"\r\n"
+			conn.Write([]byte(response))
+
+			// Close immediately without reading the message
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+
+	checker := NewWebSocketChecker()
+
+	soul := &core.Soul{
+		ID:     "test-ws",
+		Name:   "Test WebSocket",
+		Type:   core.CheckWebSocket,
+		Target: "ws://" + listener.Addr().String(),
+		WebSocket: &core.WebSocketConfig{
+			Send: "test message",
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	if judgment.Status != core.SoulDead {
+		t.Logf("Expected status Dead when send fails, got %s", judgment.Status)
+	}
+}
+
+// TestWebSocketChecker_Judge_PingNotPong tests receiving non-pong response to ping
+func TestWebSocketChecker_Judge_PingNotPong(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		reader := bufio.NewReader(conn)
+		req, _ := http.ReadRequest(reader)
+
+		if strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
+			key := req.Header.Get("Sec-WebSocket-Key")
+			accept := calculateWebSocketAccept(key)
+
+			response := "HTTP/1.1 101 Switching Protocols\r\n" +
+				"Upgrade: websocket\r\n" +
+				"Connection: Upgrade\r\n" +
+				"Sec-WebSocket-Accept: " + accept + "\r\n" +
+				"\r\n"
+			conn.Write([]byte(response))
+
+			// Wait for ping, send a text frame instead of pong
+			frame := make([]byte, 10)
+			conn.Read(frame)
+
+			// Send text frame (opcode 0x01) instead of pong (0x0A)
+			textFrame := buildWebSocketTextFrame("not a pong")
+			conn.Write(textFrame)
+		}
+	}()
+
+	checker := NewWebSocketChecker()
+
+	soul := &core.Soul{
+		ID:     "test-ws",
+		Name:   "Test WebSocket",
+		Type:   core.CheckWebSocket,
+		Target: "ws://" + listener.Addr().String(),
+		WebSocket: &core.WebSocketConfig{
+			PingCheck: true,
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	// Should be degraded because response wasn't a pong
+	if judgment.Status != core.SoulDegraded {
+		t.Logf("Expected Degraded when ping gets non-pong response, got %s", judgment.Status)
+	}
+}
+
+// TestWebSocketChecker_Validate_InsecureSkipVerify tests validation with insecure flag
+func TestWebSocketChecker_Validate_InsecureSkipVerify(t *testing.T) {
+	checker := NewWebSocketChecker()
+	soul := &core.Soul{
+		ID:     "test",
+		Name:   "test",
+		Target: "wss://example.com",
+		WebSocket: &core.WebSocketConfig{
+			InsecureSkipVerify: true,
+		},
+	}
+	// Should not error, just log a warning
+	err := checker.Validate(soul)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+}

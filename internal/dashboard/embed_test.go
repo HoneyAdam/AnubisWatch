@@ -146,6 +146,34 @@ func TestHandler_ServeHTTP_Methods(t *testing.T) {
 	}
 }
 
+func TestHandler_ServeHTTP_Subdirectory(t *testing.T) {
+	handler, err := NewHandler()
+	if err != nil {
+		t.Fatalf("NewHandler failed: %v", err)
+	}
+
+	// Test various content types by requesting different paths
+	paths := []string{
+		"/assets/app.css",
+		"/assets/app.js",
+		"/data/config.json",
+		"/images/logo.png",
+		"/fonts/main.woff2",
+	}
+
+	for _, p := range paths {
+		req := httptest.NewRequest("GET", p, nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		// Should not panic
+		if w.Code != http.StatusOK {
+			t.Logf("Path %s returned %d", p, w.Code)
+		}
+	}
+}
+
 func TestHandler_ServeHTTP_Paths(t *testing.T) {
 	handler, err := NewHandler()
 	if err != nil {

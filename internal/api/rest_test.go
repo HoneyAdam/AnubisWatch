@@ -43,7 +43,12 @@ func newMockStorage() *mockStorage {
 	}
 }
 
-func (m *mockStorage) GetSoulNoCtx(id string) (*core.Soul, error) { return m.souls[id], nil }
+func (m *mockStorage) GetSoulNoCtx(id string) (*core.Soul, error) {
+	if s, ok := m.souls[id]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("soul not found")
+}
 func (m *mockStorage) ListSoulsNoCtx(ws string, offset, limit int) ([]*core.Soul, error) {
 	souls := make([]*core.Soul, 0, len(m.souls))
 	for _, s := range m.souls {
@@ -62,12 +67,19 @@ func (m *mockStorage) SaveSoul(ctx context.Context, soul *core.Soul) error {
 	m.souls[soul.ID] = soul
 	return nil
 }
+func (m *mockStorage) SaveSoulNoCtx(soul *core.Soul) error {
+	m.souls[soul.ID] = soul
+	return nil
+}
 func (m *mockStorage) DeleteSoul(ctx context.Context, id string) error {
 	delete(m.souls, id)
 	return nil
 }
 func (m *mockStorage) GetJudgmentNoCtx(id string) (*core.Judgment, error) {
-	return m.judgments[id], nil
+	if j, ok := m.judgments[id]; ok {
+		return j, nil
+	}
+	return nil, fmt.Errorf("judgment not found")
 }
 func (m *mockStorage) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error) {
 	var result []*core.Judgment
@@ -128,7 +140,10 @@ func (m *failingMockStorage) ListStatusPagesNoCtx() ([]*core.StatusPage, error) 
 func (m *failingMockStorage) SaveStatusPageNoCtx(page *core.StatusPage) error                   { return fmt.Errorf("storage error") }
 func (m *failingMockStorage) DeleteStatusPageNoCtx(id string) error                            { return fmt.Errorf("storage error") }
 func (m *mockStorage) GetChannelNoCtx(id string) (*core.AlertChannel, error) {
-	return m.channels[id], nil
+	if c, ok := m.channels[id]; ok {
+		return c, nil
+	}
+	return nil, fmt.Errorf("channel not found")
 }
 func (m *mockStorage) ListChannelsNoCtx(ws string) ([]*core.AlertChannel, error) {
 	channels := make([]*core.AlertChannel, 0, len(m.channels))
@@ -145,7 +160,12 @@ func (m *mockStorage) DeleteChannelNoCtx(id string) error {
 	delete(m.channels, id)
 	return nil
 }
-func (m *mockStorage) GetRuleNoCtx(id string) (*core.AlertRule, error) { return m.rules[id], nil }
+func (m *mockStorage) GetRuleNoCtx(id string) (*core.AlertRule, error) {
+	if r, ok := m.rules[id]; ok {
+		return r, nil
+	}
+	return nil, fmt.Errorf("rule not found")
+}
 func (m *mockStorage) ListRulesNoCtx(ws string) ([]*core.AlertRule, error) {
 	rules := make([]*core.AlertRule, 0, len(m.rules))
 	for _, r := range m.rules {
@@ -162,7 +182,10 @@ func (m *mockStorage) DeleteRuleNoCtx(id string) error {
 	return nil
 }
 func (m *mockStorage) GetWorkspaceNoCtx(id string) (*core.Workspace, error) {
-	return m.workspaces[id], nil
+	if w, ok := m.workspaces[id]; ok {
+		return w, nil
+	}
+	return nil, fmt.Errorf("workspace not found")
 }
 func (m *mockStorage) ListWorkspacesNoCtx() ([]*core.Workspace, error) {
 	ws := make([]*core.Workspace, 0, len(m.workspaces))
@@ -184,7 +207,9 @@ func (m *mockStorage) GetStatsNoCtx(ws string, start, end time.Time) (*core.Stat
 }
 
 // StatusPage methods
-func (m *mockStorage) GetStatusPageNoCtx(id string) (*core.StatusPage, error) { return nil, nil }
+func (m *mockStorage) GetStatusPageNoCtx(id string) (*core.StatusPage, error) {
+	return nil, fmt.Errorf("status page not found")
+}
 func (m *mockStorage) ListStatusPagesNoCtx() ([]*core.StatusPage, error) {
 	return []*core.StatusPage{}, nil
 }
@@ -236,6 +261,21 @@ func (a *mockAlertManager) RegisterChannel(ch *core.AlertChannel) error { return
 func (a *mockAlertManager) RegisterRule(rule *core.AlertRule) error     { return nil }
 func (a *mockAlertManager) DeleteChannel(id string) error               { return nil }
 func (a *mockAlertManager) DeleteRule(id string) error                  { return nil }
+
+// failingAlertManager is an AlertManager that always returns errors
+type failingAlertManager struct{}
+
+func (a *failingAlertManager) GetStats() core.AlertManagerStats {
+	return core.AlertManagerStats{}
+}
+func (a *failingAlertManager) ListChannels() []*core.AlertChannel          { return nil }
+func (a *failingAlertManager) ListRules() []*core.AlertRule                { return nil }
+func (a *failingAlertManager) RegisterChannel(ch *core.AlertChannel) error { return fmt.Errorf("alert error") }
+func (a *failingAlertManager) RegisterRule(rule *core.AlertRule) error     { return fmt.Errorf("alert error") }
+func (a *failingAlertManager) DeleteChannel(id string) error               { return fmt.Errorf("alert error") }
+func (a *failingAlertManager) DeleteRule(id string) error                  { return fmt.Errorf("alert error") }
+func (a *failingAlertManager) AcknowledgeIncident(incidentID, userID string) error { return fmt.Errorf("alert error") }
+func (a *failingAlertManager) ResolveIncident(incidentID, userID string) error     { return fmt.Errorf("alert error") }
 func (a *mockAlertManager) AcknowledgeIncident(id, userID string) error { return nil }
 func (a *mockAlertManager) ResolveIncident(id, userID string) error     { return nil }
 
@@ -256,6 +296,19 @@ func (a *mockAuthenticator) Login(email, password string) (*User, string, error)
 	return nil, "", http.ErrNoCookie
 }
 func (a *mockAuthenticator) Logout(token string) error { return nil }
+func (a *mockAuthenticator) Shutdown()                 {}
+
+// failingMockAuthenticator always returns errors
+type failingMockAuthenticator struct{}
+
+func (a *failingMockAuthenticator) Authenticate(token string) (*User, error) {
+	return &User{ID: "user-1", Email: "test@example.com", Role: "admin", Workspace: "default"}, nil
+}
+func (a *failingMockAuthenticator) Login(email, password string) (*User, string, error) {
+	return nil, "", fmt.Errorf("login failed")
+}
+func (a *failingMockAuthenticator) Logout(token string) error { return fmt.Errorf("logout failed") }
+func (a *failingMockAuthenticator) Shutdown()                 {}
 
 // mockClusterManager implements ClusterManager interface
 type mockClusterManager struct {
@@ -1056,6 +1109,30 @@ func TestHandleDeleteStatusPage(t *testing.T) {
 
 	if w.Code != http.StatusNoContent {
 		t.Errorf("expected status 204, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleDeleteStatusPage_StorageError(t *testing.T) {
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   &failingMockStorage{},
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("DELETE", "/api/v1/status-pages/:id", server.requireAuth(server.handleDeleteStatusPage))
+
+	req := httptest.NewRequest("DELETE", "/api/v1/status-pages/page-1", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -3498,5 +3575,416 @@ func TestHandleCreateSoul_InvalidJSON(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+// TestRouter_ServeHTTP_StatusPageFallback tests ServeHTTP with status page route
+func TestRouter_ServeHTTP_StatusPageFallback(t *testing.T) {
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	// Create a mock status page handler
+	statusHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("status page"))
+	})
+	router.statusPage = statusHandler
+
+	// Test /status/ prefix
+	req := httptest.NewRequest("GET", "/status/public/test", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200 from status page, got %d", w.Code)
+	}
+}
+
+// TestRouter_ServeHTTP_ACMEFallback tests ServeHTTP with ACME challenge route
+func TestRouter_ServeHTTP_ACMEFallback(t *testing.T) {
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	statusHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("acme response"))
+	})
+	router.statusPage = statusHandler
+
+	req := httptest.NewRequest("GET", "/.well-known/acme-challenge/test-token", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200 from ACME handler, got %d", w.Code)
+	}
+}
+
+// TestRouter_ServeHTTP_DashboardFallback tests ServeHTTP with dashboard fallback
+func TestRouter_ServeHTTP_DashboardFallback(t *testing.T) {
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	dashboardHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("dashboard"))
+	})
+	router.dashboard = dashboardHandler
+
+	// Non-API, non-health, non-metrics route should hit dashboard
+	req := httptest.NewRequest("GET", "/dashboard", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200 from dashboard, got %d", w.Code)
+	}
+}
+
+// TestRouter_ServeHTTP_OptionsCORS tests ServeHTTP with OPTIONS method
+func TestRouter_ServeHTTP_OptionsCORS(t *testing.T) {
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	req := httptest.NewRequest("OPTIONS", "/api/v1/test", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("expected status 204 for CORS preflight, got %d", w.Code)
+	}
+	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("expected Access-Control-Allow-Origin header")
+	}
+}
+
+// TestRouter_ServeHTTP_MethodNotAllowed tests ServeHTTP when route exists but method doesn't
+func TestRouter_ServeHTTP_MethodNotAllowed(t *testing.T) {
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	handlerCalled := false
+	router.Handle("GET", "/api/v1/test", func(ctx *Context) error {
+		handlerCalled = true
+		return ctx.JSON(http.StatusOK, nil)
+	})
+
+	// Send POST to GET-only route
+	req := httptest.NewRequest("POST", "/api/v1/test", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// Should fall through to 404 since no matching method
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", w.Code)
+	}
+	if handlerCalled {
+		t.Error("handler should not be called for wrong method")
+	}
+}
+
+// TestHandleClusterStatus_Basic tests the cluster status endpoint
+func TestHandleClusterStatus_Basic(t *testing.T) {
+	storage := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("GET", "/api/v1/cluster/status", server.handleClusterStatus)
+
+	req := httptest.NewRequest("GET", "/api/v1/cluster/status", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}
+
+// TestHandleClusterPeers_Basic tests the cluster peers endpoint
+func TestHandleClusterPeers_Basic(t *testing.T) {
+	storage := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("GET", "/api/v1/cluster/peers", server.handleClusterPeers)
+
+	req := httptest.NewRequest("GET", "/api/v1/cluster/peers", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}
+
+// Error-path tests for handlers below 85% coverage
+
+func TestHandleGetSoul_NotFound_ViaMissingID(t *testing.T) {
+	storage := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  storage,
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+	}
+
+	router.Handle("GET", "/api/v1/souls/:id", server.requireAuth(server.handleGetSoul))
+
+	req := httptest.NewRequest("GET", "/api/v1/souls/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleGetChannel_NotFound(t *testing.T) {
+	storage := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  storage,
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+	}
+
+	router.Handle("GET", "/api/v1/channels/:id", server.requireAuth(server.handleGetChannel))
+
+	req := httptest.NewRequest("GET", "/api/v1/channels/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleGetRule_NotFound(t *testing.T) {
+	storage := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  storage,
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+	}
+
+	router.Handle("GET", "/api/v1/rules/:id", server.requireAuth(server.handleGetRule))
+
+	req := httptest.NewRequest("GET", "/api/v1/rules/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleGetWorkspace_NotFound(t *testing.T) {
+	storage := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  storage,
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+	}
+
+	router.Handle("GET", "/api/v1/workspaces/:id", server.requireAuth(server.handleGetWorkspace))
+
+	req := httptest.NewRequest("GET", "/api/v1/workspaces/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleUpdateWorkspace_StorageError(t *testing.T) {
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  &failingMockStorage{},
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+	}
+
+	router.Handle("PUT", "/api/v1/workspaces/:id", server.requireAuth(server.handleUpdateWorkspace))
+
+	ws := core.Workspace{Name: "Updated"}
+	body, _ := json.Marshal(ws)
+	req := httptest.NewRequest("PUT", "/api/v1/workspaces/ws-1", bytes.NewBuffer(body))
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleGetStatusPage_NotFound(t *testing.T) {
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  &failingMockStorage{},
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+	}
+
+	router.Handle("GET", "/api/v1/status-pages/:id", server.requireAuth(server.handleGetStatusPage))
+
+	req := httptest.NewRequest("GET", "/api/v1/status-pages/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleStats_StorageError(t *testing.T) {
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  &failingMockStorage{},
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+	}
+
+	router.Handle("GET", "/api/v1/stats", server.requireAuth(server.handleStats))
+
+	req := httptest.NewRequest("GET", "/api/v1/stats", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleLogout_FailingAuth(t *testing.T) {
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  newMockStorage(),
+		router: router,
+		auth:   &failingMockAuthenticator{},
+		logger: newTestLogger(),
+	}
+
+	router.Handle("POST", "/api/v1/logout", server.requireAuth(server.handleLogout))
+
+	req := httptest.NewRequest("POST", "/api/v1/logout", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleGetJudgment_NotFound(t *testing.T) {
+	storage := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  storage,
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+	}
+
+	router.Handle("GET", "/api/v1/judgments/:id", server.requireAuth(server.handleGetJudgment))
+
+	req := httptest.NewRequest("GET", "/api/v1/judgments/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleAcknowledgeIncident_FailingStore(t *testing.T) {
+	alert := &failingAlertManager{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  newMockStorage(),
+		alert:  alert,
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+	}
+
+	router.Handle("POST", "/api/v1/incidents/:id/acknowledge", server.requireAuth(server.handleAcknowledgeIncident))
+
+	req := httptest.NewRequest("POST", "/api/v1/incidents/inc-1/acknowledge", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleResolveIncident_FailingStore(t *testing.T) {
+	alert := &failingAlertManager{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  newMockStorage(),
+		alert:  alert,
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+	}
+
+	router.Handle("POST", "/api/v1/incidents/:id/resolve", server.requireAuth(server.handleResolveIncident))
+
+	req := httptest.NewRequest("POST", "/api/v1/incidents/inc-1/resolve", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
 	}
 }

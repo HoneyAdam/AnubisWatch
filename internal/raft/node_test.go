@@ -2523,6 +2523,41 @@ func TestNode_MaybeTakeSnapshot_BelowThreshold(t *testing.T) {
 	node.maybeTakeSnapshot()
 }
 
+// Test maybeTakeSnapshot when snapshot already in progress
+func TestNode_MaybeTakeSnapshot_InProgress(t *testing.T) {
+	node := createTestNode(t)
+	node.snapshotThreshold = 5
+	node.log = make([]core.RaftLogEntry, 20)
+	node.commitIndex = 15
+	node.snapshotInProgress.Store(true)
+
+	// Should return early because snapshot is in progress
+	node.maybeTakeSnapshot()
+
+	// Verify flag is still set
+	if !node.snapshotInProgress.Load() {
+		t.Error("snapshotInProgress should still be true")
+	}
+}
+
+// Test maybeTakeSnapshot with zero threshold
+func TestNode_MaybeTakeSnapshot_ZeroThreshold(t *testing.T) {
+	node := createTestNode(t)
+	node.snapshotThreshold = 0
+
+	// Should return early with zero threshold
+	node.maybeTakeSnapshot()
+}
+
+// Test maybeTakeSnapshot with negative threshold
+func TestNode_MaybeTakeSnapshot_NegativeThreshold(t *testing.T) {
+	node := createTestNode(t)
+	node.snapshotThreshold = -1
+
+	// Should return early with negative threshold
+	node.maybeTakeSnapshot()
+}
+
 // Test startElection with mock transport
 func TestNode_StartElection_NoPeers(t *testing.T) {
 	cfg := newTestRaftNodeConfig()
@@ -2602,4 +2637,846 @@ func TestNode_HandleHeartbeat_OldTerm(t *testing.T) {
 		t.Fatal("Expected response")
 	}
 	// Should return current term in response
+}
+
+// TestContainsString tests the containsString helper function
+func TestContainsString(t *testing.T) {
+	tests := []struct {
+		name     string
+		slice    []string
+		s        string
+		expected bool
+	}{
+		{
+			name:     "string exists in slice",
+			slice:    []string{"a", "b", "c"},
+			s:        "b",
+			expected: true,
+		},
+		{
+			name:     "string does not exist",
+			slice:    []string{"a", "b", "c"},
+			s:        "d",
+			expected: false,
+		},
+		{
+			name:     "empty slice",
+			slice:    []string{},
+			s:        "a",
+			expected: false,
+		},
+		{
+			name:     "nil slice",
+			slice:    nil,
+			s:        "a",
+			expected: false,
+		},
+		{
+			name:     "empty string search",
+			slice:    []string{"a", "", "c"},
+			s:        "",
+			expected: true,
+		},
+		{
+			name:     "first element",
+			slice:    []string{"first", "second", "third"},
+			s:        "first",
+			expected: true,
+		},
+		{
+			name:     "last element",
+			slice:    []string{"first", "second", "last"},
+			s:        "last",
+			expected: true,
+		},
+	}
+
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := containsString(tt.slice, tt.s)
+			if result != tt.expected {
+				t.Errorf("containsString(%v, %q) = %v, expected %v", tt.slice, tt.s, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestNode_checkJointConsensusCommit tests joint consensus commit checking
+func TestNode_checkJointConsensusCommit(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	// Test when not in joint consensus (should use standard commit)
+	if !node.checkJointConsensusCommit(0) {
+		t.Error("Should return true for index 0 when not in joint consensus")
+	}
+
+	// Set up joint consensus state
+	node.membership.mu.Lock()
+	node.membership.jointState = true
+	node.membership.oldConfig = []string{"node-1", "node-2", "node-3"}
+	node.membership.newConfig = []string{"node-1", "node-4", "node-5"}
+	node.membership.mu.Unlock()
+
+	// Set up peers
+	peer2 := &Peer{ID: "node-2", nextIndex: 1, matchIndex: 5}
+	peer3 := &Peer{ID: "node-3", nextIndex: 1, matchIndex: 5}
+	peer4 := &Peer{ID: "node-4", nextIndex: 1, matchIndex: 5}
+	peer5 := &Peer{ID: "node-5", nextIndex: 1, matchIndex: 5}
+
+	node.peerMu.Lock()
+	node.peers["node-2"] = peer2
+	node.peers["node-3"] = peer3
+	node.peers["node-4"] = peer4
+	node.peers["node-5"] = peer5
+	node.matchIndex["node-2"] = 5
+	node.matchIndex["node-3"] = 5
+	node.matchIndex["node-4"] = 5
+	node.matchIndex["node-5"] = 5
+	node.peerMu.Unlock()
+
+	// Both old and new config need majority
+	if !node.checkJointConsensusCommit(5) {
+		t.Error("Should commit when both configs have majority")
+	}
+
+	// Reduce old config matches
+	node.peerMu.Lock()
+	node.matchIndex["node-2"] = 0
+	node.matchIndex["node-3"] = 0
+	node.peerMu.Unlock()
+
+	if node.checkJointConsensusCommit(5) {
+		t.Error("Should not commit when old config lacks majority")
+	}
+}
+
+// TestNode_checkJointConsensusCommit_NotJoint tests when not in joint state
+func TestNode_checkJointConsensusCommit_NotJoint(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	node.membership.mu.Lock()
+	node.membership.jointState = false
+	node.membership.mu.Unlock()
+
+	peer2 := &Peer{ID: "node-2", nextIndex: 1, matchIndex: 5}
+	peer3 := &Peer{ID: "node-3", nextIndex: 1, matchIndex: 5}
+
+	node.peerMu.Lock()
+	node.peers["node-2"] = peer2
+	node.peers["node-3"] = peer3
+	node.matchIndex["node-2"] = 5
+	node.matchIndex["node-3"] = 5
+	node.peerMu.Unlock()
+
+	if !node.checkJointConsensusCommit(5) {
+		t.Error("Should commit with standard rules when not in joint consensus")
+	}
+}
+
+// TestNode_applyMembershipChange_Joint tests applying joint consensus phase
+func TestNode_applyMembershipChange_Joint(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	change := core.MembershipChange{
+		Type:      core.MembershipAddPeer,
+		Phase:     "joint",
+		OldConfig: []string{"node-1", "node-2"},
+		NewConfig: []string{"node-1", "node-2", "node-3"},
+		Peer: core.RaftPeer{
+			ID:      "node-3",
+			Address: "localhost:8003",
+		},
+	}
+
+	node.applyMembershipChange(change, 10)
+
+	node.membership.mu.RLock()
+	if !node.membership.jointState {
+		t.Error("Should be in joint state")
+	}
+	node.membership.mu.RUnlock()
+
+	node.peerMu.RLock()
+	if node.peers["node-3"] == nil {
+		t.Error("Peer node-3 should have been added")
+	}
+	node.peerMu.RUnlock()
+}
+
+// TestNode_applyMembershipChange_Final_RemovePeer tests final phase
+func TestNode_applyMembershipChange_Final_RemovePeer(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	node.peerMu.Lock()
+	node.peers["node-3"] = &Peer{ID: "node-3", Address: "localhost:8003"}
+	node.peerMu.Unlock()
+
+	jointChange := core.MembershipChange{
+		Type:      core.MembershipRemovePeer,
+		Phase:     "joint",
+		OldConfig: []string{"node-1", "node-2", "node-3"},
+		NewConfig: []string{"node-1", "node-2"},
+		Peer: core.RaftPeer{
+			ID:      "node-3",
+			Address: "localhost:8003",
+		},
+	}
+	node.applyMembershipChange(jointChange, 10)
+
+	finalChange := core.MembershipChange{
+		Type:      core.MembershipRemovePeer,
+		Phase:     "final",
+		NewConfig: []string{"node-1", "node-2"},
+		Peer: core.RaftPeer{
+			ID:      "node-3",
+			Address: "localhost:8003",
+		},
+	}
+	node.applyMembershipChange(finalChange, 11)
+
+	node.membership.mu.RLock()
+	if node.membership.jointState {
+		t.Error("Should not be in joint state after final phase")
+	}
+	node.membership.mu.RUnlock()
+
+	node.peerMu.RLock()
+	if node.peers["node-3"] != nil {
+		t.Error("Peer node-3 should have been removed")
+	}
+	node.peerMu.RUnlock()
+}
+
+// TestNode_maybeTakeSnapshot_NotLeader tests snapshot only on leader
+func TestNode_maybeTakeSnapshot_NotLeader(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	node.mu.Lock()
+	node.state = core.StateFollower
+	node.mu.Unlock()
+
+	node.config.SnapshotThreshold = 10
+
+	node.mu.Lock()
+	for i := 0; i < 20; i++ {
+		node.log = append(node.log, core.RaftLogEntry{
+			Index: uint64(i + 1),
+			Term:  1,
+			Type:  core.LogCommand,
+		})
+	}
+	node.lastApplied = 20
+	node.commitIndex = 20
+	node.mu.Unlock()
+
+	node.maybeTakeSnapshot()
+	time.Sleep(50 * time.Millisecond)
+}
+
+// TestNode_maybeTakeSnapshot_Threshold tests snapshot threshold
+func TestNode_maybeTakeSnapshot_Threshold(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	node.mu.Lock()
+	node.state = core.StateLeader
+	node.mu.Unlock()
+
+	node.config.SnapshotThreshold = 100
+
+	node.mu.Lock()
+	for i := 0; i < 5; i++ {
+		node.log = append(node.log, core.RaftLogEntry{
+			Index: uint64(i + 1),
+			Term:  1,
+			Type:  core.LogCommand,
+		})
+	}
+	node.lastApplied = 5
+	node.commitIndex = 5
+	node.mu.Unlock()
+
+	node.maybeTakeSnapshot()
+	time.Sleep(50 * time.Millisecond)
+}
+
+// TestNode_transitionToFinalConfig_NotLeader tests that transitionToFinalConfig returns early when not leader
+func TestNode_transitionToFinalConfig_NotLeader(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	// Ensure not leader
+	node.mu.Lock()
+	node.state = core.StateFollower
+	node.mu.Unlock()
+
+	change := core.MembershipChange{
+		Type: core.MembershipAddPeer,
+		Peer: core.RaftPeer{ID: "node-2", Address: "127.0.0.1:7002"},
+	}
+
+	// Should return immediately without error
+	node.transitionToFinalConfig(change, 1)
+}
+
+// TestNode_transitionToFinalConfig_AsLeader tests transitionToFinalConfig when node is leader
+func TestNode_transitionToFinalConfig_AsLeader(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	// Set as leader
+	node.mu.Lock()
+	node.state = core.StateLeader
+	node.currentTerm = 1
+	node.mu.Unlock()
+
+	change := core.MembershipChange{
+		Type: core.MembershipAddPeer,
+		Peer: core.RaftPeer{ID: "node-2", Address: "127.0.0.1:7002"},
+	}
+
+	// Should not panic even without peers
+	node.transitionToFinalConfig(change, 1)
+}
+
+// TestNode_maybeTakeSnapshot_AsLeader tests snapshot when node is leader and threshold met
+func TestNode_maybeTakeSnapshot_AsLeader(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	node.mu.Lock()
+	node.state = core.StateLeader
+	node.config.SnapshotThreshold = 5
+	// Pre-populate log with entries
+	for i := 0; i <= 10; i++ {
+		node.log = append(node.log, core.RaftLogEntry{
+			Index: uint64(i),
+			Term:  1,
+			Type:  core.LogCommand,
+		})
+	}
+	node.lastApplied = 10
+	node.commitIndex = 10
+	node.mu.Unlock()
+
+	node.maybeTakeSnapshot()
+	time.Sleep(100 * time.Millisecond)
+}
+
+// TestNode_maybeTakeSnapshot_FullPath tests the complete snapshot creation path
+func TestNode_maybeTakeSnapshot_FullPath(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.SnapshotThreshold = 5
+	cfg.TrailingLogs = 2 // Small value to avoid underflow in compactLog
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+
+	// Set as leader without starting (to avoid run loop interference)
+	node.mu.Lock()
+	node.state = core.StateLeader
+	node.snapshotThreshold = 5
+	// Pre-populate log (index 0 is placeholder, entries start at 1)
+	for i := 1; i <= 10; i++ {
+		node.log = append(node.log, core.RaftLogEntry{
+			Index: uint64(i),
+			Term:  1,
+			Type:  core.LogCommand,
+		})
+	}
+	node.commitIndex = 10
+	node.lastApplied = 10
+	node.mu.Unlock()
+
+	node.maybeTakeSnapshot()
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify snapshot was created
+	snaps, err := snapshot.List()
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(snaps) == 0 {
+		t.Fatal("expected snapshot to be created")
+	}
+
+	// Verify lastSnapshotIndex was updated
+	node.mu.RLock()
+	if node.lastSnapshotIndex != 10 {
+		t.Errorf("expected lastSnapshotIndex=10, got %d", node.lastSnapshotIndex)
+	}
+	node.mu.RUnlock()
+}
+
+// TestNode_StartElection_NoPeers_Candidate tests startElection with no peers in candidate state
+func TestNode_StartElection_NoPeers_Candidate(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	node.mu.Lock()
+	node.state = core.StateCandidate
+	node.currentTerm = 10
+	node.mu.Unlock()
+
+	// Should not panic with no peers
+	node.startElection()
+}
+
+// TestNode_proposeMembershipChange_Committed tests proposeMembershipChange when entry is already committed
+func TestNode_proposeMembershipChange_Committed(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	node.mu.Lock()
+	node.state = core.StateLeader
+	node.currentTerm = 1
+	node.commitIndex = 100 // High enough to satisfy commit check immediately
+	node.mu.Unlock()
+
+	change := core.MembershipChange{
+		Type:      core.MembershipAddPeer,
+		Peer:      core.RaftPeer{ID: "node-2", Address: "127.0.0.1:7002"},
+		OldConfig: []string{"node-1"},
+		NewConfig: []string{"node-1", "node-2"},
+		Phase:     "joint",
+	}
+
+	// Should succeed since commitIndex >= entry.Index
+	err := node.proposeMembershipChange(change)
+	if err != nil {
+		t.Fatalf("proposeMembershipChange failed: %v", err)
+	}
+
+	// Verify the log entry was appended
+	node.mu.RLock()
+	logLen := len(node.log)
+	node.mu.RUnlock()
+	if logLen == 0 {
+		t.Error("Expected log entry to be appended")
+	}
+}
+
+// TestNode_requestPreVotes_NoPeers tests requestPreVotes with no peers (votes for self)
+func TestNode_requestPreVotes_NoPeers(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	// Pre-votes with no peers should still count self-vote
+	result := node.requestPreVotes(1, 0, 0, nil)
+
+	// Self-vote + 0 peers = 1 vote, needed = (0+1)/2+1 = 1, so should be true
+	if !result {
+		t.Error("Expected requestPreVotes to return true with self-vote")
+	}
+}
+
+// TestNode_requestVotes_NoPeers tests requestVotes with no peers
+func TestNode_requestVotes_NoPeers(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+	defer node.Stop()
+
+	// Votes with no peers should still count self-vote
+	votes := node.requestVotes(1, 0, 0, nil)
+	if votes != 1 {
+		t.Errorf("Expected 1 vote (self), got %d", votes)
+	}
+}
+
+// TestNode_applyLoop tests applyLoop shutdown path
+func TestNode_applyLoop_Shutdown(t *testing.T) {
+	node := createTestNode(t)
+	node.Start()
+
+	// Stop should trigger shutdownCh close and applyLoop exit
+	node.Stop()
+
+	// If we get here without hanging, applyLoop exited cleanly
+}
+
+// TestNode_AddPeer_NotLeader tests AddPeer when node is not leader
+func TestNode_AddPeer_NotLeader(t *testing.T) {
+	node := createTestNode(t)
+
+	err := node.AddPeer(core.RaftPeer{ID: "peer-1", Address: "127.0.0.1:7001"})
+	if err == nil {
+		t.Error("Expected error when adding peer as non-leader")
+	}
+
+	raftErr, ok := err.(*core.RaftError)
+	if !ok || raftErr.Code != core.ErrNotLeader {
+		t.Errorf("Expected ErrNotLeader, got %v", err)
+	}
+}
+
+// TestNode_AddPeer_SelfAsPeer tests AddPeer with node's own ID
+func TestNode_AddPeer_SelfAsPeer(t *testing.T) {
+	node := createTestNode(t)
+	node.mu.Lock()
+	node.state = core.StateLeader
+	node.mu.Unlock()
+
+	err := node.AddPeer(core.RaftPeer{ID: "test-node-1", Address: "127.0.0.1:7001"})
+	if err == nil {
+		t.Error("Expected error when adding self as peer")
+	}
+	if err.Error() != "cannot add self as peer" {
+		t.Errorf("Expected 'cannot add self as peer', got %v", err)
+	}
+}
+
+// TestNode_AddPeer_DuplicatePeer tests AddPeer with existing peer ID
+func TestNode_AddPeer_DuplicatePeer(t *testing.T) {
+	node := createTestNode(t)
+	node.mu.Lock()
+	node.state = core.StateLeader
+	node.mu.Unlock()
+
+	// Add a peer directly to the peers map
+	node.peerMu.Lock()
+	node.peers["existing-peer"] = &Peer{
+		ID:      "existing-peer",
+		Address: "127.0.0.1:7002",
+	}
+	node.peerMu.Unlock()
+
+	// Also add to membership config
+	node.membership.mu.Lock()
+	node.membership.config = []string{"test-node-1", "existing-peer"}
+	node.membership.mu.Unlock()
+
+	err := node.AddPeer(core.RaftPeer{ID: "existing-peer", Address: "127.0.0.1:7002"})
+	if err == nil {
+		t.Error("Expected error when adding duplicate peer")
+	}
+}
+
+// TestNode_RemovePeer_NotLeader tests RemovePeer when node is not leader
+func TestNode_RemovePeer_NotLeader(t *testing.T) {
+	node := createTestNode(t)
+
+	err := node.RemovePeer("peer-1")
+	if err == nil {
+		t.Error("Expected error when removing peer as non-leader")
+	}
+
+	raftErr, ok := err.(*core.RaftError)
+	if !ok || raftErr.Code != core.ErrNotLeader {
+		t.Errorf("Expected ErrNotLeader, got %v", err)
+	}
+}
+
+// TestNode_RemovePeer_SelfAsLeader tests RemovePeer with node's own ID when leader
+func TestNode_RemovePeer_SelfAsLeader(t *testing.T) {
+	node := createTestNode(t)
+	node.mu.Lock()
+	node.state = core.StateLeader
+	node.mu.Unlock()
+
+	err := node.RemovePeer("test-node-1")
+	if err == nil {
+		t.Error("Expected error when removing self")
+	}
+	if err.Error() != "cannot remove self" {
+		t.Errorf("Expected 'cannot remove self', got %v", err)
+	}
+}
+
+// TestNode_RemovePeer_NotFoundAsLeader tests RemovePeer with non-existent peer when leader
+func TestNode_RemovePeer_NotFoundAsLeader(t *testing.T) {
+	node := createTestNode(t)
+	node.mu.Lock()
+	node.state = core.StateLeader
+	node.mu.Unlock()
+
+	err := node.RemovePeer("non-existent-peer")
+	if err == nil {
+		t.Error("Expected error when removing non-existent peer")
+	}
+	if err.Error() != "peer non-existent-peer not found" {
+		t.Errorf("Expected peer not found error, got %v", err)
+	}
+}
+
+// failingMockTransport returns errors for all RPC calls
+type failingMockTransport struct{}
+
+func (m *failingMockTransport) Start() error                                 { return nil }
+func (m *failingMockTransport) Stop() error                                  { return nil }
+func (m *failingMockTransport) LocalAddr() string                            { return "127.0.0.1:0" }
+func (m *failingMockTransport) SendAppendEntries(peerID string, req *core.AppendEntriesRequest) (*core.AppendEntriesResponse, error) {
+	return nil, fmt.Errorf("network error")
+}
+func (m *failingMockTransport) SendRequestVote(peerID string, req *core.RequestVoteRequest) (*core.RequestVoteResponse, error) {
+	return nil, fmt.Errorf("network error")
+}
+func (m *failingMockTransport) SendPreVote(peerID string, req *core.PreVoteRequest) (*core.PreVoteResponse, error) {
+	return nil, fmt.Errorf("network error")
+}
+func (m *failingMockTransport) SendInstallSnapshot(peerID string, req *core.InstallSnapshotRequest) (*core.InstallSnapshotResponse, error) {
+	return nil, fmt.Errorf("network error")
+}
+func (m *failingMockTransport) SendHeartbeat(peerID string, req *core.HeartbeatRequest) (*core.HeartbeatResponse, error) {
+	return nil, fmt.Errorf("network error")
+}
+
+// highTermMockTransport returns higher term responses (peer is ahead)
+type highTermMockTransport struct{}
+
+func (m *highTermMockTransport) Start() error                                 { return nil }
+func (m *highTermMockTransport) Stop() error                                  { return nil }
+func (m *highTermMockTransport) LocalAddr() string                            { return "127.0.0.1:0" }
+func (m *highTermMockTransport) SendAppendEntries(peerID string, req *core.AppendEntriesRequest) (*core.AppendEntriesResponse, error) {
+	return &core.AppendEntriesResponse{Term: req.Term, Success: true}, nil
+}
+func (m *highTermMockTransport) SendRequestVote(peerID string, req *core.RequestVoteRequest) (*core.RequestVoteResponse, error) {
+	return &core.RequestVoteResponse{Term: req.Term + 10, VoteGranted: false, Reason: "log not current"}, nil
+}
+func (m *highTermMockTransport) SendPreVote(peerID string, req *core.PreVoteRequest) (*core.PreVoteResponse, error) {
+	return &core.PreVoteResponse{Term: req.Term + 10, VoteGranted: false, Reason: "log not current"}, nil
+}
+func (m *highTermMockTransport) SendInstallSnapshot(peerID string, req *core.InstallSnapshotRequest) (*core.InstallSnapshotResponse, error) {
+	return &core.InstallSnapshotResponse{Term: req.Term, Success: true}, nil
+}
+func (m *highTermMockTransport) SendHeartbeat(peerID string, req *core.HeartbeatRequest) (*core.HeartbeatResponse, error) {
+	return &core.HeartbeatResponse{Term: req.Term, LeaderID: req.LeaderID}, nil
+}
+
+// TestNode_RequestPreVotes_TransportError tests requestPreVotes when transport fails
+func TestNode_RequestPreVotes_TransportError(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+		{ID: "node-3", Address: "127.0.0.1:7002", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.SetTransport(&failingMockTransport{})
+	node.log = []core.RaftLogEntry{{}} // sentinel
+
+	peers := []*Peer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+		{ID: "node-3", Address: "127.0.0.1:7002", Role: core.RoleVoter},
+	}
+
+	// With all transport errors, only self-vote counts (1 vote)
+	// votesNeeded = (2+1)/2 + 1 = 2, so should return false
+	result := node.requestPreVotes(1, 0, 0, peers)
+	if result {
+		t.Error("Expected requestPreVotes to return false when all peers fail")
+	}
+}
+
+// TestNode_RequestPreVotes_HigherTerm tests requestPreVotes when peer has higher term
+func TestNode_RequestPreVotes_HigherTerm(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.SetTransport(&highTermMockTransport{})
+	node.currentTerm = 5
+	node.log = []core.RaftLogEntry{{}} // sentinel
+
+	peers := []*Peer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+	}
+
+	result := node.requestPreVotes(5, 0, 0, peers)
+	// Self-vote = 1, peer denied = 0, total = 1
+	// votesNeeded = (1+1)/2 + 1 = 2, so should return false
+	if result {
+		t.Error("Expected requestPreVotes to return false when peer denies")
+	}
+	// Peer responded with higher term (15), node should have updated
+	node.mu.RLock()
+	if node.currentTerm < 15 {
+		t.Errorf("Expected currentTerm to be updated to at least 15, got %d", node.currentTerm)
+	}
+	if node.state != core.StateFollower {
+		t.Errorf("Expected state to become Follower after higher term, got %s", node.state)
+	}
+	node.mu.RUnlock()
+}
+
+// TestNode_RequestVotes_TransportError tests requestVotes when transport fails
+func TestNode_RequestVotes_TransportError(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+		{ID: "node-3", Address: "127.0.0.1:7002", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.SetTransport(&failingMockTransport{})
+	node.log = []core.RaftLogEntry{{}} // sentinel
+
+	peers := []*Peer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+		{ID: "node-3", Address: "127.0.0.1:7002", Role: core.RoleVoter},
+	}
+
+	votes := node.requestVotes(1, 0, 0, peers)
+	// Only self-vote should count
+	if votes != 1 {
+		t.Errorf("Expected 1 vote (self only), got %d", votes)
+	}
+}
+
+// TestNode_RequestVotes_HigherTerm tests requestVotes when peer has higher term
+func TestNode_RequestVotes_HigherTerm(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.SetTransport(&highTermMockTransport{})
+	node.currentTerm = 5
+	node.log = []core.RaftLogEntry{{}} // sentinel
+
+	peers := []*Peer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+	}
+
+	votes := node.requestVotes(5, 0, 0, peers)
+	// Self-vote only, peer denied
+	if votes != 1 {
+		t.Errorf("Expected 1 vote (self only), got %d", votes)
+	}
+	// Peer responded with higher term (15), node should update
+	node.mu.RLock()
+	if node.currentTerm < 15 {
+		t.Errorf("Expected currentTerm to be updated to at least 15, got %d", node.currentTerm)
+	}
+	if node.state != core.StateFollower {
+		t.Errorf("Expected state to become Follower after higher term, got %s", node.state)
+	}
+	node.mu.RUnlock()
+}
+
+// TestNode_StartElection_PreVoteFails tests startElection when pre-vote fails
+func TestNode_StartElection_PreVoteFails(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+		{ID: "node-3", Address: "127.0.0.1:7002", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.SetTransport(&failingMockTransport{})
+	node.log = []core.RaftLogEntry{{}} // sentinel
+
+	node.mu.Lock()
+	node.state = core.StateFollower
+	node.currentTerm = 1
+	node.mu.Unlock()
+
+	node.startElection()
+
+	// Pre-vote should have failed (only 1 vote out of 2 needed)
+	// Node should have transitioned back to Follower
+	node.mu.RLock()
+	if node.state != core.StateFollower {
+		t.Errorf("Expected state to be Follower after failed pre-vote, got %s", node.state)
+	}
+	node.mu.RUnlock()
+}
+
+// TestNode_StartElection_VoteFails tests startElection when pre-vote passes but vote fails
+func TestNode_StartElection_VoteFails(t *testing.T) {
+	cfg := newTestRaftNodeConfig()
+	cfg.Peers = []core.RaftPeer{
+		{ID: "node-2", Address: "127.0.0.1:7001", Role: core.RoleVoter},
+	}
+	storage := NewInMemoryLogStore()
+	snapshot := NewInMemorySnapshotStore()
+	fsm := NewStorageFSM(NewInMemoryStorage())
+
+	node, _ := NewNode(cfg, storage, snapshot, fsm, newTestRaftLogger())
+	node.SetTransport(&failingMockTransport{})
+	node.log = []core.RaftLogEntry{{}} // sentinel
+
+	node.mu.Lock()
+	node.state = core.StateFollower
+	node.currentTerm = 1
+	node.mu.Unlock()
+
+	node.startElection()
+
+	// Pre-vote: self=1, peer fails (transport error)
+	// votesNeeded = (1+1)/2+1 = 2, only 1 vote -> pre-vote fails
+	// Node should be Follower
+	node.mu.RLock()
+	if node.state != core.StateFollower {
+		t.Errorf("Expected state to be Follower after failed pre-vote, got %s", node.state)
+	}
+	node.mu.RUnlock()
+}
+
+// TestNode_HandleRPC_PreVote tests PreVote RPC dispatch
+func TestNode_HandleRPC_PreVote(t *testing.T) {
+	node := createTestNode(t)
+
+	respCh := make(chan interface{}, 1)
+	rpc := &rpcWrapper{
+		cmd: &core.PreVoteRequest{
+			Term:         1,
+			CandidateID:  "candidate-1",
+			LastLogIndex: 0,
+			LastLogTerm:  0,
+		},
+		respCh: respCh,
+	}
+
+	node.handleRPC(rpc)
+
+	select {
+	case resp := <-respCh:
+		pvResp, ok := resp.(*core.PreVoteResponse)
+		if !ok {
+			t.Fatal("Expected PreVoteResponse")
+		}
+		if !pvResp.VoteGranted {
+			t.Error("Expected PreVote to be granted")
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Error("handleRPC timed out for PreVote")
+	}
 }

@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
@@ -404,5 +407,470 @@ func TestMCPServer_handleGetPrompt_HandlerError(t *testing.T) {
 	}
 	if resp.Error == nil {
 		t.Error("Expected error response")
+	}
+}
+
+// Test handleGetSoul with valid soul
+func TestMCPServer_handleGetSoul_Valid(t *testing.T) {
+	store := newMockStorage()
+	store.souls["soul-1"] = &core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP, Enabled: true}
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	result, err := server.handleGetSoul(json.RawMessage(`{"soul_id":"soul-1"}`))
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+}
+
+// Test handleGetSoul with missing soul_id
+func TestMCPServer_handleGetSoul_MissingID(t *testing.T) {
+	store := newMockStorage()
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	result, err := server.handleGetSoul(json.RawMessage(`{}`))
+	// Should return nil result for empty soul_id - storage will handle it
+	if err != nil {
+		t.Logf("Got error (may be expected): %v", err)
+	}
+	_ = result
+}
+
+// Test handleGetSoul with invalid JSON
+func TestMCPServer_handleGetSoul_InvalidJSON(t *testing.T) {
+	store := newMockStorage()
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	_, err := server.handleGetSoul(json.RawMessage(`{not valid json}`))
+	if err == nil {
+		t.Error("Expected error for invalid JSON")
+	}
+}
+
+// Test handleForceCheck with valid soul
+func TestMCPServer_handleForceCheck_Valid(t *testing.T) {
+	store := newMockStorage()
+	store.souls["soul-1"] = &core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP, Enabled: true}
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	result, err := server.handleForceCheck(json.RawMessage(`{"soul_id":"soul-1"}`))
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+}
+
+// Test handleForceCheck with invalid JSON
+func TestMCPServer_handleForceCheck_InvalidJSON(t *testing.T) {
+	store := newMockStorage()
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	_, err := server.handleForceCheck(json.RawMessage(`{not valid json}`))
+	if err == nil {
+		t.Error("Expected error for invalid JSON")
+	}
+}
+
+// Test handleAcknowledgeIncident with valid ID
+func TestMCPServer_handleAcknowledgeIncident_Valid(t *testing.T) {
+	store := newMockStorage()
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	result, err := server.handleAcknowledgeIncident(json.RawMessage(`{"incident_id":"inc-1"}`))
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	// Result may be nil on success
+	_ = result
+}
+
+// Test handleAcknowledgeIncident with invalid JSON
+func TestMCPServer_handleAcknowledgeIncident_InvalidJSON(t *testing.T) {
+	store := newMockStorage()
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	_, err := server.handleAcknowledgeIncident(json.RawMessage(`{not valid json}`))
+	if err == nil {
+		t.Error("Expected error for invalid JSON")
+	}
+}
+
+// Test handleCreateSoul with invalid JSON
+func TestMCPServer_handleCreateSoul_InvalidJSON(t *testing.T) {
+	store := newMockStorage()
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	_, err := server.handleCreateSoul(json.RawMessage(`{not valid json}`))
+	if err == nil {
+		t.Error("Expected error for invalid JSON")
+	}
+}
+
+// Test handleGetStats with workspace filter
+func TestMCPServer_handleGetStats_WithWorkspace(t *testing.T) {
+	store := newMockStorage()
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	result, err := server.handleGetStats(json.RawMessage(`{"workspace":"default"}`))
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+}
+
+// Test handleListIncidents returns empty list
+func TestMCPServer_handleListIncidents_Empty(t *testing.T) {
+	store := newMockStorage()
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	result, err := server.handleListIncidents(json.RawMessage(`{}`))
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+}
+
+// Test handleCallTool with unknown tool
+func TestMCPServer_handleCallTool_UnknownTool(t *testing.T) {
+	store := newMockStorage()
+	probe := &mockProbeEngine{}
+	alert := &mockAlertManager{}
+	logger := newTestLogger()
+
+	server := NewMCPServer(store, probe, alert, logger)
+
+	req := &MCPRequest{
+		ID:     1,
+		Method: "tools/call",
+		Params: json.RawMessage(`{"name":"unknown_tool","arguments":{}}`),
+	}
+	resp := server.handleCallTool(req)
+	if resp == nil {
+		t.Fatal("Expected non-nil response")
+	}
+	if resp.Error == nil {
+		t.Error("Expected error for unknown tool")
+	}
+}
+
+// Test RESTServer.handleMCP with nil MCP server
+func TestRESTServer_handleMCP_NilMCP(t *testing.T) {
+	store := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   store,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("GET", "/api/v1/mcp", server.requireAuth(server.handleMCP))
+
+	req := httptest.NewRequest("GET", "/api/v1/mcp", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected 503, got %d", w.Code)
+	}
+}
+
+// Test RESTServer.handleMCP without auth
+func TestRESTServer_handleMCP_NoAuth(t *testing.T) {
+	store := newMockStorage()
+	mcp := NewMCPServer(store, &mockProbeEngine{}, &mockAlertManager{}, newTestLogger())
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   store,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+		mcp:     mcp,
+	}
+
+	router.Handle("GET", "/api/v1/mcp", server.requireAuth(server.handleMCP))
+
+	req := httptest.NewRequest("GET", "/api/v1/mcp", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	// Should require authentication (401 or 405 depending on router behavior)
+	if w.Code != http.StatusUnauthorized && w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Expected 401 or 405, got %d", w.Code)
+	}
+}
+
+// Test RESTServer.handleClusterStatus with nil cluster
+func TestRESTServer_handleClusterStatus_NilCluster(t *testing.T) {
+	store := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  store,
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+		// No cluster set (nil)
+	}
+
+	router.Handle("GET", "/api/v1/cluster/status", server.requireAuth(server.handleClusterStatus))
+
+	req := httptest.NewRequest("GET", "/api/v1/cluster/status", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", w.Code)
+	}
+}
+
+// Test RESTServer.handleClusterPeers with nil cluster
+func TestRESTServer_handleClusterPeers_NilCluster(t *testing.T) {
+	store := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		store:  store,
+		router: router,
+		auth:   &mockAuthenticator{},
+		logger: newTestLogger(),
+		// No cluster set (nil)
+	}
+
+	router.Handle("GET", "/api/v1/cluster/peers", server.requireAuth(server.handleClusterPeers))
+
+	req := httptest.NewRequest("GET", "/api/v1/cluster/peers", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", w.Code)
+	}
+}
+
+// Test RESTServer.handleClusterPeers with cluster
+func TestRESTServer_handleClusterPeers_WithCluster(t *testing.T) {
+	store := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   store,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{isLeader: true},
+	}
+
+	router.Handle("GET", "/api/v1/cluster/peers", server.requireAuth(server.handleClusterPeers))
+
+	req := httptest.NewRequest("GET", "/api/v1/cluster/peers", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", w.Code)
+	}
+}
+
+// Test RESTServer.handleStatusPage with souls and judgments
+func TestRESTServer_handleStatusPage_WithData(t *testing.T) {
+	store := newMockStorage()
+	store.souls["soul-1"] = &core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP, Enabled: true, Target: "https://example.com"}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   store,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("GET", "/status", server.handleStatusPage)
+
+	req := httptest.NewRequest("GET", "/status", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", w.Code)
+	}
+}
+
+// Test RESTServer.handlePublicStatus with empty store
+func TestRESTServer_handlePublicStatus_Empty(t *testing.T) {
+	store := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   store,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("GET", "/api/v1/public/status", server.handlePublicStatus)
+
+	req := httptest.NewRequest("GET", "/api/v1/public/status", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", w.Code)
+	}
+}
+
+// Test RESTServer.handleStatusPageHTML with data
+func TestRESTServer_handleStatusPageHTML_WithData(t *testing.T) {
+	store := newMockStorage()
+	store.souls["soul-1"] = &core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP, Enabled: true, Target: "https://example.com"}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   store,
+		router:  router,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("GET", "/status.html", server.handleStatusPageHTML)
+
+	req := httptest.NewRequest("GET", "/status.html", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", w.Code)
+	}
+	if w.Header().Get("Content-Type") != "text/html; charset=utf-8" {
+		t.Errorf("Expected text/html content type, got %s", w.Header().Get("Content-Type"))
+	}
+}
+
+// Test RESTServer.handleWebSocket with nil WebSocket server
+func TestRESTServer_handleWebSocket_NilWS(t *testing.T) {
+	store := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:  core.ServerConfig{Host: "localhost", Port: 8080},
+		store:   store,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+		// ws is nil
+	}
+
+	router.Handle("GET", "/api/v1/ws", server.requireAuth(server.handleWebSocket))
+
+	req := httptest.NewRequest("GET", "/api/v1/ws", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected 503, got %d", w.Code)
+	}
+}
+
+// Test RESTServer.Start with zero port fallback
+func TestRESTServer_Start_ZeroPort(t *testing.T) {
+	store := newMockStorage()
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:  core.ServerConfig{Host: "", Port: 0},
+		store:   store,
+		router:  router,
+		auth:    &mockAuthenticator{},
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	// Start server in background
+	go func() {
+		_ = server.Start()
+	}()
+
+	// Give it time to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Stop it
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = server.Stop(ctx)
+}
+
+// Test RESTServer.Stop with no HTTP server
+func TestRESTServer_Stop_NoServer(t *testing.T) {
+	server := &RESTServer{}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err := server.Stop(ctx)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }

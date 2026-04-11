@@ -44,12 +44,9 @@ func (r *StatusPageRepository) GetStatusPageBySlug(slug string) (*core.StatusPag
 		return nil, &core.NotFoundError{Entity: "status_page", ID: slug}
 	}
 
-	var page core.StatusPage
-	if err := json.Unmarshal(data, &page); err != nil {
-		return nil, err
-	}
-
-	return &page, nil
+	// Slug index stores the page ID as raw bytes
+	pageID := string(data)
+	return r.GetStatusPage(pageID)
 }
 
 // GetStatusPage retrieves a status page by ID

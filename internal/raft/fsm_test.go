@@ -2,11 +2,68 @@ package raft
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
+
+// mockStorageListError returns error on List
+type mockStorageListError struct {
+	storage map[string][]byte
+}
+
+func (m *mockStorageListError) Get(key string) ([]byte, error) {
+	v, ok := m.storage[key]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return v, nil
+}
+func (m *mockStorageListError) Set(key string, value []byte) error {
+	m.storage[key] = value
+	return nil
+}
+func (m *mockStorageListError) Delete(key string) error {
+	delete(m.storage, key)
+	return nil
+}
+func (m *mockStorageListError) DeletePrefix(prefix string) error {
+	for k := range m.storage {
+		delete(m.storage, k)
+	}
+	return nil
+}
+func (m *mockStorageListError) List(prefix string) ([]string, error) {
+	return nil, errors.New("storage unavailable")
+}
+
+// mockStorageGetError returns error on Get for specific keys
+type mockStorageGetError struct {
+	storage map[string][]byte
+}
+
+func (m *mockStorageGetError) Get(key string) ([]byte, error) {
+	return nil, errors.New("read error")
+}
+func (m *mockStorageGetError) Set(key string, value []byte) error {
+	m.storage[key] = value
+	return nil
+}
+func (m *mockStorageGetError) Delete(key string) error {
+	delete(m.storage, key)
+	return nil
+}
+func (m *mockStorageGetError) DeletePrefix(prefix string) error {
+	for k := range m.storage {
+		delete(m.storage, k)
+	}
+	return nil
+}
+func (m *mockStorageGetError) List(prefix string) ([]string, error) {
+	return []string{"key1", "key2"}, nil
+}
 
 func TestStorageFSM_NewStorageFSM(t *testing.T) {
 	store := NewInMemoryStorage()
@@ -1074,5 +1131,86 @@ func TestInMemoryLogStore_DeleteRange_BeyondLength(t *testing.T) {
 		if log.Term != 0 {
 			t.Errorf("Expected log entry %d to be cleared", i)
 		}
+	}
+}
+
+// TestStorageFSM_Snapshot_ListError tests Snapshot when storage.List fails
+func TestStorageFSM_Snapshot_ListError(t *testing.T) {
+	store := &mockStorageListError{storage: make(map[string][]byte)}
+	fsm := NewStorageFSM(store)
+
+	_, err := fsm.Snapshot()
+	if err == nil {
+		t.Error("Expected error when List fails")
+	}
+}
+
+// TestStorageFSM_Snapshot_GetErrors tests Snapshot when individual Get calls fail
+func TestStorageFSM_Snapshot_GetErrors(t *testing.T) {
+	store := &mockStorageGetError{storage: make(map[string][]byte)}
+	fsm := NewStorageFSM(store)
+
+	snapshot, err := fsm.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot should succeed even if Get fails: %v", err)
+	}
+
+	// Snapshot should contain empty map since all Gets failed
+	var data map[string][]byte
+	if err := json.Unmarshal(snapshot.Value, &data); err != nil {
+		t.Fatalf("Failed to unmarshal snapshot: %v", err)
+	}
+	if len(data) != 0 {
+		t.Errorf("Expected empty snapshot, got %d entries", len(data))
+	}
+}
+
+// TestInMemoryLogStore_StoreLogs_Single tests storing a single log entry
+func TestInMemoryLogStore_StoreLogs_Single(t *testing.T) {
+	logStore := NewInMemoryLogStore()
+
+	logs := []core.RaftLogEntry{
+		{Index: 1, Term: 1, Type: core.LogCommand, Data: []byte("single-entry")},
+	}
+
+	if err := logStore.StoreLogs(logs); err != nil {
+		t.Fatalf("StoreLogs failed: %v", err)
+	}
+
+	var entry core.RaftLogEntry
+	if err := logStore.GetLog(1, &entry); err != nil {
+		t.Fatalf("GetLog failed: %v", err)
+	}
+	if entry.Type != core.LogCommand {
+		t.Errorf("Expected LogCommand, got %v", entry.Type)
+	}
+}
+
+// TestInMemoryLogStore_StoreLogs_MultipleWithGaps tests storing logs with gaps
+func TestInMemoryLogStore_StoreLogs_MultipleWithGaps(t *testing.T) {
+	logStore := NewInMemoryLogStore()
+
+	logs := []core.RaftLogEntry{
+		{Index: 10, Term: 1, Type: core.LogCommand, Data: []byte("entry-10")},
+		{Index: 20, Term: 2, Type: core.LogCommand, Data: []byte("entry-20")},
+	}
+
+	if err := logStore.StoreLogs(logs); err != nil {
+		t.Fatalf("StoreLogs failed: %v", err)
+	}
+
+	var e10, e20 core.RaftLogEntry
+	if err := logStore.GetLog(10, &e10); err != nil {
+		t.Fatalf("GetLog(10) failed: %v", err)
+	}
+	if e10.Term != 1 {
+		t.Errorf("Expected term 1, got %d", e10.Term)
+	}
+
+	if err := logStore.GetLog(20, &e20); err != nil {
+		t.Fatalf("GetLog(20) failed: %v", err)
+	}
+	if e20.Term != 2 {
+		t.Errorf("Expected term 2, got %d", e20.Term)
 	}
 }

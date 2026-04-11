@@ -140,6 +140,11 @@ func (c *HTTPChecker) Judge(ctx context.Context, soul *core.Soul) (*core.Judgmen
 		Timeout:   soul.Timeout.Duration,
 	}
 
+	// Use shared cookie jar if provided (for journey cookie persistence)
+	if jar, ok := cfg.CookieJar.(http.CookieJar); ok && jar != nil {
+		client.Jar = jar
+	}
+
 	// Handle redirects
 	if !cfg.FollowRedirects {
 		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {

@@ -403,3 +403,96 @@ func TestDuration_UnmarshalYAML_Error(t *testing.T) {
 		t.Error("Expected error for invalid duration string")
 	}
 }
+
+// TestDuration_UnmarshalJSON tests JSON unmarshaling (was at 50%)
+func TestDuration_UnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected time.Duration
+		wantErr  bool
+	}{
+		{
+			name:     "string format seconds",
+			input:    `"30s"`,
+			expected: 30 * time.Second,
+			wantErr:  false,
+		},
+		{
+			name:     "string format minutes",
+			input:    `"5m"`,
+			expected: 5 * time.Minute,
+			wantErr:  false,
+		},
+		{
+			name:     "string format complex",
+			input:    `"1h30m"`,
+			expected: 90 * time.Minute,
+			wantErr:  false,
+		},
+		{
+			name:     "nanoseconds number",
+			input:    `5000000000`,
+			expected: 5 * time.Second,
+			wantErr:  false,
+		},
+		{
+			name:     "zero nanoseconds",
+			input:    `0`,
+			expected: 0,
+			wantErr:  false,
+		},
+		{
+			name:     "negative nanoseconds",
+			input:    `-1000000000`,
+			expected: -time.Second,
+			wantErr:  false,
+		},
+		{
+			name:     "invalid string duration",
+			input:    `"not-a-duration"`,
+			expected: 0,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid number format",
+			input:    `"not-a-number"`,
+			expected: 0,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var d Duration
+			err := d.UnmarshalJSON([]byte(tt.input))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("UnmarshalJSON(%s) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && d.Duration != tt.expected {
+				t.Errorf("UnmarshalJSON(%s) = %v, want %v", tt.input, d.Duration, tt.expected)
+			}
+		})
+	}
+}
+
+// TestDuration_MarshalJSON tests JSON marshaling
+func TestDuration_MarshalJSON(t *testing.T) {
+	d := Duration{Duration: 5 * time.Minute}
+	data, err := d.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON failed: %v", err)
+	}
+	if string(data) != `"5m0s"` {
+		t.Errorf("MarshalJSON() = %s, want %q", string(data), "5m0s")
+	}
+}
+
+// TestLogEntryType_String_MembershipChange tests the missing membership_change case
+func TestLogEntryType_String_MembershipChange(t *testing.T) {
+	if LogMembershipChange.String() != "membership_change" {
+		t.Errorf("LogMembershipChange.String() = %q, want %q",
+			LogMembershipChange.String(), "membership_change")
+	}
+}

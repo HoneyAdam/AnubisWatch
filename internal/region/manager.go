@@ -2,6 +2,7 @@ package region
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -59,6 +60,13 @@ type Storage interface {
 	GetRegion(ctx context.Context, id string) (*Region, error)
 	ListRegions(ctx context.Context) ([]*Region, error)
 	DeleteRegion(ctx context.Context, id string) error
+}
+
+// ConflictStore provides entity-level storage for conflict detection
+type ConflictStore interface {
+	Storage
+	GetEntityData(ctx context.Context, entityType, entityID string) (json.RawMessage, error)
+	SaveEntityData(ctx context.Context, entityType, entityID string, data json.RawMessage) error
 }
 
 // Config contains region configuration

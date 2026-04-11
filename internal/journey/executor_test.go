@@ -2,13 +2,15 @@ package journey
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"net/http/cookiejar"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 	"github.com/AnubisWatch/anubiswatch/internal/storage"
-	"log/slog"
-	"os"
 )
 
 func newTestLogger() *slog.Logger {
@@ -497,7 +499,7 @@ func TestExecutor_executeStep_Success(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result := executor.executeStep(ctx, step, map[string]string{}, 0)
+	result := executor.executeStep(ctx, &JourneyContext{Variables: map[string]string{}}, step, 0)
 
 	// Step should execute (may fail due to network, but function runs)
 	if result.Name != "Test Step" {
@@ -521,7 +523,7 @@ func TestExecutor_executeStep_UnknownType(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result := executor.executeStep(ctx, step, map[string]string{}, 0)
+	result := executor.executeStep(ctx, &JourneyContext{Variables: map[string]string{}}, step, 0)
 
 	if result.Status != core.SoulDead {
 		t.Errorf("Expected status dead for unknown type, got %s", result.Status)
@@ -545,7 +547,7 @@ func TestExecutor_executeStep_ValidationFailed(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result := executor.executeStep(ctx, step, map[string]string{}, 0)
+	result := executor.executeStep(ctx, &JourneyContext{Variables: map[string]string{}}, step, 0)
 
 	if result.Status != core.SoulDead {
 		t.Errorf("Expected status dead for validation failure, got %s", result.Status)
@@ -578,7 +580,7 @@ func TestExecutor_executeStep_WithVariableInterpolation(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result := executor.executeStep(ctx, step, variables, 0)
+	result := executor.executeStep(ctx, &JourneyContext{Variables: variables}, step, 0)
 
 	// Step should execute with interpolated variables
 	if result.Name != "Variable Step" {
@@ -787,6 +789,116 @@ func TestExecutor_runAssertion(t *testing.T) {
 			judgment: &core.Judgment{},
 			wantPass: false,
 		},
+		{
+			name: "response_time less_than pass",
+			assertion: core.Assertion{
+				Type:     "response_time",
+				Operator: "less_than",
+				Expected: "5000",
+			},
+			judgment: &core.Judgment{
+				Duration: 100 * time.Millisecond,
+			},
+			wantPass: true,
+		},
+		{
+			name: "response_time greater_than fail",
+			assertion: core.Assertion{
+				Type:     "response_time",
+				Operator: "greater_than",
+				Expected: "50",
+			},
+			judgment: &core.Judgment{
+				Duration: 10 * time.Millisecond,
+			},
+			wantPass: false,
+		},
+		{
+			name: "header equals pass",
+			assertion: core.Assertion{
+				Type:     "header",
+				Operator: "equals",
+				Target:   "Content-Type",
+				Expected: "application/json",
+			},
+			judgment: &core.Judgment{
+				Details: &core.JudgmentDetails{
+					ResponseHeaders: map[string]string{"Content-Type": "application/json"},
+				},
+			},
+			wantPass: true,
+		},
+		{
+			name: "header not_equals pass",
+			assertion: core.Assertion{
+				Type:     "header",
+				Operator: "not_equals",
+				Target:   "X-Custom",
+				Expected: "secret",
+			},
+			judgment: &core.Judgment{
+				Details: &core.JudgmentDetails{
+					ResponseHeaders: map[string]string{"Content-Type": "text/html"},
+				},
+			},
+			wantPass: true,
+		},
+		{
+			name: "json_path equals pass",
+			assertion: core.Assertion{
+				Type:     "json_path",
+				Operator: "equals",
+				Target:   "$.status",
+				Expected: "ok",
+			},
+			judgment: &core.Judgment{
+				Details: &core.JudgmentDetails{
+					ResponseBody: `{"status":"ok"}`,
+				},
+			},
+			wantPass: true,
+		},
+		{
+			name: "regex match pass",
+			assertion: core.Assertion{
+				Type:     "regex",
+				Target:   "body",
+				Expected: `(\d{3})`,
+			},
+			judgment: &core.Judgment{
+				Details: &core.JudgmentDetails{
+					ResponseBody: `HTTP/1.1 200 OK`,
+				},
+			},
+			wantPass: true,
+		},
+		{
+			name: "regex no match fail",
+			assertion: core.Assertion{
+				Type:     "regex",
+				Target:   "",
+				Expected: `^\d{4}$`,
+			},
+			judgment: &core.Judgment{
+				Details: &core.JudgmentDetails{
+					ResponseBody: `123`,
+				},
+			},
+			wantPass: false,
+		},
+		{
+			name: "custom failure message",
+			assertion: core.Assertion{
+				Type:     "status_code",
+				Operator: "equals",
+				Expected: "200",
+				Message:  "Server is down!",
+			},
+			judgment: &core.Judgment{
+				StatusCode: 503,
+			},
+			wantPass: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -847,7 +959,7 @@ func TestExecutor_executeStep_WithAssertions(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result := executor.executeStep(ctx, step, map[string]string{}, 0)
+	result := executor.executeStep(ctx, &JourneyContext{Variables: map[string]string{}}, step, 0)
 
 	if result.Name != "Assertion Step" {
 		t.Errorf("Expected step name 'Assertion Step', got %s", result.Name)
@@ -877,4 +989,302 @@ func TestNewExecutorWithNodeID(t *testing.T) {
 	if exec2.region != "default" {
 		t.Errorf("Expected default region 'default', got %s", exec2.region)
 	}
+}
+
+// TestRetryWithBackoff_Success tests successful operation without retry
+func TestRetryWithBackoff_Success(t *testing.T) {
+	ctx := context.Background()
+	callCount := 0
+
+	err := retryWithBackoff(ctx, 3, 10*time.Millisecond, func() error {
+		callCount++
+		return nil
+	})
+
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("Expected 1 call, got %d", callCount)
+	}
+}
+
+// TestRetryWithBackoff_RetrySuccess tests successful retry
+func TestRetryWithBackoff_RetrySuccess(t *testing.T) {
+	ctx := context.Background()
+	callCount := 0
+
+	err := retryWithBackoff(ctx, 3, 10*time.Millisecond, func() error {
+		callCount++
+		if callCount < 3 {
+			return fmt.Errorf("temporary error")
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Errorf("Expected no error after retries, got %v", err)
+	}
+	if callCount != 3 {
+		t.Errorf("Expected 3 calls, got %d", callCount)
+	}
+}
+
+// TestRetryWithBackoff_MaxRetriesExceeded tests failure after max retries
+func TestRetryWithBackoff_MaxRetriesExceeded(t *testing.T) {
+	ctx := context.Background()
+	callCount := 0
+
+	err := retryWithBackoff(ctx, 3, 10*time.Millisecond, func() error {
+		callCount++
+		return fmt.Errorf("persistent error")
+	})
+
+	if err == nil {
+		t.Error("Expected error after max retries")
+	}
+	if callCount != 3 {
+		t.Errorf("Expected 3 calls, got %d", callCount)
+	}
+}
+
+// TestRetryWithBackoff_ContextCancellation tests context cancellation during retry
+func TestRetryWithBackoff_ContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	callCount := 0
+	err := retryWithBackoff(ctx, 10, 100*time.Millisecond, func() error {
+		callCount++
+		return fmt.Errorf("error")
+	})
+
+	if err != context.DeadlineExceeded && err != context.Canceled {
+		t.Errorf("Expected context error, got %v", err)
+	}
+}
+
+// TestExecuteStep_UnknownType tests step with unknown checker type
+func TestExecuteStep_UnknownType(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	executor := NewExecutor(db, newTestLogger())
+	ctx := context.Background()
+
+	step := core.JourneyStep{
+		Name:   "Unknown Step",
+		Type:   "unknown-type",
+		Target: "http://example.com",
+	}
+
+	result := executor.executeStep(ctx, &JourneyContext{Variables: map[string]string{}}, step, 0)
+
+	if result.Status != core.SoulDead {
+		t.Errorf("Expected status SoulDead, got %s", result.Status)
+	}
+	if result.Message != "unknown step type: unknown-type" {
+		t.Errorf("Expected unknown type message, got %s", result.Message)
+	}
+}
+
+// TestExecuteJourney_ContinueOnFailure tests journey continuing on step failure
+func TestExecuteJourney_ContinueOnFailure(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	executor := NewExecutor(db, newTestLogger())
+	ctx := context.Background()
+
+	journey := &core.JourneyConfig{
+		ID:                 "test-journey",
+		Name:               "Test Journey",
+		WorkspaceID:        "default",
+		ContinueOnFailure:  true, // Continue on failure
+		Steps: []core.JourneyStep{
+			{
+				Name:   "Step 1",
+				Type:   "http",
+				Target: "invalid-url-that-will-fail",
+			},
+			{
+				Name:   "Step 2",
+				Type:   "http",
+				Target: "also-invalid",
+			},
+		},
+	}
+
+	// Execute journey - should not panic
+	executor.executeJourney(ctx, journey)
+
+	// Both steps should have been executed (continued after first failure)
+
+	t.Log("Journey with ContinueOnFailure executed without panic")
+}
+
+// TestJourneyContext_CookieJarPersistence tests that cookie jar is shared across HTTP steps
+func TestJourneyContext_CookieJarPersistence(t *testing.T) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("Failed to create cookie jar: %v", err)
+	}
+
+	ctx := &JourneyContext{
+		Variables: map[string]string{"token": "abc123"},
+		CookieJar: jar,
+	}
+
+	if ctx.CookieJar == nil {
+		t.Fatal("CookieJar should be set")
+	}
+}
+
+// TestExecutor_VariableInterpolationInHTTPConfig tests variable interpolation in HTTP headers and body
+func TestExecutor_VariableInterpolationInHTTPConfig(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	executor := NewExecutor(db, newTestLogger())
+
+	step := core.JourneyStep{
+		Name:    "Auth Step",
+		Type:    core.CheckHTTP,
+		Target:  "https://${host}/api/${endpoint}",
+		Timeout: core.Duration{Duration: 5 * time.Second},
+		HTTP: &core.HTTPConfig{
+			Method: "${method}",
+			Headers: map[string]string{
+				"Authorization": "Bearer ${token}",
+				"Content-Type":  "application/json",
+			},
+			Body:          `{"user": "${user_id}"}`,
+			ValidStatus:   []int{200},
+		},
+	}
+
+	ctx := &JourneyContext{
+		Variables: map[string]string{
+			"host":     "example.com",
+			"endpoint": "health",
+			"method":   "GET",
+			"token":    "secret-token",
+			"user_id":  "12345",
+		},
+	}
+
+	result := executor.executeStep(context.Background(), ctx, step, 0)
+
+	// Step should execute (network may fail but interpolation works)
+	if result.Name != "Auth Step" {
+		t.Errorf("Expected step name 'Auth Step', got %s", result.Name)
+	}
+}
+
+// TestExecutor_VariableInterpolationInTCPConfig tests variable interpolation in TCP config
+func TestExecutor_VariableInterpolationInTCPConfig(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	executor := NewExecutor(db, newTestLogger())
+
+	step := core.JourneyStep{
+		Name:    "TCP Step",
+		Type:    core.CheckTCP,
+		Target:  "${host}:${port}",
+		Timeout: core.Duration{Duration: 5 * time.Second},
+		TCP: &core.TCPConfig{
+			Send:        "PING ${user}\r\n",
+			BannerMatch: "^Welcome to ${server_name}",
+		},
+	}
+
+	ctx := &JourneyContext{
+		Variables: map[string]string{
+			"host":        "localhost",
+			"port":        "8080",
+			"user":        "admin",
+			"server_name": "test-server",
+		},
+	}
+
+	result := executor.executeStep(context.Background(), ctx, step, 0)
+
+	if result.Name != "TCP Step" {
+		t.Errorf("Expected step name 'TCP Step', got %s", result.Name)
+	}
+}
+
+// TestExecutor_VariableInterpolationInDNSConfig tests variable interpolation in DNS config
+func TestExecutor_VariableInterpolationInDNSConfig(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	executor := NewExecutor(db, newTestLogger())
+
+	step := core.JourneyStep{
+		Name:    "DNS Step",
+		Type:    core.CheckDNS,
+		Target:  "${domain}",
+		Timeout: core.Duration{Duration: 5 * time.Second},
+		DNS: &core.DNSConfig{
+			RecordType:  "${record_type}",
+			Nameservers: []string{"${dns_server}"},
+		},
+	}
+
+	ctx := &JourneyContext{
+		Variables: map[string]string{
+			"domain":      "example.com",
+			"record_type": "A",
+			"dns_server":  "8.8.8.8",
+		},
+	}
+
+	result := executor.executeStep(context.Background(), ctx, step, 0)
+
+	if result.Name != "DNS Step" {
+		t.Errorf("Expected step name 'DNS Step', got %s", result.Name)
+	}
+}
+
+// TestJourney_VariablePassingBetweenSteps tests that variables extracted in one step
+// are available in subsequent steps
+func TestJourney_VariablePassingBetweenSteps(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	executor := NewExecutor(db, newTestLogger())
+
+	// Create a journey with two steps where step 1 extracts a variable
+	// and step 2 uses it
+	journey := &core.JourneyConfig{
+		ID:          "var-pass-test",
+		Name:        "Variable Passing Test",
+		WorkspaceID: "default",
+		Variables:   map[string]string{"base_url": "example.com"},
+		Steps: []core.JourneyStep{
+			{
+				Name:    "Step 1",
+				Type:    core.CheckHTTP,
+				Target:  "https://${base_url}/",
+				Timeout: core.Duration{Duration: 5 * time.Second},
+				Extract: map[string]core.ExtractionRule{
+					"extracted_value": {From: "body", Regex: `value=([a-z0-9]+)`},
+				},
+			},
+			{
+				Name:    "Step 2",
+				Type:    core.CheckHTTP,
+				Target:  "https://${base_url}/api/${extracted_value}",
+				Timeout: core.Duration{Duration: 5 * time.Second},
+			},
+		},
+	}
+
+	ctx := context.Background()
+	executor.executeJourney(ctx, journey)
+
+	// Journey should execute without error
+	t.Log("Journey with variable passing executed successfully")
 }

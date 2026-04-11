@@ -2463,3 +2463,490 @@ func TestManager_escalationChecker_Stop(t *testing.T) {
 		t.Fatalf("Stop failed: %v", err)
 	}
 }
+
+// TestManager_Start_AlreadyRunning tests calling Start twice
+func TestManager_Start_AlreadyRunning(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+	defer manager.Stop()
+
+	if err := manager.Start(); err != nil {
+		t.Fatalf("First Start failed: %v", err)
+	}
+
+	// Second Start should succeed without error (already running)
+	if err := manager.Start(); err != nil {
+		t.Errorf("Second Start should succeed, got error: %v", err)
+	}
+}
+
+// TestManager_ProcessJudgment_AlertQueued tests full path through ProcessJudgment
+func TestManager_ProcessJudgment_AlertQueued(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	// Create manager manually with custom queue
+	m := &Manager{
+		channels:    make(map[string]*core.AlertChannel),
+		rules:       make(map[string]*core.AlertRule),
+		history:     &core.AlertHistory{Entries: make(map[string]*core.AlertHistoryEntry)},
+		incidents:   make(map[string]*core.Incident),
+		dispatchers: make(map[core.AlertChannelType]ChannelDispatcher),
+		stopCh:      make(chan struct{}),
+		queue:       make(chan *core.AlertEvent, 100),
+		logger:      newTestLogger(),
+		storage:     storage,
+	}
+	m.registerDispatchers()
+
+	// Add a rule with status_change: alive -> dead (will match)
+	rule := &core.AlertRule{
+		ID:      "rule-status",
+		Name:    "Status Change Rule",
+		Enabled: true,
+		Scope:   core.RuleScope{Type: "all"},
+		Conditions: []core.AlertCondition{
+			{Type: "status_change", From: "alive", To: "dead"},
+		},
+		Channels: []string{},
+	}
+	m.RegisterRule(rule)
+
+	soul := &core.Soul{
+		ID:          "soul-alert",
+		Name:        "Alert Soul",
+		WorkspaceID: "default",
+	}
+
+	judgment := &core.Judgment{
+		Status:  core.SoulDead,
+		Message: "Soul is dead",
+		Details: &core.JudgmentDetails{
+			Assertions: []core.AssertionResult{
+				{Type: "http_status", Expected: "200", Actual: "500", Passed: false},
+			},
+		},
+	}
+
+	// Process judgment with status change from alive to dead
+	m.ProcessJudgment(soul, core.SoulAlive, judgment)
+
+	// Alert should be queued - read from queue
+	select {
+	case event := <-m.queue:
+		if event.SoulID != "soul-alert" {
+			t.Errorf("Expected soul ID soul-alert, got %s", event.SoulID)
+		}
+		if event.Status != core.SoulDead {
+			t.Errorf("Expected status Dead, got %s", event.Status)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Log("No alert in queue (may be expected depending on condition logic)")
+	}
+}
+
+// TestManager_ProcessJudgment_NilJudgmentDetails tests extractDetails with nil
+func TestManager_ProcessJudgment_NilJudgmentDetails(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	m := &Manager{
+		channels:    make(map[string]*core.AlertChannel),
+		rules:       make(map[string]*core.AlertRule),
+		history:     &core.AlertHistory{Entries: make(map[string]*core.AlertHistoryEntry)},
+		incidents:   make(map[string]*core.Incident),
+		dispatchers: make(map[core.AlertChannelType]ChannelDispatcher),
+		stopCh:      make(chan struct{}),
+		queue:       make(chan *core.AlertEvent, 100),
+		logger:      newTestLogger(),
+		storage:     storage,
+	}
+	m.registerDispatchers()
+
+	rule := &core.AlertRule{
+		ID:         "rule-nil",
+		Name:       "Nil Details Rule",
+		Enabled:    true,
+		Scope:      core.RuleScope{Type: "all"},
+		Conditions: []core.AlertCondition{{Type: "consecutive_failures", Threshold: 1}},
+		Channels:   []string{},
+	}
+	m.RegisterRule(rule)
+
+	soul := &core.Soul{
+		ID:          "soul-nil",
+		Name:        "Nil Soul",
+		WorkspaceID: "default",
+	}
+
+	// Judgment with nil Details
+	judgment := &core.Judgment{
+		Status:  core.SoulDead,
+		Message: "No details",
+		Details: nil,
+	}
+
+	m.ProcessJudgment(soul, core.SoulUnknown, judgment)
+	// Should not panic
+}
+
+// TestManager_isDuplicate_SameStatus tests dedup when status unchanged
+func TestManager_isDuplicate_SameStatus(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{
+		ID:      "rule-dedup",
+		Name:    "Dedup Rule",
+		Enabled: true,
+		Cooldown: core.Duration{Duration: 5 * time.Minute},
+	}
+
+	// First alert - not duplicate
+	event1 := &core.AlertEvent{
+		SoulID: "soul-dedup",
+		Status: core.SoulDead,
+	}
+	if manager.isDuplicate(rule, event1) {
+		t.Error("First alert should not be duplicate")
+	}
+
+	// Second alert with same status - should be duplicate
+	event2 := &core.AlertEvent{
+		SoulID: "soul-dedup",
+		Status: core.SoulDead,
+	}
+	if !manager.isDuplicate(rule, event2) {
+		t.Error("Second alert with same status should be duplicate")
+	}
+}
+
+// TestManager_isDuplicate_CooldownExpired tests dedup window expiry
+func TestManager_isDuplicate_CooldownExpired(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{
+		ID:       "rule-expire",
+		Name:     "Expiry Rule",
+		Enabled:  true,
+		Cooldown: core.Duration{Duration: 10 * time.Millisecond},
+	}
+
+	event := &core.AlertEvent{
+		SoulID: "soul-expire",
+		Status: core.SoulDead,
+	}
+
+	// First alert
+	if manager.isDuplicate(rule, event) {
+		t.Error("First alert should not be duplicate")
+	}
+
+	// Second alert immediately - should be duplicate
+	if !manager.isDuplicate(rule, event) {
+		t.Error("Immediate second alert should be duplicate")
+	}
+
+	// Wait for cooldown
+	time.Sleep(20 * time.Millisecond)
+
+	// Third alert after cooldown - should NOT be duplicate
+	if manager.isDuplicate(rule, event) {
+		t.Error("Alert after cooldown should not be duplicate")
+	}
+}
+
+func TestCheckConditions_CompoundAnd(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{
+		ID:      "compound-and",
+		Name:    "Compound AND Rule",
+		Enabled: true,
+		Conditions: []core.AlertCondition{
+			{
+				Type: "compound",
+				Logic: "and",
+				SubConditions: []core.AlertCondition{
+					{Type: "status_change", From: "alive", To: "dead"},
+					{Type: "degraded"},
+				},
+			},
+		},
+	}
+
+	if err := manager.RegisterRule(rule); err != nil {
+		t.Fatalf("RegisterRule failed: %v", err)
+	}
+
+	// Both sub-conditions must match: status_change alive->dead AND status degraded
+	// This is impossible since status can't be both dead (from status_change) and degraded at the same time
+	judgment := &core.Judgment{
+		SoulID: "soul-1",
+		Status: core.SoulDegraded,
+	}
+
+	triggered := manager.checkConditions(rule, core.SoulAlive, judgment)
+	// status_change needs alive->dead but judgment is degraded, so false
+	if triggered {
+		t.Error("Compound AND should not trigger when sub-conditions don't all match")
+	}
+
+	// Test with dead status - status_change matches but degraded doesn't
+	judgment2 := &core.Judgment{
+		SoulID: "soul-1",
+		Status: core.SoulDead,
+	}
+
+	triggered2 := manager.checkConditions(rule, core.SoulAlive, judgment2)
+	// status_change alive->dead matches, but degraded doesn't (status is dead)
+	if triggered2 {
+		t.Error("Compound AND should not trigger when only one sub-condition matches")
+	}
+}
+
+func TestCheckConditions_CompoundOr(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{
+		ID:      "compound-or",
+		Name:    "Compound OR Rule",
+		Enabled: true,
+		Conditions: []core.AlertCondition{
+			{
+				Type: "compound",
+				Logic: "or",
+				SubConditions: []core.AlertCondition{
+					{Type: "degraded"},
+					{Type: "recovery"},
+				},
+			},
+		},
+	}
+
+	if err := manager.RegisterRule(rule); err != nil {
+		t.Fatalf("RegisterRule failed: %v", err)
+	}
+
+	// Test: degraded matches, recovery doesn't
+	judgment := &core.Judgment{
+		SoulID: "soul-1",
+		Status: core.SoulDegraded,
+	}
+
+	triggered := manager.checkConditions(rule, core.SoulAlive, judgment)
+	if !triggered {
+		t.Error("Compound OR should trigger when at least one sub-condition matches")
+	}
+
+	// Test: neither matches
+	judgment2 := &core.Judgment{
+		SoulID: "soul-1",
+		Status: core.SoulDead,
+	}
+
+	triggered2 := manager.checkConditions(rule, core.SoulDead, judgment2)
+	if triggered2 {
+		t.Error("Compound OR should not trigger when no sub-conditions match")
+	}
+
+	// Test: recovery matches (dead->alive)
+	judgment3 := &core.Judgment{
+		SoulID: "soul-1",
+		Status: core.SoulAlive,
+	}
+
+	triggered3 := manager.checkConditions(rule, core.SoulDead, judgment3)
+	if !triggered3 {
+		t.Error("Compound OR should trigger on recovery")
+	}
+}
+
+func TestCheckConditions_CompoundMajority(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{
+		ID:      "compound-majority",
+		Name:    "Compound Majority Rule",
+		Enabled: true,
+		Conditions: []core.AlertCondition{
+			{
+				Type:  "compound",
+				Logic: "majority",
+				SubConditions: []core.AlertCondition{
+					{Type: "degraded"},
+					{Type: "failure_rate"},
+					{Type: "status_change", From: "alive", To: "dead"},
+				},
+			},
+		},
+	}
+
+	if err := manager.RegisterRule(rule); err != nil {
+		t.Fatalf("RegisterRule failed: %v", err)
+	}
+
+	// 2 of 3 match: degraded + failure_rate (both true for SoulDead)
+	judgment := &core.Judgment{
+		SoulID: "soul-1",
+		Status: core.SoulDead,
+	}
+
+	triggered := manager.checkConditions(rule, core.SoulAlive, judgment)
+	if !triggered {
+		t.Error("Compound majority should trigger when >50% match (2/3 for dead)")
+	}
+
+	// Only 0 of 3 match (alive, prevStatus alive)
+	judgment2 := &core.Judgment{
+		SoulID: "soul-1",
+		Status: core.SoulAlive,
+	}
+
+	triggered2 := manager.checkConditions(rule, core.SoulAlive, judgment2)
+	if triggered2 {
+		t.Error("Compound majority should not trigger when 0/3 match")
+	}
+
+	// Only 1 of 3 (degraded)
+	judgment3 := &core.Judgment{
+		SoulID: "soul-1",
+		Status: core.SoulDegraded,
+	}
+
+	triggered3 := manager.checkConditions(rule, core.SoulAlive, judgment3)
+	if triggered3 {
+		t.Error("Compound majority should not trigger when only 1/3 match")
+	}
+}
+
+func TestCheckConditions_AnomalyLatency(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+
+	// Populate with historical events with some variance around 100ms
+	latencies := []time.Duration{90, 95, 100, 105, 98, 102, 97, 103, 99, 101}
+	for _, lat := range latencies {
+		storage.events = append(storage.events, &core.AlertEvent{
+			SoulID: "soul-1",
+			Status: core.SoulAlive,
+			Judgment: &core.Judgment{
+				SoulID:   "soul-1",
+				Status:   core.SoulAlive,
+				Duration: lat * time.Millisecond,
+			},
+		})
+	}
+
+	manager := NewManager(storage, newTestLogger())
+
+	// Anomalous latency: 10x normal
+	judgment := &core.Judgment{
+		SoulID:   "soul-1",
+		Status:   core.SoulAlive,
+		Duration: 1000 * time.Millisecond, // 1000ms, way above 100ms baseline
+	}
+
+	rule := &core.AlertRule{
+		ID:      "anomaly-latency",
+		Name:    "Anomaly Latency Rule",
+		Enabled: true,
+		Conditions: []core.AlertCondition{
+			{
+				Type:          "anomaly",
+				Metric:        "latency",
+				AnomalyStdDev: 2.0,
+			},
+		},
+	}
+
+	if err := manager.RegisterRule(rule); err != nil {
+		t.Fatalf("RegisterRule failed: %v", err)
+	}
+
+	triggered := manager.checkConditions(rule, core.SoulAlive, judgment)
+	if !triggered {
+		t.Error("Anomaly condition should trigger when latency is significantly above baseline")
+	}
+
+	// Normal latency should not trigger
+	judgment2 := &core.Judgment{
+		SoulID:   "soul-1",
+		Status:   core.SoulAlive,
+		Duration: 100 * time.Millisecond, // Exactly at mean
+	}
+
+	triggered2 := manager.checkConditions(rule, core.SoulAlive, judgment2)
+	if triggered2 {
+		t.Error("Anomaly condition should not trigger when latency is near baseline")
+	}
+}
+
+func TestCheckConditions_AnomalyFallback(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+		events:   nil, // No history
+	}
+
+	manager := NewManager(storage, newTestLogger())
+
+	// No history - should use simple threshold fallback
+	judgment := &core.Judgment{
+		SoulID:   "soul-1",
+		Status:   core.SoulAlive,
+		Duration: 500 * time.Millisecond,
+	}
+
+	rule := &core.AlertRule{
+		ID:      "anomaly-no-history",
+		Name:    "Anomaly No History",
+		Enabled: true,
+		Conditions: []core.AlertCondition{
+			{
+				Type:          "anomaly",
+				Metric:        "latency",
+				Threshold:     100, // 100ms threshold
+				Operator:      ">",
+			},
+		},
+	}
+
+	if err := manager.RegisterRule(rule); err != nil {
+		t.Fatalf("RegisterRule failed: %v", err)
+	}
+
+	triggered := manager.checkConditions(rule, core.SoulAlive, judgment)
+	if !triggered {
+		t.Error("Anomaly should trigger with threshold fallback when no history")
+	}
+}

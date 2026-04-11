@@ -544,6 +544,60 @@ func TestHTTPChecker_Validate_Valid(t *testing.T) {
 	}
 }
 
+func TestHTTPChecker_Validate_InsecureSkipVerify(t *testing.T) {
+	checker := NewHTTPChecker()
+
+	soul := &core.Soul{
+		ID:     "test-http",
+		Name:   "Test HTTP",
+		Type:   core.CheckHTTP,
+		Target: "https://example.com",
+		HTTP:   &core.HTTPConfig{Method: "GET", ValidStatus: []int{200}, InsecureSkipVerify: true},
+	}
+
+	// Should pass validation (just logs a warning)
+	err := checker.Validate(soul)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+}
+
+func TestHTTPChecker_GetTransport_CacheHit(t *testing.T) {
+	checker := NewHTTPChecker()
+	cfg := &core.HTTPConfig{Method: "GET", ValidStatus: []int{200}}
+
+	// First call creates transport
+	t1 := checker.getTransport(cfg, 10*time.Second)
+	if t1 == nil {
+		t.Fatal("Expected non-nil transport")
+	}
+
+	// Second call should return cached transport (cache hit path)
+	t2 := checker.getTransport(cfg, 10*time.Second)
+	if t2 == nil {
+		t.Fatal("Expected non-nil transport from cache")
+	}
+
+	// Should be the same instance (cache hit)
+	if t1 != t2 {
+		t.Error("Expected cached transport to be the same instance")
+	}
+}
+
+func TestHTTPChecker_GetTransport_DifferentConfigs(t *testing.T) {
+	checker := NewHTTPChecker()
+	cfg1 := &core.HTTPConfig{Method: "GET", ValidStatus: []int{200}, InsecureSkipVerify: false}
+	cfg2 := &core.HTTPConfig{Method: "GET", ValidStatus: []int{200}, InsecureSkipVerify: true}
+
+	t1 := checker.getTransport(cfg1, 10*time.Second)
+	t2 := checker.getTransport(cfg2, 10*time.Second)
+
+	// Different configs should create different transports
+	if t1 == t2 {
+		t.Error("Expected different transports for different configs")
+	}
+}
+
 func Test_extractTLSInfo(t *testing.T) {
 	// Test with nil TLS state
 	info := extractTLSInfo(nil)
@@ -567,5 +621,167 @@ func TestExtractJSONPath_ArrayNotSupported(t *testing.T) {
 	result := extractJSONPath(jsonData, "items.0")
 	if result != "" {
 		t.Logf("Array access returned: %s", result)
+	}
+}
+
+// TestExtractJSONPath_AllTypes tests all type conversion branches
+func TestExtractJSONPath_AllTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		json     string
+		path     string
+		expected string
+	}{
+		{"string", `{"name": "hello"}`, "name", "hello"},
+		{"int", `{"count": 42}`, "count", "42"},
+		{"float", `{"price": 3.14}`, "price", "3.14"},
+		{"bool_true", `{"active": true}`, "active", "true"},
+		{"bool_false", `{"active": false}`, "active", "false"},
+		{"null", `{"value": null}`, "value", "null"},
+		{"object", `{"nested": {"a": 1}}`, "nested", `{"a":1}`},
+		{"missing_key", `{"name": "test"}`, "missing", ""},
+		{"empty_path", `{"name": "test"}`, "", ""},
+		{"dollar_prefix", `{"name": "test"}`, "$.name", "test"},
+		{"deep_nested", `{"a": {"b": {"c": "deep"}}}`, "a.b.c", "deep"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractJSONPath([]byte(tt.json), tt.path)
+			if result != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+// TestValidateJSONSchema_AllBranches tests all validation branches
+func TestValidateJSONSchema_AllBranches(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     string
+		schema   string
+		strict   bool
+		expected bool
+	}{
+		{
+			name:     "invalid_schema_json",
+			data:     `{"a": 1}`,
+			schema:   `{invalid}`,
+			expected: false,
+		},
+		{
+			name:     "invalid_data_json",
+			data:     `{invalid}`,
+			schema:   `{"type": "object"}`,
+			expected: false,
+		},
+		{
+			name:     "type_match",
+			data:     `{"name": "test"}`,
+			schema:   `{"type": "object"}`,
+			expected: true,
+		},
+		{
+			name:     "type_mismatch",
+			data:     `"just a string"`,
+			schema:   `{"type": "object"}`,
+			expected: false,
+		},
+		{
+			name:     "required_fields_pass",
+			data:     `{"name": "test", "email": "a@b.com"}`,
+			schema:   `{"required": ["name", "email"]}`,
+			expected: true,
+		},
+		{
+			name:     "required_fields_fail",
+			data:     `{"name": "test"}`,
+			schema:   `{"required": ["name", "email"]}`,
+			expected: false,
+		},
+		{
+			name:     "properties_validation_pass",
+			data:     `{"age": 25}`,
+			schema:   `{"properties": {"age": {"type": "number"}}}`,
+			expected: true,
+		},
+		{
+			name:     "properties_validation_fail",
+			data:     `{"age": "not a number"}`,
+			schema:   `{"properties": {"age": {"type": "number"}}}`,
+			expected: false,
+		},
+		{
+			name:     "enum_pass",
+			data:     `"active"`,
+			schema:   `{"enum": ["active", "inactive"]}`,
+			expected: true,
+		},
+		{
+			name:     "enum_fail",
+			data:     `"unknown"`,
+			schema:   `{"enum": ["active", "inactive"]}`,
+			expected: false,
+		},
+		{
+			name:     "strict_additional_props_fail",
+			data:     `{"name": "test", "extra": true}`,
+			schema:   `{"properties": {"name": {"type": "string"}}}`,
+			strict:   true,
+			expected: false,
+		},
+		{
+			name:     "strict_pass",
+			data:     `{"name": "test"}`,
+			schema:   `{"properties": {"name": {"type": "string"}}}`,
+			strict:   true,
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := validateJSONSchema([]byte(tt.data), tt.schema, tt.strict)
+			if result != tt.expected {
+				t.Errorf("Expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+// TestMatchesType_AllTypes tests all type matching branches
+func TestMatchesType_AllTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     interface{}
+		typeName string
+		expected bool
+	}{
+		{"object", map[string]interface{}{"a": 1}, "object", true},
+		{"not_object", "string", "object", false},
+		{"array", []interface{}{1, 2}, "array", true},
+		{"not_array", "string", "array", false},
+		{"string", "hello", "string", true},
+		{"not_string", 42, "string", false},
+		{"number", float64(3.14), "number", true},
+		{"not_number", "string", "number", false},
+		{"integer_whole", float64(42), "integer", true},
+		{"integer_fractional", float64(3.14), "integer", false},
+		{"not_integer", "string", "integer", false},
+		{"boolean", true, "boolean", true},
+		{"not_boolean", "string", "boolean", false},
+		{"null", nil, "null", true},
+		{"not_null", "string", "null", false},
+		{"unknown_type", "anything", "custom", true}, // default case returns true
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := matchesType(tt.data, tt.typeName)
+			if result != tt.expected {
+				t.Errorf("matchesType(%T, %q) = %v, want %v", tt.data, tt.typeName, result, tt.expected)
+			}
+		})
 	}
 }

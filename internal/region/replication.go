@@ -549,9 +549,92 @@ func (r *ReplicationManager) applyEvent(ctx context.Context, event *ReplicationE
 
 // checkConflict checks if there's a conflict with local data
 func (r *ReplicationManager) checkConflict(ctx context.Context, event *ReplicationEvent) (*ConflictResolution, error) {
-	// TODO: Implement conflict detection based on local storage
-	// For now, assume no conflict
+	// If there's no local data to conflict with, no conflict
+	if r.manager == nil || r.manager.storage == nil {
+		return nil, nil
+	}
+
+	// Check if storage supports entity-level conflict detection
+	store, ok := r.manager.storage.(ConflictStore)
+	if !ok {
+		return nil, nil
+	}
+
+	// Look up local version of the entity
+	localData, err := store.GetEntityData(ctx, event.Type, event.EntityID)
+	if err != nil {
+		// Entity not found locally — no conflict, this is new data
+		r.logger.Debug("No local entity found for conflict check",
+			"type", event.Type,
+			"entity_id", event.EntityID)
+		return nil, nil
+	}
+
+	// Parse both versions to extract timestamps
+	localTimestamp := extractTimestamp(localData)
+	remoteTimestamp := extractTimestamp(event.Data)
+
+	// If timestamps are available and differ, there's a conflict
+	if !localTimestamp.IsZero() && !remoteTimestamp.IsZero() && !localTimestamp.Equal(remoteTimestamp) {
+		localEvent := &ReplicationEvent{
+			ID:        event.ID + "-local",
+			Type:      event.Type,
+			Action:    "local",
+			Timestamp: localTimestamp,
+			EntityID:  event.EntityID,
+			Data:      localData,
+		}
+		// Update event timestamp for conflict resolution comparison
+		remoteCopy := *event
+		remoteCopy.Timestamp = remoteTimestamp
+		return &ConflictResolution{
+			EventID:       event.ID,
+			LocalVersion:  localEvent,
+			RemoteVersion: &remoteCopy,
+		}, nil
+	}
+
+	// If timestamps aren't available, compare raw data
+	if !bytes.Equal(localData, event.Data) {
+		localEvent := &ReplicationEvent{
+			ID:        event.ID + "-local",
+			Type:      event.Type,
+			Action:    "local",
+			Timestamp: localTimestamp,
+			EntityID:  event.EntityID,
+			Data:      localData,
+		}
+		return &ConflictResolution{
+			EventID:       event.ID,
+			LocalVersion:  localEvent,
+			RemoteVersion: event,
+		}, nil
+	}
+
+	// Data is identical — no conflict
 	return nil, nil
+}
+
+// extractTimestamp parses updated_at or timestamp from JSON data
+func extractTimestamp(data json.RawMessage) time.Time {
+	if len(data) == 0 {
+		return time.Time{}
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return time.Time{}
+	}
+	if ts, ok := m["updated_at"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			return t
+		}
+	}
+	if ts, ok := m["timestamp"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // resolveConflict resolves a replication conflict

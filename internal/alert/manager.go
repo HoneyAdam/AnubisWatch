@@ -468,6 +468,14 @@ func (m *Manager) checkConditions(rule *core.AlertRule, prevStatus core.SoulStat
 			if prevStatus == core.SoulDead && judgment.Status == core.SoulAlive {
 				return true
 			}
+		case "anomaly":
+			if m.checkAnomaly(cond, judgment) {
+				return true
+			}
+		case "compound":
+			if m.checkCompound(cond, prevStatus, judgment) {
+				return true
+			}
 		}
 	}
 
@@ -600,6 +608,216 @@ func (m *Manager) calculateSeverity(judgment *core.Judgment) core.Severity {
 	default:
 		return core.SeverityInfo
 	}
+}
+
+// checkAnomaly checks if the current judgment deviates significantly from baseline.
+// It uses stored alert history to compute mean and standard deviation, then
+// triggers if the current value exceeds mean ± (stdDev * anomalyStdDev).
+func (m *Manager) checkAnomaly(cond core.AlertCondition, judgment *core.Judgment) bool {
+	// Determine which metric to check
+	metric := cond.Metric
+	if metric == "" {
+		metric = "latency"
+	}
+
+	// Get current value
+	var currentValue float64
+	switch metric {
+	case "latency", "duration":
+		currentValue = float64(judgment.Duration.Milliseconds())
+	case "status_code":
+		currentValue = float64(judgment.StatusCode)
+	default:
+		// Default: check if status is dead (anomaly in status)
+		return judgment.Status == core.SoulDead
+	}
+
+	// Fetch historical events for this soul to compute baseline
+	events, err := m.storage.ListEvents(judgment.SoulID, 100)
+	if err != nil || len(events) < 3 {
+		// Not enough history, use simple threshold fallback
+		threshold, _ := cond.Value.(float64)
+		if threshold == 0 {
+			threshold = float64(cond.Threshold)
+		}
+		if threshold > 0 {
+			return m.compareFloatValue(currentValue, cond.Operator, threshold)
+		}
+		// Default: 2 standard deviations, trigger if > 2x average
+		return currentValue > 0
+	}
+
+	// Compute baseline statistics from history
+	values := make([]float64, 0, len(events))
+	for _, ev := range events {
+		var val float64
+		switch metric {
+		case "latency", "duration":
+			if ev.Judgment != nil {
+				val = float64(ev.Judgment.Duration.Milliseconds())
+			}
+		case "status_code":
+			if ev.Judgment != nil {
+				val = float64(ev.Judgment.StatusCode)
+			}
+		}
+		if val > 0 {
+			values = append(values, val)
+		}
+	}
+
+	if len(values) < 2 {
+		return false
+	}
+
+	// Calculate mean
+	var sum float64
+	for _, v := range values {
+		sum += v
+	}
+	mean := sum / float64(len(values))
+
+	// Calculate standard deviation
+	var sqSum float64
+	for _, v := range values {
+		diff := v - mean
+		sqSum += diff * diff
+	}
+	stdDev := 0.0
+	if len(values) > 1 {
+		stdDev = sqSum / float64(len(values)-1)
+		if stdDev > 0 {
+			stdDev = stdDev / float64(len(values)-1) // Fix: variance = sqSum/(n-1), stdDev = sqrt(variance)
+			// Actually let's compute properly:
+			stdDev = 0
+			for _, v := range values {
+				d := v - mean
+				stdDev += d * d
+			}
+			stdDev = stdDev / float64(len(values))
+			// sqrt without math package
+			stdDev = sqrtApprox(stdDev)
+		}
+	}
+
+	// Determine threshold: mean ± (stdDev * anomalyStdDev)
+	anomalyStdDev := cond.AnomalyStdDev
+	if anomalyStdDev <= 0 {
+		anomalyStdDev = 2.0 // Default: 2 standard deviations
+	}
+
+	upperBound := mean + (stdDev * anomalyStdDev)
+	lowerBound := mean - (stdDev * anomalyStdDev)
+	if lowerBound < 0 {
+		lowerBound = 0
+	}
+
+	// Check if current value is outside bounds
+	return currentValue > upperBound || (currentValue < lowerBound && lowerBound > 0)
+}
+
+// checkCompound evaluates compound conditions (AND/OR of sub-conditions).
+func (m *Manager) checkCompound(cond core.AlertCondition, prevStatus core.SoulStatus, judgment *core.Judgment) bool {
+	if len(cond.SubConditions) == 0 {
+		return false
+	}
+
+	logic := cond.Logic
+	if logic == "" {
+		logic = "and"
+	}
+
+	matchedCount := 0
+	for _, subCond := range cond.SubConditions {
+		if m.evaluateCondition(subCond, prevStatus, judgment) {
+			matchedCount++
+		}
+	}
+
+	switch logic {
+	case "and":
+		return matchedCount == len(cond.SubConditions)
+	case "or":
+		return matchedCount > 0
+	case "majority":
+		return matchedCount > len(cond.SubConditions)/2
+	case "at_least":
+		threshold := cond.Threshold
+		if threshold <= 0 {
+			threshold = 1
+		}
+		return matchedCount >= threshold
+	default:
+		return matchedCount == len(cond.SubConditions)
+	}
+}
+
+// evaluateCondition evaluates a single condition (used by compound).
+func (m *Manager) evaluateCondition(cond core.AlertCondition, prevStatus core.SoulStatus, judgment *core.Judgment) bool {
+	switch cond.Type {
+	case "status_change":
+		return string(prevStatus) == cond.From && string(judgment.Status) == cond.To
+	case "status_for":
+		return string(judgment.Status) == cond.Status
+	case "failure_rate":
+		return judgment.Status == core.SoulDead
+	case "degraded":
+		return judgment.Status == core.SoulDegraded
+	case "recovery":
+		return prevStatus == core.SoulDead && judgment.Status == core.SoulAlive
+	case "anomaly":
+		return m.checkAnomaly(cond, judgment)
+	case "threshold":
+		// Metric-based threshold
+		var currentValue float64
+		switch cond.Metric {
+		case "latency", "duration":
+			currentValue = float64(judgment.Duration.Milliseconds())
+		case "status_code":
+			currentValue = float64(judgment.StatusCode)
+		default:
+			currentValue = float64(judgment.Duration.Milliseconds())
+		}
+		threshold, _ := cond.Value.(float64)
+		if threshold == 0 {
+			threshold = float64(cond.Threshold)
+		}
+		return m.compareFloatValue(currentValue, cond.Operator, threshold)
+	default:
+		return false
+	}
+}
+
+// compareFloatValue compares a float value against a threshold using the given operator.
+func (m *Manager) compareFloatValue(actual float64, operator string, expected float64) bool {
+	switch operator {
+	case ">", "gt", "greater_than":
+		return actual > expected
+	case "<", "lt", "less_than":
+		return actual < expected
+	case ">=", "ge", "greater_equals":
+		return actual >= expected
+	case "<=", "le", "less_equals":
+		return actual <= expected
+	case "==", "eq", "equals":
+		return actual == expected
+	case "!=", "ne", "not_equals":
+		return actual != expected
+	default:
+		return actual > expected
+	}
+}
+
+// sqrtApprox computes an approximate square root using Newton's method.
+func sqrtApprox(x float64) float64 {
+	if x <= 0 {
+		return 0
+	}
+	z := x
+	for i := 0; i < 10; i++ {
+		z = z - (z*z-x)/(2*z)
+	}
+	return z
 }
 
 // generateAlertID generates a unique alert ID

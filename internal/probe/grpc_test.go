@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/net/http2"
+
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
 
@@ -984,4 +986,165 @@ func TestGRPCChecker_Judge_WithTLSServer(t *testing.T) {
 
 	// The test exercises the TLS code path
 	t.Logf("TLS test got status: %s", judgment.Status)
+}
+
+// TestGRPCChecker_Validate_InsecureSkipVerify tests validation with insecure flag
+func TestGRPCChecker_Validate_InsecureSkipVerify(t *testing.T) {
+	checker := NewGRPCChecker()
+	soul := &core.Soul{
+		ID:     "test-grpc-insecure",
+		Name:   "Test",
+		Target: "localhost:50051",
+		Type:   core.CheckGRPC,
+		GRPC: &core.GRPCConfig{
+			InsecureSkipVerify: true,
+		},
+	}
+	// Should not error, just log a warning
+	err := checker.Validate(soul)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+}
+
+// newHTTP2TestServer creates an httptest.Server with HTTP/2 support
+func newHTTP2TestServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewUnstartedServer(handler)
+	if err := http2.ConfigureServer(srv.Config, &http2.Server{}); err != nil {
+		t.Fatalf("http2.ConfigureServer: %v", err)
+	}
+	srv.StartTLS()
+	// StartTLS creates its own TLS config; add h2 to NextProtos for ALPN
+	srv.TLS.NextProtos = append(srv.TLS.NextProtos, "h2")
+	return srv
+}
+
+// TestGRPCChecker_Judge_GRPCStatusError tests gRPC status header != "0"
+func TestGRPCChecker_Judge_GRPCStatusError(t *testing.T) {
+	srv := newHTTP2TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Grpc-Status", "14") // UNAVAILABLE
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	u, _ := url.Parse(srv.URL)
+	checker := NewGRPCChecker()
+	soul := &core.Soul{
+		ID:     "test-grpc-status",
+		Name:   "Test gRPC",
+		Type:   core.CheckGRPC,
+		Target: u.Host,
+		GRPC: &core.GRPCConfig{
+			TLS:                true,
+			InsecureSkipVerify: true,
+		},
+		Timeout: core.Duration{Duration: 2 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, err := checker.Judge(ctx, soul)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if judgment.Status != core.SoulDead {
+		t.Errorf("Expected SoulDead, got %s", judgment.Status)
+	}
+}
+
+// TestGRPCChecker_Judge_HTTPError tests non-200 HTTP response
+func TestGRPCChecker_Judge_HTTPError(t *testing.T) {
+	srv := newHTTP2TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	u, _ := url.Parse(srv.URL)
+	checker := NewGRPCChecker()
+	soul := &core.Soul{
+		ID:     "test-grpc-http-err",
+		Name:   "Test gRPC",
+		Type:   core.CheckGRPC,
+		Target: u.Host,
+		GRPC: &core.GRPCConfig{
+			TLS:                true,
+			InsecureSkipVerify: true,
+		},
+		Timeout: core.Duration{Duration: 2 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, err := checker.Judge(ctx, soul)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if judgment.Status != core.SoulDead {
+		t.Errorf("Expected SoulDead, got %s", judgment.Status)
+	}
+}
+
+// TestGRPCChecker_Judge_FeatherExceeded tests performance budget breach
+func TestGRPCChecker_Judge_FeatherExceeded(t *testing.T) {
+	srv := newHTTP2TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(50 * time.Millisecond)
+		w.Header().Set("Grpc-Status", "0")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	u, _ := url.Parse(srv.URL)
+	checker := NewGRPCChecker()
+	soul := &core.Soul{
+		ID:     "test-grpc-feather",
+		Name:   "Test gRPC",
+		Type:   core.CheckGRPC,
+		Target: u.Host,
+		GRPC: &core.GRPCConfig{
+			TLS:                true,
+			InsecureSkipVerify: true,
+			Feather:            core.Duration{Duration: 10 * time.Millisecond},
+		},
+		Timeout: core.Duration{Duration: 2 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, err := checker.Judge(ctx, soul)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if judgment.Status != core.SoulDegraded {
+		t.Errorf("Expected SoulDegraded, got %s", judgment.Status)
+	}
+}
+
+// TestGRPCChecker_Judge_Success tests a healthy gRPC response
+func TestGRPCChecker_Judge_Success(t *testing.T) {
+	srv := newHTTP2TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Grpc-Status", "0")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	u, _ := url.Parse(srv.URL)
+	checker := NewGRPCChecker()
+	soul := &core.Soul{
+		ID:     "test-grpc-ok",
+		Name:   "Test gRPC",
+		Type:   core.CheckGRPC,
+		Target: u.Host,
+		GRPC: &core.GRPCConfig{
+			TLS:                true,
+			InsecureSkipVerify: true,
+		},
+		Timeout: core.Duration{Duration: 2 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, err := checker.Judge(ctx, soul)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if judgment.Status != core.SoulAlive {
+		t.Errorf("Expected SoulAlive, got %s", judgment.Status)
+	}
 }

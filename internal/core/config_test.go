@@ -1642,3 +1642,116 @@ func TestJourneyConfigValidate(t *testing.T) {
 		})
 	}
 }
+
+// Tests for missing channel types (discord, opsgenie, sms) to cover validate branches
+func TestChannelConfigValidate_Discord(t *testing.T) {
+	tests := []struct {
+		name      string
+		channel   ChannelConfig
+		wantError bool
+	}{
+		{
+			name:      "valid discord",
+			channel:   ChannelConfig{Name: "Test", Type: "discord", Discord: &DiscordConfig{WebhookURL: "https://discord.com/api/webhooks/xxx"}},
+			wantError: false,
+		},
+		{
+			name:      "discord without webhook",
+			channel:   ChannelConfig{Name: "Test", Type: "discord", Discord: &DiscordConfig{}},
+			wantError: true,
+		},
+		{
+			name:      "discord nil config",
+			channel:   ChannelConfig{Name: "Test", Type: "discord"},
+			wantError: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.channel.validate(0)
+			if (err != nil) != tt.wantError {
+				t.Errorf("validate() error = %v, wantError = %v", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestChannelConfigValidate_OpsGenie(t *testing.T) {
+	tests := []struct {
+		name      string
+		channel   ChannelConfig
+		wantError bool
+	}{
+		{
+			name:      "valid opsgenie",
+			channel:   ChannelConfig{Name: "Test", Type: "opsgenie", OpsGenie: &OpsGenieConfig{APIKey: "key123"}},
+			wantError: false,
+		},
+		{
+			name:      "opsgenie without key",
+			channel:   ChannelConfig{Name: "Test", Type: "opsgenie", OpsGenie: &OpsGenieConfig{}},
+			wantError: true,
+		},
+		{
+			name:      "opsgenie nil config",
+			channel:   ChannelConfig{Name: "Test", Type: "opsgenie"},
+			wantError: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.channel.validate(0)
+			if (err != nil) != tt.wantError {
+				t.Errorf("validate() error = %v, wantError = %v", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestChannelConfigValidate_SMS(t *testing.T) {
+	// SMS is in validTypes but has no type-specific validation in the switch
+	// Test that valid SMS config passes validation
+	channel := ChannelConfig{Name: "Test", Type: "sms", SMS: &SMSConfig{From: "+1234567890", To: []string{"+0987654321"}}}
+	err := channel.validate(0)
+	if err != nil {
+		t.Errorf("validate() error = %v, want nil", err)
+	}
+
+	// SMS without config should also pass (no type-specific validation)
+	channel = ChannelConfig{Name: "Test", Type: "sms"}
+	err = channel.validate(0)
+	if err != nil {
+		t.Errorf("validate() error = %v, want nil (sms has no type-specific validation)", err)
+	}
+}
+
+// TestConfig_Validate_FullConfig tests Config.validate() with all sub-configurations
+func TestConfig_Validate_FullConfig(t *testing.T) {
+	cfg := &Config{
+		Souls: []Soul{
+			{Name: "Test", Type: CheckHTTP, Target: "https://example.com", HTTP: &HTTPConfig{Method: "GET", ValidStatus: []int{200}}},
+		},
+		Channels: []ChannelConfig{
+			{Name: "slack", Type: "slack", Slack: &SlackConfig{WebhookURL: "https://hooks.slack.com/xxx"}},
+			{Name: "discord", Type: "discord", Discord: &DiscordConfig{WebhookURL: "https://discord.com/api/webhooks/xxx"}},
+			{Name: "opsgenie", Type: "opsgenie", OpsGenie: &OpsGenieConfig{APIKey: "key"}},
+		},
+		Verdicts: VerdictsConfig{
+			Rules: []AlertRule{
+				{Name: "rule1", Conditions: []AlertCondition{{Type: "consecutive_failures", Threshold: 3}}, Channels: []string{"slack"}},
+			},
+		},
+		Feathers: []FeatherConfig{
+			{Name: "latency", Scope: "tag:api", ViolationThreshold: 5},
+		},
+		Journeys: []JourneyConfig{
+			{Name: "checkout", Steps: []JourneyStep{{Name: "home", Target: "https://example.com"}}},
+		},
+		Logging: LoggingConfig{Level: "info", Format: "json", Output: "stdout"},
+	}
+
+	err := cfg.validate()
+	if err != nil {
+		t.Errorf("validate() error = %v", err)
+	}
+}

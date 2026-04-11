@@ -521,6 +521,65 @@ func TestDistributor_SelectLoadBased(t *testing.T) {
 
 	// Should prefer node-2 (lower load)
 	if nodeID != "node-2" {
-		t.Logf("Note: Assigned to %s (not necessarily node-2 due to implementation)", nodeID)
+		t.Logf("Note: assigned to %s (not necessarily node-2 due to implementation)", nodeID)
 	}
+}
+
+// TestDistributor_CheckAndRebalance tests rebalancing when nodes have imbalanced loads
+func TestDistributor_CheckAndRebalance(t *testing.T) {
+	d := NewDistributor("node-1", "us-east", StrategyLoadBased, newTestLogger())
+
+	// Register nodes
+	d.RegisterNode("node-1", "us-east")
+	d.RegisterNode("node-2", "us-west")
+
+	// Register many souls on node-1 to create imbalance
+	for i := 0; i < 20; i++ {
+		soul := &core.Soul{ID: fmt.Sprintf("soul-%d", i), Name: fmt.Sprintf("Soul %d", i)}
+		d.AssignSoul(soul)
+	}
+
+	// Manually update loads to create clear imbalance
+	d.UpdateNodeLoad("node-1", 0.8, 0.8, 20)
+	d.UpdateNodeLoad("node-2", 0.2, 0.2, 0)
+
+	// Trigger rebalance check - should not panic
+	d.checkAndRebalance()
+}
+
+// TestDistributor_CheckAndRebalance_NoRebalanceNeeded tests when loads are balanced
+func TestDistributor_CheckAndRebalance_NoRebalanceNeeded(t *testing.T) {
+	d := NewDistributor("node-1", "us-east", StrategyLoadBased, newTestLogger())
+
+	d.RegisterNode("node-1", "us-east")
+	d.RegisterNode("node-2", "us-west")
+
+	// Equal loads
+	d.UpdateNodeLoad("node-1", 0.5, 0.5, 10)
+	d.UpdateNodeLoad("node-2", 0.5, 0.5, 10)
+
+	// Should not trigger rebalance
+	d.checkAndRebalance()
+}
+
+// TestDistributor_CheckAndRebalance_SingleNode tests with single node (no rebalance)
+func TestDistributor_CheckAndRebalance_SingleNode(t *testing.T) {
+	d := NewDistributor("node-1", "us-east", StrategyLoadBased, newTestLogger())
+
+	d.RegisterNode("node-1", "us-east")
+	d.UpdateNodeLoad("node-1", 0.9, 0.9, 50)
+
+	// Should not rebalance with single node
+	d.checkAndRebalance()
+}
+
+// TestDistributor_CheckAndRebalance_UnhealthyNodes tests with only unhealthy nodes
+func TestDistributor_CheckAndRebalance_UnhealthyNodes(t *testing.T) {
+	d := NewDistributor("node-1", "us-east", StrategyLoadBased, newTestLogger())
+
+	d.RegisterNode("node-1", "us-east")
+	d.UnregisterNode("node-1")
+
+	// Should not rebalance with no healthy nodes
+	d.checkAndRebalance()
 }

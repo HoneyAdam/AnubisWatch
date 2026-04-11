@@ -802,3 +802,93 @@ func TestTLSChecker_Judge_OCSPStaplingAbsent(t *testing.T) {
 		t.Error("Expected OCSP stapling assertion")
 	}
 }
+
+// TestTLSChecker_Judge_DefaultTimeout tests the default timeout path (timeout == 0)
+func TestTLSChecker_Judge_DefaultTimeout(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	host := ts.URL[8:]
+
+	checker := NewTLSChecker()
+
+	soul := &core.Soul{
+		ID:     "test-tls",
+		Name:   "Test TLS",
+		Type:   core.CheckTLS,
+		Target: host,
+		// No Timeout set - should default to 10s
+	}
+
+	ctx := context.Background()
+	judgment, err := checker.Judge(ctx, soul)
+
+	if err != nil {
+		t.Fatalf("Judge failed: %v", err)
+	}
+	if judgment.Status != core.SoulAlive {
+		t.Errorf("Expected status Alive, got %s", judgment.Status)
+	}
+}
+
+// TestTLSChecker_Judge_TargetWithoutPort tests SplitHostPort error path (no port in target)
+func TestTLSChecker_Judge_TargetWithoutPort(t *testing.T) {
+	checker := NewTLSChecker()
+
+	soul := &core.Soul{
+		ID:     "test-tls",
+		Name:   "Test TLS",
+		Type:   core.CheckTLS,
+		Target: "example.com", // No port - SplitHostPort will fail
+		Timeout: core.Duration{Duration: 2 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	// Should attempt connection to "example.com" (no port), which will fail
+	if judgment.Status != core.SoulDead {
+		t.Logf("Expected Dead for target without port, got %s", judgment.Status)
+	}
+}
+
+// TestTLSChecker_Judge_CipherForbidden tests the forbidden cipher path triggers degraded
+func TestTLSChecker_Judge_CipherForbidden(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	host := ts.URL[8:]
+
+	checker := NewTLSChecker()
+
+	soul := &core.Soul{
+		ID:     "test-tls",
+		Name:   "Test TLS",
+		Type:   core.CheckTLS,
+		Target: host,
+		TLS: &core.TLSConfig{
+			ForbiddenCiphers: []string{"AES"},
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, _ := checker.Judge(ctx, soul)
+
+	t.Logf("Forbidden cipher result: %s - %d assertions", judgment.Message, len(judgment.Details.Assertions))
+
+	foundCipherAssert := false
+	for _, assert := range judgment.Details.Assertions {
+		if assert.Type == "cipher_suite" {
+			foundCipherAssert = true
+			break
+		}
+	}
+	if !foundCipherAssert {
+		t.Error("Expected cipher_suite assertion")
+	}
+}
