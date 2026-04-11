@@ -26,14 +26,14 @@
 | CLI | 15+ commands | Complete | ✅ Complete | All major commands including souls import/export |
 | OIDC Auth | OpenID Connect | Complete | ✅ Complete | Zero-dep OIDC with discovery, code flow, JWT parsing, local fallback |
 | LDAP Auth | AD/LDAP bind | Complete | ✅ Complete | go-ldap with StartTLS, UPN/DN bind, attribute search, local fallback |
-| Multi-Tenant | Workspace isolation | Partial | ⚠️ Partial | Workspace exists but no quota enforcement |
+| Multi-Tenant | Workspace isolation | Complete | ✅ Complete | Quota enforcement with per-workspace tracking |
 | Status Page | Custom domains, ACME | Complete | ✅ Complete | Public status page with custom domain support |
 | Backup/Restore | Full export/import | Complete | ✅ Complete | Compression support |
 | Region Support | Multi-region replication | Complete | ✅ Complete | All 5 strategies: round-robin, region-aware, latency-optimal, redundant, weighted |
 | Check Distribution | 4 strategies | Partial | ⚠️ Partial | Only region-aware implemented |
 | Auto-Discovery | mDNS + Gossip | Complete | ✅ Complete | UDP broadcast + gossip peer discovery wired into cluster manager |
 | Storage Encryption | AES-256-GCM | Complete | ✅ Implemented | AES-256-GCM with SHA-256 key derivation, WAL migration support |
-| Performance Budgets | Feathers (p50/p95/p99) | Partial | ⚠️ Partial | Per-soul feather exists, global budgets not implemented |
+| Performance Budgets | Feathers (p50/p95/p99) | Complete | ✅ Complete | Per-soul + global budgets, violation callbacks |
 | DNS Features | DNSSEC, propagation | Complete | ✅ Complete | EDNS0 DO bit, RRSIG parsing, AD flag validation, propagation check |
 | Time-Series Downsampling | 5 resolution levels | Complete | ✅ Complete | Multi-resolution compaction (raw→1min→5min→1hr→1day) |
 
@@ -220,13 +220,13 @@
 | `anubis verdict ack` | ✅ | Implemented | Acknowledge incident |
 | `anubis health` | ✅ | Implemented | Self health check |
 
-#### 6. Multi-Tenant — 60%
+#### 6. Multi-Tenant — 100%
 
 | Feature | Spec §5.5 | Status | Notes |
 |---------|-----------|--------|-------|
 | Workspace isolation | ✅ | Implemented | Prefix-based key isolation |
 | RBAC (Admin/Editor/Viewer) | ✅ | Implemented | Role field exists |
-| Quota enforcement | ❌ | Not implemented | `max_souls`, `max_journeys` not enforced |
+| Quota enforcement | ✅ | Implemented | `internal/quota/` — per-workspace limits for souls, journeys, alert channels, team members |
 | Cross-workspace query blocking | ✅ | Implemented | By prefix |
 | Workspace-scoped auth | ✅ | Implemented | User has workspace field |
 
@@ -266,15 +266,16 @@
 | Compaction policy | ✅ | Implemented | Background compaction loop |
 | p50/p95/p99 computation | ✅ | Implemented | Statistical summaries |
 
-#### 10. Performance Budgets (Feathers) — 50%
+#### 10. Performance Budgets (Feathers) — 100%
 
 | Feature | Spec §4.6 | Status | Notes |
 |---------|-----------|--------|-------|
 | Per-soul feather | ✅ | Implemented | `HTTPConfig.Feather` |
-| Global feather (tag-based) | ❌ | Not implemented | |
-| p50/p95/p99 rules | ❌ | Not implemented | |
-| Violation threshold | ❌ | Not implemented | |
-| Time window evaluation | ❌ | Not implemented | |
+| Global feather (tag-based) | ✅ | Implemented | Scope-based matching (`all`, soulID, tag) |
+| p50/p95/p99 rules | ✅ | Implemented | `internal/feather/` — percentile evaluation |
+| Max latency rule | ✅ | Implemented | Absolute max threshold |
+| Violation threshold | ✅ | Implemented | Consecutive violation counting with callback |
+| Time window evaluation | ✅ | Implemented | Configurable window per feather |
 
 ---
 
@@ -394,13 +395,13 @@
 | Storage | **100%** | Encryption + downsampling complete |
 | API Layer | **95%** | gRPC + WebSocket complete, streaming stubs |
 | CLI | **90%** | 23 commands implemented including souls import/export |
-| Multi-Tenant | **60%** | Missing quota enforcement |
+| Multi-Tenant | **100%** | Quota enforcement complete |
 | Region Support | **100%** | All 5 distribution strategies implemented |
 | Dashboard | **90%** | Missing Grafana-style custom dashboards |
 | Security | **95%** | Encryption + OIDC + LDAP complete |
 | Synthetic Monitoring | **90%** | Cookie jar + variable interpolation complete |
 | Prometheus Metrics | **80%** | Latency percentiles, uptime ratios, alert stats, counters added |
-| **Overall** | **~99%** | All major features complete. WebSocket cluster events added. Remaining: quota enforcement (multi-tenant), performance budgets |
+| **Overall** | **~100%** | All major features complete. Quota enforcement and performance budgets now implemented. |
 
 ---
 
@@ -414,12 +415,15 @@
 | ~~P3~~ | ~~mDNS/Gossip auto-discovery~~ | ✅ Complete | | UDP broadcast + gossip wired into cluster manager |
 | ~~P3~~ | ~~CLI command completion~~ | ✅ Complete | | 23 commands including souls import/export, verdict subcommands |
 | ~~P4~~ | ~~DNSSEC validation~~ | ✅ Complete | | EDNS0 DO bit, RRSIG parsing, AD flag validation |
-| ~~P4~~ | ~~Check distribution strategies~~ | ✅ Complete | | All 5 strategies: round-robin, region-aware, redundant, weighted, latency-optimal |
+| ~~P4~~ | ~~Check distribution strategies~~ | ✅ Complete | | All 5 strategies: round-robin, region-aware, redundant (primary+backup), weighted (capacity-based), latency-optimal (load+memory scoring) |
 | ~~P0~~ | ~~Storage encryption~~ | ✅ Complete | | AES-256-GCM implemented |
 | ~~P4~~ | ~~Anomaly/compound conditions~~ | ✅ Complete | | Implemented with z-score & compound logic |
 | ~~P2~~ | ~~Time-series downsampling~~ | ✅ Complete | | Multi-resolution compaction |
 | ~~P4~~ | ~~Region conflict detection~~ | ✅ Complete | | Timestamp-based conflict resolution |
 | ~~P1~~ | ~~Journey variable passing~~ | ✅ Complete | | Cookie jar + variable interpolation |
+| ~~P3~~ | ~~Cluster event WebSocket broadcasts~~ | ✅ Complete | | `jackal.joined/left`, `raft.leader_change`, generic `cluster_event` |
+| ~~P2~~ | ~~Quota enforcement~~ | ✅ Complete | | `internal/quota/` — per-workspace limits for souls, journeys, alert channels, team members |
+| ~~P3~~ | ~~Performance budgets (Feathers)~~ | ✅ Complete | | `internal/feather/` — p50/p95/p99/max evaluation, violation callbacks |
 
 ---
 
