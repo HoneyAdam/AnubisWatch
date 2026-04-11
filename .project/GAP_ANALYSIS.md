@@ -171,7 +171,7 @@
 | `ping` keep-alive | ✅ | Implemented | Server pong + 30s ping ticker |
 | `cluster_event` broadcast | ✅ | Implemented | Generic cluster lifecycle events |
 
-#### 4. Prometheus Metrics — 80%
+#### 4. Prometheus Metrics — 100%
 
 | Metric | Spec §9.5 | Status | Notes |
 |--------|-----------|--------|-------|
@@ -182,11 +182,13 @@
 | `anubis_judgments_in_24h` | ✅ | Implemented | Gauge with failed count |
 | `anubis_verdicts_fired_total` | ✅ | Implemented | Counter synced from alert manager |
 | `anubis_verdicts_resolved_total` | ✅ | Implemented | Counter synced from alert manager |
+| `anubis_verdicts_total{severity="..."}` | ✅ | Implemented | Alert count by severity (critical/warning/info) |
 | `anubis_alerts_total` | ✅ | Implemented | Total alerts, sent, failed, resolved, rate-limited |
 | `anubis_active_incidents` | ✅ | Implemented | Active incident count |
 | `anubis_cluster_nodes` | ✅ | Implemented | Node count from cluster status |
 | `anubis_cluster_leader` | ✅ | Implemented | Leader gauge |
 | `anubis_raft_term` | ✅ | Implemented | Raft term gauge |
+| `anubis_raft_commit_index` | ✅ | Implemented | Raft log commit index |
 | `anubis_latency_p50_seconds` | ✅ | Implemented | 50th percentile across all souls |
 | `anubis_latency_p95_seconds` | ✅ | Implemented | 95th percentile across all souls |
 | `anubis_latency_p99_seconds` | ✅ | Implemented | 99th percentile across all souls |
@@ -400,7 +402,7 @@
 | Dashboard | **90%** | Missing Grafana-style custom dashboards |
 | Security | **95%** | Encryption + OIDC + LDAP complete |
 | Synthetic Monitoring | **90%** | Cookie jar + variable interpolation complete |
-| Prometheus Metrics | **80%** | Latency percentiles, uptime ratios, alert stats, counters added |
+| Prometheus Metrics | **100%** | All spec metrics including commit_index and verdicts by severity |
 | **Overall** | **~100%** | All major features complete. Quota enforcement and performance budgets now implemented. |
 
 ---
