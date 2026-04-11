@@ -467,17 +467,17 @@ func TestListRuns(t *testing.T) {
 	}
 }
 
-func TestGetRun_NotImplemented(t *testing.T) {
+func TestGetRun_NotFound(t *testing.T) {
 	db := newTestDB(t)
 	defer db.Close()
 
 	executor := NewExecutor(db, newTestLogger())
 	ctx := context.Background()
 
-	// Should return "not implemented" error
-	_, err := executor.GetRun(ctx, "default", "run-1")
+	// Should return "not found" error for non-existent run
+	_, err := executor.GetRun(ctx, "default", "journey-1", "run-1")
 	if err == nil {
-		t.Error("Expected error from GetRun")
+		t.Error("Expected error from GetRun for non-existent run")
 	}
 }
 

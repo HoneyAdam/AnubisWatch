@@ -44,6 +44,9 @@ service AnubisWatchService {
   rpc CreateJourney(CreateJourneyRequest) returns (Journey);
   rpc UpdateJourney(UpdateJourneyRequest) returns (Journey);
   rpc DeleteJourney(DeleteJourneyRequest) returns (google.protobuf.Empty);
+  rpc RunJourney(RunJourneyRequest) returns (RunJourneyResponse);
+  rpc ListJourneyRuns(ListJourneyRunsRequest) returns (ListJourneyRunsResponse);
+  rpc GetJourneyRun(GetJourneyRunRequest) returns (JourneyRun);
 
   // Cluster
   rpc GetClusterStatus(google.protobuf.Empty) returns (ClusterStatus);
@@ -396,6 +399,56 @@ message UpdateJourneyRequest {
 
 message DeleteJourneyRequest {
   string id = 1;
+}
+
+message RunJourneyRequest {
+  string id = 1;
+}
+
+message RunJourneyResponse {
+  string journey_id = 1;
+  string status = 2;
+  string message = 3;
+}
+
+message ListJourneyRunsRequest {
+  string journey_id = 1;
+  int32 limit = 2;
+  optional string workspace = 3;
+}
+
+message ListJourneyRunsResponse {
+  repeated JourneyRun runs = 1;
+  int32 total = 2;
+}
+
+message GetJourneyRunRequest {
+  string journey_id = 1;
+  string run_id = 2;
+  optional string workspace = 3;
+}
+
+message JourneyStepResult {
+  string name = 1;
+  int32 step_index = 2;
+  int64 duration_ms = 3;
+  string status = 4;
+  string message = 5;
+  map<string, string> extracted = 6;
+}
+
+message JourneyRun {
+  string id = 1;
+  string journey_id = 2;
+  string workspace = 3;
+  string jackal_id = 4;
+  string region = 5;
+  google.protobuf.Timestamp started_at = 6;
+  google.protobuf.Timestamp completed_at = 7;
+  int64 duration_ms = 8;
+  string status = 9;
+  repeated JourneyStepResult steps = 10;
+  map<string, string> variables = 11;
 }
 
 // --- Cluster ---

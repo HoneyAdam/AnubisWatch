@@ -44,6 +44,9 @@ const (
 	AnubisWatchService_CreateJourney_FullMethodName    = "/anubiswatch.v1.AnubisWatchService/CreateJourney"
 	AnubisWatchService_UpdateJourney_FullMethodName    = "/anubiswatch.v1.AnubisWatchService/UpdateJourney"
 	AnubisWatchService_DeleteJourney_FullMethodName    = "/anubiswatch.v1.AnubisWatchService/DeleteJourney"
+	AnubisWatchService_RunJourney_FullMethodName       = "/anubiswatch.v1.AnubisWatchService/RunJourney"
+	AnubisWatchService_ListJourneyRuns_FullMethodName  = "/anubiswatch.v1.AnubisWatchService/ListJourneyRuns"
+	AnubisWatchService_GetJourneyRun_FullMethodName    = "/anubiswatch.v1.AnubisWatchService/GetJourneyRun"
 	AnubisWatchService_GetClusterStatus_FullMethodName = "/anubiswatch.v1.AnubisWatchService/GetClusterStatus"
 	AnubisWatchService_StreamJudgments_FullMethodName  = "/anubiswatch.v1.AnubisWatchService/StreamJudgments"
 	AnubisWatchService_StreamVerdicts_FullMethodName   = "/anubiswatch.v1.AnubisWatchService/StreamVerdicts"
@@ -85,6 +88,9 @@ type AnubisWatchServiceClient interface {
 	CreateJourney(ctx context.Context, in *CreateJourneyRequest, opts ...grpc.CallOption) (*Journey, error)
 	UpdateJourney(ctx context.Context, in *UpdateJourneyRequest, opts ...grpc.CallOption) (*Journey, error)
 	DeleteJourney(ctx context.Context, in *DeleteJourneyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	RunJourney(ctx context.Context, in *RunJourneyRequest, opts ...grpc.CallOption) (*RunJourneyResponse, error)
+	ListJourneyRuns(ctx context.Context, in *ListJourneyRunsRequest, opts ...grpc.CallOption) (*ListJourneyRunsResponse, error)
+	GetJourneyRun(ctx context.Context, in *GetJourneyRunRequest, opts ...grpc.CallOption) (*JourneyRun, error)
 	// Cluster
 	GetClusterStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ClusterStatus, error)
 	// Streaming
@@ -340,6 +346,36 @@ func (c *anubisWatchServiceClient) DeleteJourney(ctx context.Context, in *Delete
 	return out, nil
 }
 
+func (c *anubisWatchServiceClient) RunJourney(ctx context.Context, in *RunJourneyRequest, opts ...grpc.CallOption) (*RunJourneyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunJourneyResponse)
+	err := c.cc.Invoke(ctx, AnubisWatchService_RunJourney_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *anubisWatchServiceClient) ListJourneyRuns(ctx context.Context, in *ListJourneyRunsRequest, opts ...grpc.CallOption) (*ListJourneyRunsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListJourneyRunsResponse)
+	err := c.cc.Invoke(ctx, AnubisWatchService_ListJourneyRuns_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *anubisWatchServiceClient) GetJourneyRun(ctx context.Context, in *GetJourneyRunRequest, opts ...grpc.CallOption) (*JourneyRun, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JourneyRun)
+	err := c.cc.Invoke(ctx, AnubisWatchService_GetJourneyRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *anubisWatchServiceClient) GetClusterStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ClusterStatus, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ClusterStatus)
@@ -424,6 +460,9 @@ type AnubisWatchServiceServer interface {
 	CreateJourney(context.Context, *CreateJourneyRequest) (*Journey, error)
 	UpdateJourney(context.Context, *UpdateJourneyRequest) (*Journey, error)
 	DeleteJourney(context.Context, *DeleteJourneyRequest) (*emptypb.Empty, error)
+	RunJourney(context.Context, *RunJourneyRequest) (*RunJourneyResponse, error)
+	ListJourneyRuns(context.Context, *ListJourneyRunsRequest) (*ListJourneyRunsResponse, error)
+	GetJourneyRun(context.Context, *GetJourneyRunRequest) (*JourneyRun, error)
 	// Cluster
 	GetClusterStatus(context.Context, *emptypb.Empty) (*ClusterStatus, error)
 	// Streaming
@@ -510,6 +549,15 @@ func (UnimplementedAnubisWatchServiceServer) UpdateJourney(context.Context, *Upd
 }
 func (UnimplementedAnubisWatchServiceServer) DeleteJourney(context.Context, *DeleteJourneyRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteJourney not implemented")
+}
+func (UnimplementedAnubisWatchServiceServer) RunJourney(context.Context, *RunJourneyRequest) (*RunJourneyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RunJourney not implemented")
+}
+func (UnimplementedAnubisWatchServiceServer) ListJourneyRuns(context.Context, *ListJourneyRunsRequest) (*ListJourneyRunsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListJourneyRuns not implemented")
+}
+func (UnimplementedAnubisWatchServiceServer) GetJourneyRun(context.Context, *GetJourneyRunRequest) (*JourneyRun, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetJourneyRun not implemented")
 }
 func (UnimplementedAnubisWatchServiceServer) GetClusterStatus(context.Context, *emptypb.Empty) (*ClusterStatus, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetClusterStatus not implemented")
@@ -973,6 +1021,60 @@ func _AnubisWatchService_DeleteJourney_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AnubisWatchService_RunJourney_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunJourneyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AnubisWatchServiceServer).RunJourney(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AnubisWatchService_RunJourney_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AnubisWatchServiceServer).RunJourney(ctx, req.(*RunJourneyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AnubisWatchService_ListJourneyRuns_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListJourneyRunsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AnubisWatchServiceServer).ListJourneyRuns(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AnubisWatchService_ListJourneyRuns_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AnubisWatchServiceServer).ListJourneyRuns(ctx, req.(*ListJourneyRunsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AnubisWatchService_GetJourneyRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetJourneyRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AnubisWatchServiceServer).GetJourneyRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AnubisWatchService_GetJourneyRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AnubisWatchServiceServer).GetJourneyRun(ctx, req.(*GetJourneyRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AnubisWatchService_GetClusterStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
@@ -1115,6 +1217,18 @@ var AnubisWatchService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteJourney",
 			Handler:    _AnubisWatchService_DeleteJourney_Handler,
+		},
+		{
+			MethodName: "RunJourney",
+			Handler:    _AnubisWatchService_RunJourney_Handler,
+		},
+		{
+			MethodName: "ListJourneyRuns",
+			Handler:    _AnubisWatchService_ListJourneyRuns_Handler,
+		},
+		{
+			MethodName: "GetJourneyRun",
+			Handler:    _AnubisWatchService_GetJourneyRun_Handler,
 		},
 		{
 			MethodName: "GetClusterStatus",

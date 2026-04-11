@@ -302,6 +302,34 @@ func (db *CobaltDB) QueryJourneyRuns(ctx context.Context, workspaceID, journeyID
 	return runs, nil
 }
 
+// GetJourneyRun retrieves a single journey run by run ID
+func (db *CobaltDB) GetJourneyRun(ctx context.Context, workspaceID, journeyID, runID string) (*core.JourneyRun, error) {
+	if workspaceID == "" {
+		workspaceID = "default"
+	}
+
+	prefix := fmt.Sprintf("%s/journey-runs/%s/", workspaceID, journeyID)
+	results, err := db.PrefixScan(prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, data := range results {
+		if data == nil {
+			continue
+		}
+		var run core.JourneyRun
+		if err := json.Unmarshal(data, &run); err != nil {
+			continue
+		}
+		if run.ID == runID {
+			return &run, nil
+		}
+	}
+
+	return nil, fmt.Errorf("journey run %s not found", runID)
+}
+
 // SaveChannel saves an alert channel configuration
 func (db *CobaltDB) SaveChannel(ctx context.Context, ch *core.ChannelConfig) error {
 	workspaceID := "default"

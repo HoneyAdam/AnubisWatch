@@ -34,12 +34,19 @@ type RESTServer struct {
 	cluster    ClusterManager
 	dashboard  http.Handler
 	statusPage http.Handler
+	journey    JourneyExecutor
 
 	// Prometheus-style counters (in-memory, reset on restart)
 	metricsMu  sync.RWMutex
 	judgmentsTotal   uint64
 	verdictsFired    uint64
 	verdictsResolved uint64
+}
+
+// JourneyExecutor interface for journey operations
+type JourneyExecutor interface {
+	ListRuns(ctx context.Context, workspaceID, journeyID string, limit int) ([]*core.JourneyRun, error)
+	GetRun(ctx context.Context, workspaceID, journeyID, runID string) (*core.JourneyRun, error)
 }
 
 // Router handles HTTP routing
@@ -200,7 +207,7 @@ type User struct {
 }
 
 // NewRESTServer creates a new REST server
-func NewRESTServer(config core.ServerConfig, authConfig core.AuthConfig, store Storage, probe ProbeEngine, alert AlertManager, auth Authenticator, cluster ClusterManager, dashboard http.Handler, statusPage http.Handler, mcp *MCPServer, logger *slog.Logger) *RESTServer {
+func NewRESTServer(config core.ServerConfig, authConfig core.AuthConfig, store Storage, probe ProbeEngine, alert AlertManager, auth Authenticator, cluster ClusterManager, journey JourneyExecutor, dashboard http.Handler, statusPage http.Handler, mcp *MCPServer, logger *slog.Logger) *RESTServer {
 	wsServer := NewWebSocketServer(logger)
 
 	s := &RESTServer{
@@ -217,6 +224,7 @@ func NewRESTServer(config core.ServerConfig, authConfig core.AuthConfig, store S
 		alert:      alert,
 		auth:       auth,
 		cluster:    cluster,
+		journey:    journey,
 		mcp:        mcp,
 		ws:         wsServer,
 		dashboard:  dashboard,
@@ -342,6 +350,8 @@ func (s *RESTServer) setupRoutes() {
 	s.router.Handle("PUT", "/api/v1/journeys/:id", s.requireAuth(s.handleUpdateJourney))
 	s.router.Handle("DELETE", "/api/v1/journeys/:id", s.requireAuth(s.handleDeleteJourney))
 	s.router.Handle("POST", "/api/v1/journeys/:id/run", s.requireAuth(s.handleRunJourney))
+	s.router.Handle("GET", "/api/v1/journeys/:id/runs", s.requireAuth(s.handleListJourneyRuns))
+	s.router.Handle("GET", "/api/v1/journeys/:id/runs/:runId", s.requireAuth(s.handleGetJourneyRun))
 
 	// MCP tools endpoint
 	s.router.Handle("GET", "/api/v1/mcp/tools", s.requireAuth(s.handleMCPTools))

@@ -281,6 +281,20 @@ func (a *grpcStorageAdapter) ListEvents(soulID string, limit int) ([]interface{}
 	}
 	return result, nil
 }
+func (a *grpcStorageAdapter) ListJourneyRunsNoCtx(journeyID string, limit int) ([]interface{}, error) {
+	runs, err := a.inner.store.QueryJourneyRuns(context.Background(), "default", journeyID, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(runs))
+	for i, r := range runs {
+		result[i] = r
+	}
+	return result, nil
+}
+func (a *grpcStorageAdapter) GetJourneyRunNoCtx(journeyID, runID string) (interface{}, error) {
+	return a.inner.store.GetJourneyRun(context.Background(), "default", journeyID, runID)
+}
 // BuildServerDependencies builds all server dependencies
 func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 	logger := opts.Logger
@@ -393,7 +407,7 @@ func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 	// Initialize MCP server
 	mcpServer := api.NewMCPServer(restStore, probeEngine, alertMgr, logger)
 
-	restServer := api.NewRESTServer(cfg.Server, cfg.Auth, restStore, probeEngine, alertMgr, authenticator, clusterAdapt, dashboardHandler, statusPageHandler, mcpServer, logger)
+	restServer := api.NewRESTServer(cfg.Server, cfg.Auth, restStore, probeEngine, alertMgr, authenticator, clusterAdapt, journeyExec, dashboardHandler, statusPageHandler, mcpServer, logger)
 
 	// Wire up WebSocket broadcast for real-time judgment updates
 	probeEngine.SetOnJudgment(restServer.OnJudgmentCallback())

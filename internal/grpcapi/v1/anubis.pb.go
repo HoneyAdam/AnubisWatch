@@ -3312,6 +3312,490 @@ func (x *DeleteJourneyRequest) GetId() string {
 	return ""
 }
 
+type RunJourneyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunJourneyRequest) Reset() {
+	*x = RunJourneyRequest{}
+	mi := &file_proto_v1_anubis_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunJourneyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunJourneyRequest) ProtoMessage() {}
+
+func (x *RunJourneyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_anubis_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunJourneyRequest.ProtoReflect.Descriptor instead.
+func (*RunJourneyRequest) Descriptor() ([]byte, []int) {
+	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *RunJourneyRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type RunJourneyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JourneyId     string                 `protobuf:"bytes,1,opt,name=journey_id,json=journeyId,proto3" json:"journey_id,omitempty"`
+	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunJourneyResponse) Reset() {
+	*x = RunJourneyResponse{}
+	mi := &file_proto_v1_anubis_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunJourneyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunJourneyResponse) ProtoMessage() {}
+
+func (x *RunJourneyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_anubis_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunJourneyResponse.ProtoReflect.Descriptor instead.
+func (*RunJourneyResponse) Descriptor() ([]byte, []int) {
+	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *RunJourneyResponse) GetJourneyId() string {
+	if x != nil {
+		return x.JourneyId
+	}
+	return ""
+}
+
+func (x *RunJourneyResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *RunJourneyResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type ListJourneyRunsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JourneyId     string                 `protobuf:"bytes,1,opt,name=journey_id,json=journeyId,proto3" json:"journey_id,omitempty"`
+	Limit         int32                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	Workspace     *string                `protobuf:"bytes,3,opt,name=workspace,proto3,oneof" json:"workspace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListJourneyRunsRequest) Reset() {
+	*x = ListJourneyRunsRequest{}
+	mi := &file_proto_v1_anubis_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListJourneyRunsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListJourneyRunsRequest) ProtoMessage() {}
+
+func (x *ListJourneyRunsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_anubis_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListJourneyRunsRequest.ProtoReflect.Descriptor instead.
+func (*ListJourneyRunsRequest) Descriptor() ([]byte, []int) {
+	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *ListJourneyRunsRequest) GetJourneyId() string {
+	if x != nil {
+		return x.JourneyId
+	}
+	return ""
+}
+
+func (x *ListJourneyRunsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListJourneyRunsRequest) GetWorkspace() string {
+	if x != nil && x.Workspace != nil {
+		return *x.Workspace
+	}
+	return ""
+}
+
+type ListJourneyRunsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Runs          []*JourneyRun          `protobuf:"bytes,1,rep,name=runs,proto3" json:"runs,omitempty"`
+	Total         int32                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListJourneyRunsResponse) Reset() {
+	*x = ListJourneyRunsResponse{}
+	mi := &file_proto_v1_anubis_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListJourneyRunsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListJourneyRunsResponse) ProtoMessage() {}
+
+func (x *ListJourneyRunsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_anubis_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListJourneyRunsResponse.ProtoReflect.Descriptor instead.
+func (*ListJourneyRunsResponse) Descriptor() ([]byte, []int) {
+	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *ListJourneyRunsResponse) GetRuns() []*JourneyRun {
+	if x != nil {
+		return x.Runs
+	}
+	return nil
+}
+
+func (x *ListJourneyRunsResponse) GetTotal() int32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+type GetJourneyRunRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JourneyId     string                 `protobuf:"bytes,1,opt,name=journey_id,json=journeyId,proto3" json:"journey_id,omitempty"`
+	RunId         string                 `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	Workspace     *string                `protobuf:"bytes,3,opt,name=workspace,proto3,oneof" json:"workspace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetJourneyRunRequest) Reset() {
+	*x = GetJourneyRunRequest{}
+	mi := &file_proto_v1_anubis_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetJourneyRunRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetJourneyRunRequest) ProtoMessage() {}
+
+func (x *GetJourneyRunRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_anubis_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetJourneyRunRequest.ProtoReflect.Descriptor instead.
+func (*GetJourneyRunRequest) Descriptor() ([]byte, []int) {
+	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *GetJourneyRunRequest) GetJourneyId() string {
+	if x != nil {
+		return x.JourneyId
+	}
+	return ""
+}
+
+func (x *GetJourneyRunRequest) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *GetJourneyRunRequest) GetWorkspace() string {
+	if x != nil && x.Workspace != nil {
+		return *x.Workspace
+	}
+	return ""
+}
+
+type JourneyStepResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	StepIndex     int32                  `protobuf:"varint,2,opt,name=step_index,json=stepIndex,proto3" json:"step_index,omitempty"`
+	DurationMs    int64                  `protobuf:"varint,3,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	Message       string                 `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
+	Extracted     map[string]string      `protobuf:"bytes,6,rep,name=extracted,proto3" json:"extracted,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JourneyStepResult) Reset() {
+	*x = JourneyStepResult{}
+	mi := &file_proto_v1_anubis_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JourneyStepResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JourneyStepResult) ProtoMessage() {}
+
+func (x *JourneyStepResult) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_anubis_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JourneyStepResult.ProtoReflect.Descriptor instead.
+func (*JourneyStepResult) Descriptor() ([]byte, []int) {
+	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *JourneyStepResult) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *JourneyStepResult) GetStepIndex() int32 {
+	if x != nil {
+		return x.StepIndex
+	}
+	return 0
+}
+
+func (x *JourneyStepResult) GetDurationMs() int64 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+func (x *JourneyStepResult) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *JourneyStepResult) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *JourneyStepResult) GetExtracted() map[string]string {
+	if x != nil {
+		return x.Extracted
+	}
+	return nil
+}
+
+type JourneyRun struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	JourneyId     string                 `protobuf:"bytes,2,opt,name=journey_id,json=journeyId,proto3" json:"journey_id,omitempty"`
+	Workspace     string                 `protobuf:"bytes,3,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	JackalId      string                 `protobuf:"bytes,4,opt,name=jackal_id,json=jackalId,proto3" json:"jackal_id,omitempty"`
+	Region        string                 `protobuf:"bytes,5,opt,name=region,proto3" json:"region,omitempty"`
+	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	CompletedAt   *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	DurationMs    int64                  `protobuf:"varint,8,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	Status        string                 `protobuf:"bytes,9,opt,name=status,proto3" json:"status,omitempty"`
+	Steps         []*JourneyStepResult   `protobuf:"bytes,10,rep,name=steps,proto3" json:"steps,omitempty"`
+	Variables     map[string]string      `protobuf:"bytes,11,rep,name=variables,proto3" json:"variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JourneyRun) Reset() {
+	*x = JourneyRun{}
+	mi := &file_proto_v1_anubis_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JourneyRun) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JourneyRun) ProtoMessage() {}
+
+func (x *JourneyRun) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_anubis_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JourneyRun.ProtoReflect.Descriptor instead.
+func (*JourneyRun) Descriptor() ([]byte, []int) {
+	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *JourneyRun) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *JourneyRun) GetJourneyId() string {
+	if x != nil {
+		return x.JourneyId
+	}
+	return ""
+}
+
+func (x *JourneyRun) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
+func (x *JourneyRun) GetJackalId() string {
+	if x != nil {
+		return x.JackalId
+	}
+	return ""
+}
+
+func (x *JourneyRun) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *JourneyRun) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
+	}
+	return nil
+}
+
+func (x *JourneyRun) GetCompletedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CompletedAt
+	}
+	return nil
+}
+
+func (x *JourneyRun) GetDurationMs() int64 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+func (x *JourneyRun) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *JourneyRun) GetSteps() []*JourneyStepResult {
+	if x != nil {
+		return x.Steps
+	}
+	return nil
+}
+
+func (x *JourneyRun) GetVariables() map[string]string {
+	if x != nil {
+		return x.Variables
+	}
+	return nil
+}
+
 // --- Cluster ---
 type ClusterStatus struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -3329,7 +3813,7 @@ type ClusterStatus struct {
 
 func (x *ClusterStatus) Reset() {
 	*x = ClusterStatus{}
-	mi := &file_proto_v1_anubis_proto_msgTypes[43]
+	mi := &file_proto_v1_anubis_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3341,7 +3825,7 @@ func (x *ClusterStatus) String() string {
 func (*ClusterStatus) ProtoMessage() {}
 
 func (x *ClusterStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_anubis_proto_msgTypes[43]
+	mi := &file_proto_v1_anubis_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3354,7 +3838,7 @@ func (x *ClusterStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterStatus.ProtoReflect.Descriptor instead.
 func (*ClusterStatus) Descriptor() ([]byte, []int) {
-	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{43}
+	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ClusterStatus) GetClustered() bool {
@@ -3426,7 +3910,7 @@ type ClusterNode struct {
 
 func (x *ClusterNode) Reset() {
 	*x = ClusterNode{}
-	mi := &file_proto_v1_anubis_proto_msgTypes[44]
+	mi := &file_proto_v1_anubis_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3438,7 +3922,7 @@ func (x *ClusterNode) String() string {
 func (*ClusterNode) ProtoMessage() {}
 
 func (x *ClusterNode) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_anubis_proto_msgTypes[44]
+	mi := &file_proto_v1_anubis_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3451,7 +3935,7 @@ func (x *ClusterNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterNode.ProtoReflect.Descriptor instead.
 func (*ClusterNode) Descriptor() ([]byte, []int) {
-	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{44}
+	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ClusterNode) GetId() string {
@@ -3500,7 +3984,7 @@ type StreamRequest struct {
 
 func (x *StreamRequest) Reset() {
 	*x = StreamRequest{}
-	mi := &file_proto_v1_anubis_proto_msgTypes[45]
+	mi := &file_proto_v1_anubis_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3512,7 +3996,7 @@ func (x *StreamRequest) String() string {
 func (*StreamRequest) ProtoMessage() {}
 
 func (x *StreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_anubis_proto_msgTypes[45]
+	mi := &file_proto_v1_anubis_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3525,7 +4009,7 @@ func (x *StreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamRequest.ProtoReflect.Descriptor instead.
 func (*StreamRequest) Descriptor() ([]byte, []int) {
-	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{45}
+	return file_proto_v1_anubis_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *StreamRequest) GetSoulId() string {
@@ -3903,7 +4387,63 @@ const file_proto_v1_anubis_proto_rawDesc = "" +
 	"\n" +
 	"\b_enabled\"&\n" +
 	"\x14DeleteJourneyRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x9b\x02\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"#\n" +
+	"\x11RunJourneyRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"e\n" +
+	"\x12RunJourneyResponse\x12\x1d\n" +
+	"\n" +
+	"journey_id\x18\x01 \x01(\tR\tjourneyId\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"~\n" +
+	"\x16ListJourneyRunsRequest\x12\x1d\n" +
+	"\n" +
+	"journey_id\x18\x01 \x01(\tR\tjourneyId\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\x12!\n" +
+	"\tworkspace\x18\x03 \x01(\tH\x00R\tworkspace\x88\x01\x01B\f\n" +
+	"\n" +
+	"_workspace\"_\n" +
+	"\x17ListJourneyRunsResponse\x12.\n" +
+	"\x04runs\x18\x01 \x03(\v2\x1a.anubiswatch.v1.JourneyRunR\x04runs\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x05R\x05total\"}\n" +
+	"\x14GetJourneyRunRequest\x12\x1d\n" +
+	"\n" +
+	"journey_id\x18\x01 \x01(\tR\tjourneyId\x12\x15\n" +
+	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12!\n" +
+	"\tworkspace\x18\x03 \x01(\tH\x00R\tworkspace\x88\x01\x01B\f\n" +
+	"\n" +
+	"_workspace\"\xa7\x02\n" +
+	"\x11JourneyStepResult\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"step_index\x18\x02 \x01(\x05R\tstepIndex\x12\x1f\n" +
+	"\vduration_ms\x18\x03 \x01(\x03R\n" +
+	"durationMs\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\x12\x18\n" +
+	"\amessage\x18\x05 \x01(\tR\amessage\x12N\n" +
+	"\textracted\x18\x06 \x03(\v20.anubiswatch.v1.JourneyStepResult.ExtractedEntryR\textracted\x1a<\n" +
+	"\x0eExtractedEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x81\x04\n" +
+	"\n" +
+	"JourneyRun\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"journey_id\x18\x02 \x01(\tR\tjourneyId\x12\x1c\n" +
+	"\tworkspace\x18\x03 \x01(\tR\tworkspace\x12\x1b\n" +
+	"\tjackal_id\x18\x04 \x01(\tR\bjackalId\x12\x16\n" +
+	"\x06region\x18\x05 \x01(\tR\x06region\x129\n" +
+	"\n" +
+	"started_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12=\n" +
+	"\fcompleted_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\vcompletedAt\x12\x1f\n" +
+	"\vduration_ms\x18\b \x01(\x03R\n" +
+	"durationMs\x12\x16\n" +
+	"\x06status\x18\t \x01(\tR\x06status\x127\n" +
+	"\x05steps\x18\n" +
+	" \x03(\v2!.anubiswatch.v1.JourneyStepResultR\x05steps\x12G\n" +
+	"\tvariables\x18\v \x03(\v2).anubiswatch.v1.JourneyRun.VariablesEntryR\tvariables\x1a<\n" +
+	"\x0eVariablesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9b\x02\n" +
 	"\rClusterStatus\x12\x1c\n" +
 	"\tclustered\x18\x01 \x01(\bR\tclustered\x12\x1b\n" +
 	"\tis_leader\x18\x02 \x01(\bR\bisLeader\x12\x17\n" +
@@ -3926,7 +4466,7 @@ const file_proto_v1_anubis_proto_rawDesc = "" +
 	"\n" +
 	"\b_soul_idB\f\n" +
 	"\n" +
-	"_workspace2\xdb\x10\n" +
+	"_workspace2\xe7\x12\n" +
 	"\x12AnubisWatchService\x12P\n" +
 	"\tListSouls\x12 .anubiswatch.v1.ListSoulsRequest\x1a!.anubiswatch.v1.ListSoulsResponse\x12?\n" +
 	"\aGetSoul\x12\x1e.anubiswatch.v1.GetSoulRequest\x1a\x14.anubiswatch.v1.Soul\x12E\n" +
@@ -3959,11 +4499,15 @@ const file_proto_v1_anubis_proto_rawDesc = "" +
 	"GetJourney\x12!.anubiswatch.v1.GetJourneyRequest\x1a\x17.anubiswatch.v1.Journey\x12N\n" +
 	"\rCreateJourney\x12$.anubiswatch.v1.CreateJourneyRequest\x1a\x17.anubiswatch.v1.Journey\x12N\n" +
 	"\rUpdateJourney\x12$.anubiswatch.v1.UpdateJourneyRequest\x1a\x17.anubiswatch.v1.Journey\x12M\n" +
-	"\rDeleteJourney\x12$.anubiswatch.v1.DeleteJourneyRequest\x1a\x16.google.protobuf.Empty\x12I\n" +
+	"\rDeleteJourney\x12$.anubiswatch.v1.DeleteJourneyRequest\x1a\x16.google.protobuf.Empty\x12S\n" +
+	"\n" +
+	"RunJourney\x12!.anubiswatch.v1.RunJourneyRequest\x1a\".anubiswatch.v1.RunJourneyResponse\x12b\n" +
+	"\x0fListJourneyRuns\x12&.anubiswatch.v1.ListJourneyRunsRequest\x1a'.anubiswatch.v1.ListJourneyRunsResponse\x12Q\n" +
+	"\rGetJourneyRun\x12$.anubiswatch.v1.GetJourneyRunRequest\x1a\x1a.anubiswatch.v1.JourneyRun\x12I\n" +
 	"\x10GetClusterStatus\x12\x16.google.protobuf.Empty\x1a\x1d.anubiswatch.v1.ClusterStatus\x12L\n" +
 	"\x0fStreamJudgments\x12\x1d.anubiswatch.v1.StreamRequest\x1a\x18.anubiswatch.v1.Judgment0\x01\x12J\n" +
-	"\x0eStreamVerdicts\x12\x1d.anubiswatch.v1.StreamRequest\x1a\x17.anubiswatch.v1.Verdict0\x01B\xbb\x01\n" +
-	"\x12com.anubiswatch.v1B\vAnubisProtoP\x01Z?github.com/AnubisWatch/anubiswatch/proto/proto/v1;anubiswatchv1\xa2\x02\x03AXX\xaa\x02\x0eAnubiswatch.V1\xca\x02\x0eAnubiswatch\\V1\xe2\x02\x1aAnubiswatch\\V1\\GPBMetadata\xea\x02\x0fAnubiswatch::V1b\x06proto3"
+	"\x0eStreamVerdicts\x12\x1d.anubiswatch.v1.StreamRequest\x1a\x17.anubiswatch.v1.Verdict0\x01B\xc9\x01\n" +
+	"\x12com.anubiswatch.v1B\vAnubisProtoP\x01ZMgithub.com/AnubisWatch/anubiswatch/internal/grpcapi/v1/proto/v1;anubiswatchv1\xa2\x02\x03AXX\xaa\x02\x0eAnubiswatch.V1\xca\x02\x0eAnubiswatch\\V1\xe2\x02\x1aAnubiswatch\\V1\\GPBMetadata\xea\x02\x0fAnubiswatch::V1b\x06proto3"
 
 var (
 	file_proto_v1_anubis_proto_rawDescOnce sync.Once
@@ -3977,7 +4521,7 @@ func file_proto_v1_anubis_proto_rawDescGZIP() []byte {
 	return file_proto_v1_anubis_proto_rawDescData
 }
 
-var file_proto_v1_anubis_proto_msgTypes = make([]protoimpl.MessageInfo, 58)
+var file_proto_v1_anubis_proto_msgTypes = make([]protoimpl.MessageInfo, 67)
 var file_proto_v1_anubis_proto_goTypes = []any{
 	(*Pagination)(nil),              // 0: anubiswatch.v1.Pagination
 	(*Soul)(nil),                    // 1: anubiswatch.v1.Soul
@@ -4022,132 +4566,153 @@ var file_proto_v1_anubis_proto_goTypes = []any{
 	(*CreateJourneyRequest)(nil),    // 40: anubiswatch.v1.CreateJourneyRequest
 	(*UpdateJourneyRequest)(nil),    // 41: anubiswatch.v1.UpdateJourneyRequest
 	(*DeleteJourneyRequest)(nil),    // 42: anubiswatch.v1.DeleteJourneyRequest
-	(*ClusterStatus)(nil),           // 43: anubiswatch.v1.ClusterStatus
-	(*ClusterNode)(nil),             // 44: anubiswatch.v1.ClusterNode
-	(*StreamRequest)(nil),           // 45: anubiswatch.v1.StreamRequest
-	nil,                             // 46: anubiswatch.v1.Soul.LabelsEntry
-	nil,                             // 47: anubiswatch.v1.HTTPCheck.HeadersEntry
-	nil,                             // 48: anubiswatch.v1.GRPCCheck.MetadataEntry
-	nil,                             // 49: anubiswatch.v1.CreateSoulRequest.LabelsEntry
-	nil,                             // 50: anubiswatch.v1.UpdateSoulRequest.LabelsEntry
-	nil,                             // 51: anubiswatch.v1.Channel.ConfigEntry
-	nil,                             // 52: anubiswatch.v1.CreateChannelRequest.ConfigEntry
-	nil,                             // 53: anubiswatch.v1.UpdateChannelRequest.ConfigEntry
-	nil,                             // 54: anubiswatch.v1.Rule.ConfigEntry
-	nil,                             // 55: anubiswatch.v1.CreateRuleRequest.ConfigEntry
-	nil,                             // 56: anubiswatch.v1.UpdateRuleRequest.ConfigEntry
-	nil,                             // 57: anubiswatch.v1.JourneyStep.ConfigEntry
-	(*timestamppb.Timestamp)(nil),   // 58: google.protobuf.Timestamp
-	(*emptypb.Empty)(nil),           // 59: google.protobuf.Empty
+	(*RunJourneyRequest)(nil),       // 43: anubiswatch.v1.RunJourneyRequest
+	(*RunJourneyResponse)(nil),      // 44: anubiswatch.v1.RunJourneyResponse
+	(*ListJourneyRunsRequest)(nil),  // 45: anubiswatch.v1.ListJourneyRunsRequest
+	(*ListJourneyRunsResponse)(nil), // 46: anubiswatch.v1.ListJourneyRunsResponse
+	(*GetJourneyRunRequest)(nil),    // 47: anubiswatch.v1.GetJourneyRunRequest
+	(*JourneyStepResult)(nil),       // 48: anubiswatch.v1.JourneyStepResult
+	(*JourneyRun)(nil),              // 49: anubiswatch.v1.JourneyRun
+	(*ClusterStatus)(nil),           // 50: anubiswatch.v1.ClusterStatus
+	(*ClusterNode)(nil),             // 51: anubiswatch.v1.ClusterNode
+	(*StreamRequest)(nil),           // 52: anubiswatch.v1.StreamRequest
+	nil,                             // 53: anubiswatch.v1.Soul.LabelsEntry
+	nil,                             // 54: anubiswatch.v1.HTTPCheck.HeadersEntry
+	nil,                             // 55: anubiswatch.v1.GRPCCheck.MetadataEntry
+	nil,                             // 56: anubiswatch.v1.CreateSoulRequest.LabelsEntry
+	nil,                             // 57: anubiswatch.v1.UpdateSoulRequest.LabelsEntry
+	nil,                             // 58: anubiswatch.v1.Channel.ConfigEntry
+	nil,                             // 59: anubiswatch.v1.CreateChannelRequest.ConfigEntry
+	nil,                             // 60: anubiswatch.v1.UpdateChannelRequest.ConfigEntry
+	nil,                             // 61: anubiswatch.v1.Rule.ConfigEntry
+	nil,                             // 62: anubiswatch.v1.CreateRuleRequest.ConfigEntry
+	nil,                             // 63: anubiswatch.v1.UpdateRuleRequest.ConfigEntry
+	nil,                             // 64: anubiswatch.v1.JourneyStep.ConfigEntry
+	nil,                             // 65: anubiswatch.v1.JourneyStepResult.ExtractedEntry
+	nil,                             // 66: anubiswatch.v1.JourneyRun.VariablesEntry
+	(*timestamppb.Timestamp)(nil),   // 67: google.protobuf.Timestamp
+	(*emptypb.Empty)(nil),           // 68: google.protobuf.Empty
 }
 var file_proto_v1_anubis_proto_depIdxs = []int32{
-	46, // 0: anubiswatch.v1.Soul.labels:type_name -> anubiswatch.v1.Soul.LabelsEntry
-	58, // 1: anubiswatch.v1.Soul.created_at:type_name -> google.protobuf.Timestamp
-	58, // 2: anubiswatch.v1.Soul.updated_at:type_name -> google.protobuf.Timestamp
+	53, // 0: anubiswatch.v1.Soul.labels:type_name -> anubiswatch.v1.Soul.LabelsEntry
+	67, // 1: anubiswatch.v1.Soul.created_at:type_name -> google.protobuf.Timestamp
+	67, // 2: anubiswatch.v1.Soul.updated_at:type_name -> google.protobuf.Timestamp
 	2,  // 3: anubiswatch.v1.Soul.http:type_name -> anubiswatch.v1.HTTPCheck
 	3,  // 4: anubiswatch.v1.Soul.tcp:type_name -> anubiswatch.v1.TCPCheck
 	4,  // 5: anubiswatch.v1.Soul.dns:type_name -> anubiswatch.v1.DNSCheck
 	5,  // 6: anubiswatch.v1.Soul.tls:type_name -> anubiswatch.v1.TLSCheck
 	6,  // 7: anubiswatch.v1.Soul.grpc:type_name -> anubiswatch.v1.GRPCCheck
-	47, // 8: anubiswatch.v1.HTTPCheck.headers:type_name -> anubiswatch.v1.HTTPCheck.HeadersEntry
-	48, // 9: anubiswatch.v1.GRPCCheck.metadata:type_name -> anubiswatch.v1.GRPCCheck.MetadataEntry
-	49, // 10: anubiswatch.v1.CreateSoulRequest.labels:type_name -> anubiswatch.v1.CreateSoulRequest.LabelsEntry
+	54, // 8: anubiswatch.v1.HTTPCheck.headers:type_name -> anubiswatch.v1.HTTPCheck.HeadersEntry
+	55, // 9: anubiswatch.v1.GRPCCheck.metadata:type_name -> anubiswatch.v1.GRPCCheck.MetadataEntry
+	56, // 10: anubiswatch.v1.CreateSoulRequest.labels:type_name -> anubiswatch.v1.CreateSoulRequest.LabelsEntry
 	2,  // 11: anubiswatch.v1.CreateSoulRequest.http:type_name -> anubiswatch.v1.HTTPCheck
 	3,  // 12: anubiswatch.v1.CreateSoulRequest.tcp:type_name -> anubiswatch.v1.TCPCheck
 	4,  // 13: anubiswatch.v1.CreateSoulRequest.dns:type_name -> anubiswatch.v1.DNSCheck
 	5,  // 14: anubiswatch.v1.CreateSoulRequest.tls:type_name -> anubiswatch.v1.TLSCheck
 	6,  // 15: anubiswatch.v1.CreateSoulRequest.grpc:type_name -> anubiswatch.v1.GRPCCheck
-	50, // 16: anubiswatch.v1.UpdateSoulRequest.labels:type_name -> anubiswatch.v1.UpdateSoulRequest.LabelsEntry
+	57, // 16: anubiswatch.v1.UpdateSoulRequest.labels:type_name -> anubiswatch.v1.UpdateSoulRequest.LabelsEntry
 	1,  // 17: anubiswatch.v1.ListSoulsResponse.souls:type_name -> anubiswatch.v1.Soul
 	0,  // 18: anubiswatch.v1.ListSoulsResponse.pagination:type_name -> anubiswatch.v1.Pagination
-	58, // 19: anubiswatch.v1.Judgment.timestamp:type_name -> google.protobuf.Timestamp
-	58, // 20: anubiswatch.v1.ListJudgmentsRequest.since:type_name -> google.protobuf.Timestamp
-	58, // 21: anubiswatch.v1.ListJudgmentsRequest.until:type_name -> google.protobuf.Timestamp
+	67, // 19: anubiswatch.v1.Judgment.timestamp:type_name -> google.protobuf.Timestamp
+	67, // 20: anubiswatch.v1.ListJudgmentsRequest.since:type_name -> google.protobuf.Timestamp
+	67, // 21: anubiswatch.v1.ListJudgmentsRequest.until:type_name -> google.protobuf.Timestamp
 	13, // 22: anubiswatch.v1.ListJudgmentsResponse.judgments:type_name -> anubiswatch.v1.Judgment
 	0,  // 23: anubiswatch.v1.ListJudgmentsResponse.pagination:type_name -> anubiswatch.v1.Pagination
-	58, // 24: anubiswatch.v1.Verdict.fired_at:type_name -> google.protobuf.Timestamp
-	58, // 25: anubiswatch.v1.Verdict.resolved_at:type_name -> google.protobuf.Timestamp
+	67, // 24: anubiswatch.v1.Verdict.fired_at:type_name -> google.protobuf.Timestamp
+	67, // 25: anubiswatch.v1.Verdict.resolved_at:type_name -> google.protobuf.Timestamp
 	18, // 26: anubiswatch.v1.ListVerdictsResponse.verdicts:type_name -> anubiswatch.v1.Verdict
 	0,  // 27: anubiswatch.v1.ListVerdictsResponse.pagination:type_name -> anubiswatch.v1.Pagination
-	51, // 28: anubiswatch.v1.Channel.config:type_name -> anubiswatch.v1.Channel.ConfigEntry
-	58, // 29: anubiswatch.v1.Channel.created_at:type_name -> google.protobuf.Timestamp
+	58, // 28: anubiswatch.v1.Channel.config:type_name -> anubiswatch.v1.Channel.ConfigEntry
+	67, // 29: anubiswatch.v1.Channel.created_at:type_name -> google.protobuf.Timestamp
 	21, // 30: anubiswatch.v1.ListChannelsResponse.channels:type_name -> anubiswatch.v1.Channel
 	0,  // 31: anubiswatch.v1.ListChannelsResponse.pagination:type_name -> anubiswatch.v1.Pagination
-	52, // 32: anubiswatch.v1.CreateChannelRequest.config:type_name -> anubiswatch.v1.CreateChannelRequest.ConfigEntry
-	53, // 33: anubiswatch.v1.UpdateChannelRequest.config:type_name -> anubiswatch.v1.UpdateChannelRequest.ConfigEntry
-	54, // 34: anubiswatch.v1.Rule.config:type_name -> anubiswatch.v1.Rule.ConfigEntry
-	58, // 35: anubiswatch.v1.Rule.created_at:type_name -> google.protobuf.Timestamp
+	59, // 32: anubiswatch.v1.CreateChannelRequest.config:type_name -> anubiswatch.v1.CreateChannelRequest.ConfigEntry
+	60, // 33: anubiswatch.v1.UpdateChannelRequest.config:type_name -> anubiswatch.v1.UpdateChannelRequest.ConfigEntry
+	61, // 34: anubiswatch.v1.Rule.config:type_name -> anubiswatch.v1.Rule.ConfigEntry
+	67, // 35: anubiswatch.v1.Rule.created_at:type_name -> google.protobuf.Timestamp
 	28, // 36: anubiswatch.v1.ListRulesResponse.rules:type_name -> anubiswatch.v1.Rule
 	0,  // 37: anubiswatch.v1.ListRulesResponse.pagination:type_name -> anubiswatch.v1.Pagination
-	55, // 38: anubiswatch.v1.CreateRuleRequest.config:type_name -> anubiswatch.v1.CreateRuleRequest.ConfigEntry
-	56, // 39: anubiswatch.v1.UpdateRuleRequest.config:type_name -> anubiswatch.v1.UpdateRuleRequest.ConfigEntry
+	62, // 38: anubiswatch.v1.CreateRuleRequest.config:type_name -> anubiswatch.v1.CreateRuleRequest.ConfigEntry
+	63, // 39: anubiswatch.v1.UpdateRuleRequest.config:type_name -> anubiswatch.v1.UpdateRuleRequest.ConfigEntry
 	36, // 40: anubiswatch.v1.Journey.steps:type_name -> anubiswatch.v1.JourneyStep
-	58, // 41: anubiswatch.v1.Journey.created_at:type_name -> google.protobuf.Timestamp
-	57, // 42: anubiswatch.v1.JourneyStep.config:type_name -> anubiswatch.v1.JourneyStep.ConfigEntry
+	67, // 41: anubiswatch.v1.Journey.created_at:type_name -> google.protobuf.Timestamp
+	64, // 42: anubiswatch.v1.JourneyStep.config:type_name -> anubiswatch.v1.JourneyStep.ConfigEntry
 	35, // 43: anubiswatch.v1.ListJourneysResponse.journeys:type_name -> anubiswatch.v1.Journey
 	0,  // 44: anubiswatch.v1.ListJourneysResponse.pagination:type_name -> anubiswatch.v1.Pagination
 	36, // 45: anubiswatch.v1.CreateJourneyRequest.steps:type_name -> anubiswatch.v1.JourneyStep
 	36, // 46: anubiswatch.v1.UpdateJourneyRequest.steps:type_name -> anubiswatch.v1.JourneyStep
-	44, // 47: anubiswatch.v1.ClusterStatus.nodes:type_name -> anubiswatch.v1.ClusterNode
-	10, // 48: anubiswatch.v1.AnubisWatchService.ListSouls:input_type -> anubiswatch.v1.ListSoulsRequest
-	9,  // 49: anubiswatch.v1.AnubisWatchService.GetSoul:input_type -> anubiswatch.v1.GetSoulRequest
-	7,  // 50: anubiswatch.v1.AnubisWatchService.CreateSoul:input_type -> anubiswatch.v1.CreateSoulRequest
-	8,  // 51: anubiswatch.v1.AnubisWatchService.UpdateSoul:input_type -> anubiswatch.v1.UpdateSoulRequest
-	12, // 52: anubiswatch.v1.AnubisWatchService.DeleteSoul:input_type -> anubiswatch.v1.DeleteSoulRequest
-	14, // 53: anubiswatch.v1.AnubisWatchService.ListJudgments:input_type -> anubiswatch.v1.ListJudgmentsRequest
-	16, // 54: anubiswatch.v1.AnubisWatchService.GetSoulJudgments:input_type -> anubiswatch.v1.GetSoulJudgmentsRequest
-	17, // 55: anubiswatch.v1.AnubisWatchService.JudgeSoul:input_type -> anubiswatch.v1.JudgeSoulRequest
-	19, // 56: anubiswatch.v1.AnubisWatchService.ListVerdicts:input_type -> anubiswatch.v1.ListVerdictsRequest
-	22, // 57: anubiswatch.v1.AnubisWatchService.ListChannels:input_type -> anubiswatch.v1.ListChannelsRequest
-	24, // 58: anubiswatch.v1.AnubisWatchService.GetChannel:input_type -> anubiswatch.v1.GetChannelRequest
-	25, // 59: anubiswatch.v1.AnubisWatchService.CreateChannel:input_type -> anubiswatch.v1.CreateChannelRequest
-	26, // 60: anubiswatch.v1.AnubisWatchService.UpdateChannel:input_type -> anubiswatch.v1.UpdateChannelRequest
-	27, // 61: anubiswatch.v1.AnubisWatchService.DeleteChannel:input_type -> anubiswatch.v1.DeleteChannelRequest
-	29, // 62: anubiswatch.v1.AnubisWatchService.ListRules:input_type -> anubiswatch.v1.ListRulesRequest
-	31, // 63: anubiswatch.v1.AnubisWatchService.GetRule:input_type -> anubiswatch.v1.GetRuleRequest
-	32, // 64: anubiswatch.v1.AnubisWatchService.CreateRule:input_type -> anubiswatch.v1.CreateRuleRequest
-	33, // 65: anubiswatch.v1.AnubisWatchService.UpdateRule:input_type -> anubiswatch.v1.UpdateRuleRequest
-	34, // 66: anubiswatch.v1.AnubisWatchService.DeleteRule:input_type -> anubiswatch.v1.DeleteRuleRequest
-	37, // 67: anubiswatch.v1.AnubisWatchService.ListJourneys:input_type -> anubiswatch.v1.ListJourneysRequest
-	39, // 68: anubiswatch.v1.AnubisWatchService.GetJourney:input_type -> anubiswatch.v1.GetJourneyRequest
-	40, // 69: anubiswatch.v1.AnubisWatchService.CreateJourney:input_type -> anubiswatch.v1.CreateJourneyRequest
-	41, // 70: anubiswatch.v1.AnubisWatchService.UpdateJourney:input_type -> anubiswatch.v1.UpdateJourneyRequest
-	42, // 71: anubiswatch.v1.AnubisWatchService.DeleteJourney:input_type -> anubiswatch.v1.DeleteJourneyRequest
-	59, // 72: anubiswatch.v1.AnubisWatchService.GetClusterStatus:input_type -> google.protobuf.Empty
-	45, // 73: anubiswatch.v1.AnubisWatchService.StreamJudgments:input_type -> anubiswatch.v1.StreamRequest
-	45, // 74: anubiswatch.v1.AnubisWatchService.StreamVerdicts:input_type -> anubiswatch.v1.StreamRequest
-	11, // 75: anubiswatch.v1.AnubisWatchService.ListSouls:output_type -> anubiswatch.v1.ListSoulsResponse
-	1,  // 76: anubiswatch.v1.AnubisWatchService.GetSoul:output_type -> anubiswatch.v1.Soul
-	1,  // 77: anubiswatch.v1.AnubisWatchService.CreateSoul:output_type -> anubiswatch.v1.Soul
-	1,  // 78: anubiswatch.v1.AnubisWatchService.UpdateSoul:output_type -> anubiswatch.v1.Soul
-	59, // 79: anubiswatch.v1.AnubisWatchService.DeleteSoul:output_type -> google.protobuf.Empty
-	15, // 80: anubiswatch.v1.AnubisWatchService.ListJudgments:output_type -> anubiswatch.v1.ListJudgmentsResponse
-	15, // 81: anubiswatch.v1.AnubisWatchService.GetSoulJudgments:output_type -> anubiswatch.v1.ListJudgmentsResponse
-	13, // 82: anubiswatch.v1.AnubisWatchService.JudgeSoul:output_type -> anubiswatch.v1.Judgment
-	20, // 83: anubiswatch.v1.AnubisWatchService.ListVerdicts:output_type -> anubiswatch.v1.ListVerdictsResponse
-	23, // 84: anubiswatch.v1.AnubisWatchService.ListChannels:output_type -> anubiswatch.v1.ListChannelsResponse
-	21, // 85: anubiswatch.v1.AnubisWatchService.GetChannel:output_type -> anubiswatch.v1.Channel
-	21, // 86: anubiswatch.v1.AnubisWatchService.CreateChannel:output_type -> anubiswatch.v1.Channel
-	21, // 87: anubiswatch.v1.AnubisWatchService.UpdateChannel:output_type -> anubiswatch.v1.Channel
-	59, // 88: anubiswatch.v1.AnubisWatchService.DeleteChannel:output_type -> google.protobuf.Empty
-	30, // 89: anubiswatch.v1.AnubisWatchService.ListRules:output_type -> anubiswatch.v1.ListRulesResponse
-	28, // 90: anubiswatch.v1.AnubisWatchService.GetRule:output_type -> anubiswatch.v1.Rule
-	28, // 91: anubiswatch.v1.AnubisWatchService.CreateRule:output_type -> anubiswatch.v1.Rule
-	28, // 92: anubiswatch.v1.AnubisWatchService.UpdateRule:output_type -> anubiswatch.v1.Rule
-	59, // 93: anubiswatch.v1.AnubisWatchService.DeleteRule:output_type -> google.protobuf.Empty
-	38, // 94: anubiswatch.v1.AnubisWatchService.ListJourneys:output_type -> anubiswatch.v1.ListJourneysResponse
-	35, // 95: anubiswatch.v1.AnubisWatchService.GetJourney:output_type -> anubiswatch.v1.Journey
-	35, // 96: anubiswatch.v1.AnubisWatchService.CreateJourney:output_type -> anubiswatch.v1.Journey
-	35, // 97: anubiswatch.v1.AnubisWatchService.UpdateJourney:output_type -> anubiswatch.v1.Journey
-	59, // 98: anubiswatch.v1.AnubisWatchService.DeleteJourney:output_type -> google.protobuf.Empty
-	43, // 99: anubiswatch.v1.AnubisWatchService.GetClusterStatus:output_type -> anubiswatch.v1.ClusterStatus
-	13, // 100: anubiswatch.v1.AnubisWatchService.StreamJudgments:output_type -> anubiswatch.v1.Judgment
-	18, // 101: anubiswatch.v1.AnubisWatchService.StreamVerdicts:output_type -> anubiswatch.v1.Verdict
-	75, // [75:102] is the sub-list for method output_type
-	48, // [48:75] is the sub-list for method input_type
-	48, // [48:48] is the sub-list for extension type_name
-	48, // [48:48] is the sub-list for extension extendee
-	0,  // [0:48] is the sub-list for field type_name
+	49, // 47: anubiswatch.v1.ListJourneyRunsResponse.runs:type_name -> anubiswatch.v1.JourneyRun
+	65, // 48: anubiswatch.v1.JourneyStepResult.extracted:type_name -> anubiswatch.v1.JourneyStepResult.ExtractedEntry
+	67, // 49: anubiswatch.v1.JourneyRun.started_at:type_name -> google.protobuf.Timestamp
+	67, // 50: anubiswatch.v1.JourneyRun.completed_at:type_name -> google.protobuf.Timestamp
+	48, // 51: anubiswatch.v1.JourneyRun.steps:type_name -> anubiswatch.v1.JourneyStepResult
+	66, // 52: anubiswatch.v1.JourneyRun.variables:type_name -> anubiswatch.v1.JourneyRun.VariablesEntry
+	51, // 53: anubiswatch.v1.ClusterStatus.nodes:type_name -> anubiswatch.v1.ClusterNode
+	10, // 54: anubiswatch.v1.AnubisWatchService.ListSouls:input_type -> anubiswatch.v1.ListSoulsRequest
+	9,  // 55: anubiswatch.v1.AnubisWatchService.GetSoul:input_type -> anubiswatch.v1.GetSoulRequest
+	7,  // 56: anubiswatch.v1.AnubisWatchService.CreateSoul:input_type -> anubiswatch.v1.CreateSoulRequest
+	8,  // 57: anubiswatch.v1.AnubisWatchService.UpdateSoul:input_type -> anubiswatch.v1.UpdateSoulRequest
+	12, // 58: anubiswatch.v1.AnubisWatchService.DeleteSoul:input_type -> anubiswatch.v1.DeleteSoulRequest
+	14, // 59: anubiswatch.v1.AnubisWatchService.ListJudgments:input_type -> anubiswatch.v1.ListJudgmentsRequest
+	16, // 60: anubiswatch.v1.AnubisWatchService.GetSoulJudgments:input_type -> anubiswatch.v1.GetSoulJudgmentsRequest
+	17, // 61: anubiswatch.v1.AnubisWatchService.JudgeSoul:input_type -> anubiswatch.v1.JudgeSoulRequest
+	19, // 62: anubiswatch.v1.AnubisWatchService.ListVerdicts:input_type -> anubiswatch.v1.ListVerdictsRequest
+	22, // 63: anubiswatch.v1.AnubisWatchService.ListChannels:input_type -> anubiswatch.v1.ListChannelsRequest
+	24, // 64: anubiswatch.v1.AnubisWatchService.GetChannel:input_type -> anubiswatch.v1.GetChannelRequest
+	25, // 65: anubiswatch.v1.AnubisWatchService.CreateChannel:input_type -> anubiswatch.v1.CreateChannelRequest
+	26, // 66: anubiswatch.v1.AnubisWatchService.UpdateChannel:input_type -> anubiswatch.v1.UpdateChannelRequest
+	27, // 67: anubiswatch.v1.AnubisWatchService.DeleteChannel:input_type -> anubiswatch.v1.DeleteChannelRequest
+	29, // 68: anubiswatch.v1.AnubisWatchService.ListRules:input_type -> anubiswatch.v1.ListRulesRequest
+	31, // 69: anubiswatch.v1.AnubisWatchService.GetRule:input_type -> anubiswatch.v1.GetRuleRequest
+	32, // 70: anubiswatch.v1.AnubisWatchService.CreateRule:input_type -> anubiswatch.v1.CreateRuleRequest
+	33, // 71: anubiswatch.v1.AnubisWatchService.UpdateRule:input_type -> anubiswatch.v1.UpdateRuleRequest
+	34, // 72: anubiswatch.v1.AnubisWatchService.DeleteRule:input_type -> anubiswatch.v1.DeleteRuleRequest
+	37, // 73: anubiswatch.v1.AnubisWatchService.ListJourneys:input_type -> anubiswatch.v1.ListJourneysRequest
+	39, // 74: anubiswatch.v1.AnubisWatchService.GetJourney:input_type -> anubiswatch.v1.GetJourneyRequest
+	40, // 75: anubiswatch.v1.AnubisWatchService.CreateJourney:input_type -> anubiswatch.v1.CreateJourneyRequest
+	41, // 76: anubiswatch.v1.AnubisWatchService.UpdateJourney:input_type -> anubiswatch.v1.UpdateJourneyRequest
+	42, // 77: anubiswatch.v1.AnubisWatchService.DeleteJourney:input_type -> anubiswatch.v1.DeleteJourneyRequest
+	43, // 78: anubiswatch.v1.AnubisWatchService.RunJourney:input_type -> anubiswatch.v1.RunJourneyRequest
+	45, // 79: anubiswatch.v1.AnubisWatchService.ListJourneyRuns:input_type -> anubiswatch.v1.ListJourneyRunsRequest
+	47, // 80: anubiswatch.v1.AnubisWatchService.GetJourneyRun:input_type -> anubiswatch.v1.GetJourneyRunRequest
+	68, // 81: anubiswatch.v1.AnubisWatchService.GetClusterStatus:input_type -> google.protobuf.Empty
+	52, // 82: anubiswatch.v1.AnubisWatchService.StreamJudgments:input_type -> anubiswatch.v1.StreamRequest
+	52, // 83: anubiswatch.v1.AnubisWatchService.StreamVerdicts:input_type -> anubiswatch.v1.StreamRequest
+	11, // 84: anubiswatch.v1.AnubisWatchService.ListSouls:output_type -> anubiswatch.v1.ListSoulsResponse
+	1,  // 85: anubiswatch.v1.AnubisWatchService.GetSoul:output_type -> anubiswatch.v1.Soul
+	1,  // 86: anubiswatch.v1.AnubisWatchService.CreateSoul:output_type -> anubiswatch.v1.Soul
+	1,  // 87: anubiswatch.v1.AnubisWatchService.UpdateSoul:output_type -> anubiswatch.v1.Soul
+	68, // 88: anubiswatch.v1.AnubisWatchService.DeleteSoul:output_type -> google.protobuf.Empty
+	15, // 89: anubiswatch.v1.AnubisWatchService.ListJudgments:output_type -> anubiswatch.v1.ListJudgmentsResponse
+	15, // 90: anubiswatch.v1.AnubisWatchService.GetSoulJudgments:output_type -> anubiswatch.v1.ListJudgmentsResponse
+	13, // 91: anubiswatch.v1.AnubisWatchService.JudgeSoul:output_type -> anubiswatch.v1.Judgment
+	20, // 92: anubiswatch.v1.AnubisWatchService.ListVerdicts:output_type -> anubiswatch.v1.ListVerdictsResponse
+	23, // 93: anubiswatch.v1.AnubisWatchService.ListChannels:output_type -> anubiswatch.v1.ListChannelsResponse
+	21, // 94: anubiswatch.v1.AnubisWatchService.GetChannel:output_type -> anubiswatch.v1.Channel
+	21, // 95: anubiswatch.v1.AnubisWatchService.CreateChannel:output_type -> anubiswatch.v1.Channel
+	21, // 96: anubiswatch.v1.AnubisWatchService.UpdateChannel:output_type -> anubiswatch.v1.Channel
+	68, // 97: anubiswatch.v1.AnubisWatchService.DeleteChannel:output_type -> google.protobuf.Empty
+	30, // 98: anubiswatch.v1.AnubisWatchService.ListRules:output_type -> anubiswatch.v1.ListRulesResponse
+	28, // 99: anubiswatch.v1.AnubisWatchService.GetRule:output_type -> anubiswatch.v1.Rule
+	28, // 100: anubiswatch.v1.AnubisWatchService.CreateRule:output_type -> anubiswatch.v1.Rule
+	28, // 101: anubiswatch.v1.AnubisWatchService.UpdateRule:output_type -> anubiswatch.v1.Rule
+	68, // 102: anubiswatch.v1.AnubisWatchService.DeleteRule:output_type -> google.protobuf.Empty
+	38, // 103: anubiswatch.v1.AnubisWatchService.ListJourneys:output_type -> anubiswatch.v1.ListJourneysResponse
+	35, // 104: anubiswatch.v1.AnubisWatchService.GetJourney:output_type -> anubiswatch.v1.Journey
+	35, // 105: anubiswatch.v1.AnubisWatchService.CreateJourney:output_type -> anubiswatch.v1.Journey
+	35, // 106: anubiswatch.v1.AnubisWatchService.UpdateJourney:output_type -> anubiswatch.v1.Journey
+	68, // 107: anubiswatch.v1.AnubisWatchService.DeleteJourney:output_type -> google.protobuf.Empty
+	44, // 108: anubiswatch.v1.AnubisWatchService.RunJourney:output_type -> anubiswatch.v1.RunJourneyResponse
+	46, // 109: anubiswatch.v1.AnubisWatchService.ListJourneyRuns:output_type -> anubiswatch.v1.ListJourneyRunsResponse
+	49, // 110: anubiswatch.v1.AnubisWatchService.GetJourneyRun:output_type -> anubiswatch.v1.JourneyRun
+	50, // 111: anubiswatch.v1.AnubisWatchService.GetClusterStatus:output_type -> anubiswatch.v1.ClusterStatus
+	13, // 112: anubiswatch.v1.AnubisWatchService.StreamJudgments:output_type -> anubiswatch.v1.Judgment
+	18, // 113: anubiswatch.v1.AnubisWatchService.StreamVerdicts:output_type -> anubiswatch.v1.Verdict
+	84, // [84:114] is the sub-list for method output_type
+	54, // [54:84] is the sub-list for method input_type
+	54, // [54:54] is the sub-list for extension type_name
+	54, // [54:54] is the sub-list for extension extendee
+	0,  // [0:54] is the sub-list for field type_name
 }
 
 func init() { file_proto_v1_anubis_proto_init() }
@@ -4183,13 +4748,15 @@ func file_proto_v1_anubis_proto_init() {
 	file_proto_v1_anubis_proto_msgTypes[37].OneofWrappers = []any{}
 	file_proto_v1_anubis_proto_msgTypes[41].OneofWrappers = []any{}
 	file_proto_v1_anubis_proto_msgTypes[45].OneofWrappers = []any{}
+	file_proto_v1_anubis_proto_msgTypes[47].OneofWrappers = []any{}
+	file_proto_v1_anubis_proto_msgTypes[52].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_v1_anubis_proto_rawDesc), len(file_proto_v1_anubis_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   58,
+			NumMessages:   67,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

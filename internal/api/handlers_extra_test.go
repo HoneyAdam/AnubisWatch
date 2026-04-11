@@ -16,7 +16,7 @@ import (
 func newTestServerWithStorage(store Storage) *RESTServer {
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	return NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, logger)
+	return NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 }
 
 // TestHandleListJourneys tests handleListJourneys
@@ -257,8 +257,8 @@ func TestHandleRunJourney(t *testing.T) {
 		t.Fatalf("handleRunJourney failed: %v", err)
 	}
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("Expected status %d, got %d", http.StatusAccepted, rec.Code)
 	}
 
 	var result map[string]interface{}
@@ -270,8 +270,8 @@ func TestHandleRunJourney(t *testing.T) {
 		t.Errorf("Expected journey_id journey-1, got %s", result["journey_id"])
 	}
 
-	if result["status"] != "execution_requested" {
-		t.Errorf("Expected status execution_requested, got %s", result["status"])
+	if result["status"] != "executing" {
+		t.Errorf("Expected status executing, got %s", result["status"])
 	}
 }
 

@@ -3,11 +3,11 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/AnubisWatch/anubiswatch/proto
+      value: github.com/AnubisWatch/anubiswatch/internal/grpcapi/v1
 plugins:
   - remote: buf.build/protocolbuffers/go
-    out: internal/grpcapi
+    out: internal/grpcapi/v1
     opt: paths=source_relative
   - remote: buf.build/grpc/go
-    out: internal/grpcapi
+    out: internal/grpcapi/v1
     opt: paths=source_relative

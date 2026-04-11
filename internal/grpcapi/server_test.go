@@ -121,6 +121,12 @@ func (m *mockGRPCStore) SaveJourneyNoCtx(j interface{}) error {
 	return nil
 }
 func (m *mockGRPCStore) DeleteJourneyNoCtx(id string) error   { delete(m.journeys, id); return nil }
+func (m *mockGRPCStore) ListJourneyRunsNoCtx(journeyID string, limit int) ([]interface{}, error) {
+	return nil, nil
+}
+func (m *mockGRPCStore) GetJourneyRunNoCtx(journeyID, runID string) (interface{}, error) {
+	return nil, nil
+}
 func (m *mockGRPCStore) ListEvents(soulID string, limit int) ([]interface{}, error) {
 	return m.events, nil
 }

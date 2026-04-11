@@ -4758,6 +4758,45 @@ func TestCobaltDB_SaveJourneyRun_WithData(t *testing.T) {
 	}
 }
 
+func TestCobaltDB_GetJourneyRun(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	// Create a journey run
+	run := &core.JourneyRun{
+		ID:          "run-test-1",
+		JourneyID:   "journey-test-1",
+		WorkspaceID: "default",
+		JackalID:    "jackal-1",
+		Region:      "us-east",
+		StartedAt:   time.Now().UnixMilli(),
+		Status:      core.SoulAlive,
+	}
+	if err := db.SaveJourneyRun(ctx, run); err != nil {
+		t.Fatalf("SaveJourneyRun failed: %v", err)
+	}
+
+	// Retrieve the run
+	retrieved, err := db.GetJourneyRun(ctx, "default", "journey-test-1", "run-test-1")
+	if err != nil {
+		t.Fatalf("GetJourneyRun failed: %v", err)
+	}
+	if retrieved.ID != "run-test-1" {
+		t.Errorf("Expected ID run-test-1, got %s", retrieved.ID)
+	}
+	if retrieved.JackalID != "jackal-1" {
+		t.Errorf("Expected jackal_id jackal-1, got %s", retrieved.JackalID)
+	}
+
+	// Non-existent run
+	_, err = db.GetJourneyRun(ctx, "default", "journey-test-1", "nonexistent")
+	if err == nil {
+		t.Error("Expected error for non-existent run")
+	}
+}
+
 // TestTimeSeriesStore_SaveJudgment_WithDetails tests SaveJudgment with various details
 func TestTimeSeriesStore_SaveJudgment_WithDetails(t *testing.T) {
 	db := newTestDB(t)

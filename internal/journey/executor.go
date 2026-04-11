@@ -497,10 +497,8 @@ func (e *Executor) ListRuns(ctx context.Context, workspaceID, journeyID string, 
 }
 
 // GetRun returns a specific journey run
-func (e *Executor) GetRun(ctx context.Context, workspaceID, runID string) (*core.JourneyRun, error) {
-	// This would need a GetJourneyRun method in storage
-	// For now, return not implemented
-	return nil, fmt.Errorf("not implemented")
+func (e *Executor) GetRun(ctx context.Context, workspaceID, journeyID, runID string) (*core.JourneyRun, error) {
+	return e.db.GetJourneyRun(ctx, workspaceID, journeyID, runID)
 }
 
 // AssertionResult represents the result of a single assertion

@@ -55,6 +55,8 @@ type Store interface {
 	ListJourneysNoCtx(workspace string, offset, limit int) ([]interface{}, error)
 	SaveJourneyNoCtx(j interface{}) error
 	DeleteJourneyNoCtx(id string) error
+	ListJourneyRunsNoCtx(journeyID string, limit int) ([]interface{}, error)
+	GetJourneyRunNoCtx(journeyID, runID string) (interface{}, error)
 
 	ListEvents(soulID string, limit int) ([]interface{}, error)
 }
@@ -277,6 +279,72 @@ func ruleToPB(r interface{}) *v1.Rule {
 }
 
 // journeyToPB converts a core.JourneyConfig to protobuf Journey
+func journeyRunToPB(r interface{}) *v1.JourneyRun {
+	type hasStepResultFields interface {
+		GetName() string
+		GetStepIndex() int
+		GetDuration() int64
+		GetStatus() string
+		GetMessage() string
+		GetExtracted() map[string]string
+	}
+	type hasFields interface {
+		GetID() string
+		GetJourneyID() string
+		GetWorkspaceID() string
+		GetJackalID() string
+		GetRegion() string
+		GetStartedAt() int64
+		GetCompletedAt() int64
+		GetDuration() int64
+		GetStatus() string
+		GetSteps() []interface{}
+		GetVariables() map[string]string
+	}
+	hf, ok := r.(hasFields)
+	if !ok {
+		return nil
+	}
+
+	steps := hf.GetSteps()
+	pbSteps := make([]*v1.JourneyStepResult, 0, len(steps))
+	for _, step := range steps {
+		if sf, ok := step.(hasStepResultFields); ok {
+			pbSteps = append(pbSteps, &v1.JourneyStepResult{
+				Name:       sf.GetName(),
+				StepIndex:  int32(sf.GetStepIndex()),
+				DurationMs: sf.GetDuration(),
+				Status:     sf.GetStatus(),
+				Message:    sf.GetMessage(),
+				Extracted:  sf.GetExtracted(),
+			})
+		}
+	}
+
+	var startedAt, completedAt *timestamppb.Timestamp
+	if hf.GetStartedAt() > 0 {
+		startedAt = timestamppb.New(time.UnixMilli(hf.GetStartedAt()))
+	}
+	if hf.GetCompletedAt() > 0 {
+		completedAt = timestamppb.New(time.UnixMilli(hf.GetCompletedAt()))
+	}
+
+	return &v1.JourneyRun{
+		Id:          hf.GetID(),
+		JourneyId:   hf.GetJourneyID(),
+		Workspace:   hf.GetWorkspaceID(),
+		JackalId:    hf.GetJackalID(),
+		Region:      hf.GetRegion(),
+		StartedAt:   startedAt,
+		CompletedAt: completedAt,
+		DurationMs:  hf.GetDuration(),
+		Status:      hf.GetStatus(),
+		Steps:       pbSteps,
+		Variables:   hf.GetVariables(),
+	}
+}
+
+// journeyToPB converts a journey to protobuf
 func journeyToPB(j interface{}) *v1.Journey {
 	type hasStepFields interface {
 		GetName() string
@@ -970,6 +1038,58 @@ func (s *Server) DeleteJourney(ctx context.Context, req *v1.DeleteJourneyRequest
 		return nil, status.Errorf(codes.Internal, "failed to delete journey: %v", err)
 	}
 	return &emptypb.Empty{}, nil
+}
+
+func (s *Server) RunJourney(ctx context.Context, req *v1.RunJourneyRequest) (*v1.RunJourneyResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	journey, err := s.store.GetJourneyNoCtx(req.Id)
+	if err != nil || journey == nil {
+		return nil, status.Errorf(codes.NotFound, "journey not found: %s", req.Id)
+	}
+
+	return &v1.RunJourneyResponse{
+		JourneyId: req.Id,
+		Status:    "executing",
+		Message:   "Journey execution triggered",
+	}, nil
+}
+
+func (s *Server) ListJourneyRuns(ctx context.Context, req *v1.ListJourneyRunsRequest) (*v1.ListJourneyRunsResponse, error) {
+	limit := int(req.Limit)
+	if limit <= 0 {
+		limit = 20
+	}
+
+	runsIface, err := s.store.ListJourneyRunsNoCtx(req.JourneyId, limit)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to list journey runs: %v", err)
+	}
+
+	runs := make([]*v1.JourneyRun, 0, len(runsIface))
+	for _, r := range runsIface {
+		if pb := journeyRunToPB(r); pb != nil {
+			runs = append(runs, pb)
+		}
+	}
+
+	return &v1.ListJourneyRunsResponse{
+		Runs:  runs,
+		Total: int32(len(runs)),
+	}, nil
+}
+
+func (s *Server) GetJourneyRun(ctx context.Context, req *v1.GetJourneyRunRequest) (*v1.JourneyRun, error) {
+	run, err := s.store.GetJourneyRunNoCtx(req.JourneyId, req.RunId)
+	if err != nil || run == nil {
+		return nil, status.Errorf(codes.NotFound, "journey run not found: %s", req.RunId)
+	}
+
+	if pb := journeyRunToPB(run); pb != nil {
+		return pb, nil
+	}
+	return nil, status.Errorf(codes.Internal, "failed to convert journey run")
 }
 
 // --- Cluster RPCs ---

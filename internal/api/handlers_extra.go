@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
@@ -81,7 +82,7 @@ func (s *RESTServer) handleDeleteJourney(ctx *Context) error {
 	return ctx.JSON(http.StatusNoContent, nil)
 }
 
-// handleRunJourney runs a journey
+// handleRunJourney runs a journey immediately
 func (s *RESTServer) handleRunJourney(ctx *Context) error {
 	id := ctx.Params["id"]
 
@@ -93,11 +94,49 @@ func (s *RESTServer) handleRunJourney(ctx *Context) error {
 		return ctx.Error(http.StatusNotFound, "journey not found")
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
+	return ctx.JSON(http.StatusAccepted, map[string]interface{}{
 		"journey_id": journey.ID,
-		"status":     "execution_requested",
+		"status":     "executing",
 		"message":    "Journey execution triggered",
 	})
+}
+
+// handleListJourneyRuns lists runs for a journey
+func (s *RESTServer) handleListJourneyRuns(ctx *Context) error {
+	id := ctx.Params["id"]
+	limit := ctx.Request.URL.Query().Get("limit")
+	n := 20
+	if limit != "" {
+		if v, err := strconv.Atoi(limit); err == nil && v > 0 {
+			n = v
+		}
+	}
+
+	if s.journey == nil {
+		return ctx.Error(http.StatusServiceUnavailable, "journey executor not available")
+	}
+
+	runs, err := s.journey.ListRuns(ctx.Request.Context(), ctx.Workspace, id, n)
+	if err != nil {
+		return ctx.Error(http.StatusInternalServerError, err.Error())
+	}
+	return ctx.JSON(http.StatusOK, runs)
+}
+
+// handleGetJourneyRun gets a single journey run
+func (s *RESTServer) handleGetJourneyRun(ctx *Context) error {
+	journeyID := ctx.Params["id"]
+	runID := ctx.Params["runId"]
+
+	if s.journey == nil {
+		return ctx.Error(http.StatusServiceUnavailable, "journey executor not available")
+	}
+
+	run, err := s.journey.GetRun(ctx.Request.Context(), ctx.Workspace, journeyID, runID)
+	if err != nil {
+		return ctx.Error(http.StatusNotFound, "journey run not found")
+	}
+	return ctx.JSON(http.StatusOK, run)
 }
 
 // handleMCPTools returns available MCP tools
