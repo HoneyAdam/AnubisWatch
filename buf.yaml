@@ -1,0 +1,7 @@
+version: v2
+deps:
+  - buf.build/protocolbuffers/go
+  - buf.build/grpc/go
+lint:
+  use:
+    - DEFAULT

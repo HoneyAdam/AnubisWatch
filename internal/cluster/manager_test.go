@@ -45,7 +45,7 @@ func TestManager_NewManager(t *testing.T) {
 	defer db.Close()
 
 	cfg := newTestRaftConfig()
-	manager, err := NewManager(cfg, db, newTestLogger())
+	manager, err := NewManager(core.NecropolisConfig{Raft: cfg}, db, newTestLogger())
 
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
@@ -116,7 +116,7 @@ func TestManager_IsClustered(t *testing.T) {
 			cfg.Bootstrap = tt.bootstrap
 			cfg.Peers = tt.peers
 
-			manager, err := NewManager(cfg, db, newTestLogger())
+			manager, err := NewManager(core.NecropolisConfig{Raft: cfg}, db, newTestLogger())
 			if err != nil {
 				t.Fatalf("NewManager failed: %v", err)
 			}
@@ -136,7 +136,7 @@ func TestManager_StartStop_Standalone(t *testing.T) {
 	cfg.Bootstrap = false
 	cfg.Peers = []core.RaftPeer{}
 
-	manager, err := NewManager(cfg, db, newTestLogger())
+	manager, err := NewManager(core.NecropolisConfig{Raft: cfg}, db, newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestManager_GetStatus_Standalone(t *testing.T) {
 	cfg := newTestRaftConfig()
 	cfg.Bootstrap = false
 
-	manager, err := NewManager(cfg, db, newTestLogger())
+	manager, err := NewManager(core.NecropolisConfig{Raft: cfg}, db, newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestManager_IsLeader_NotRunning(t *testing.T) {
 	defer db.Close()
 
 	cfg := newTestRaftConfig()
-	manager, err := NewManager(cfg, db, newTestLogger())
+	manager, err := NewManager(core.NecropolisConfig{Raft: cfg}, db, newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestManager_StartStop_Clustered(t *testing.T) {
 	cfg.Bootstrap = true
 	cfg.BindAddr = "127.0.0.1:0"
 
-	manager, err := NewManager(cfg, db, newTestLogger())
+	manager, err := NewManager(core.NecropolisConfig{Raft: cfg}, db, newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestManager_ConcurrentAccess(t *testing.T) {
 	defer db.Close()
 
 	cfg := newTestRaftConfig()
-	manager, err := NewManager(cfg, db, newTestLogger())
+	manager, err := NewManager(core.NecropolisConfig{Raft: cfg}, db, newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestManager_Logger(t *testing.T) {
 
 	cfg := newTestRaftConfig()
 	logger := newTestLogger()
-	manager, err := NewManager(cfg, db, logger)
+	manager, err := NewManager(core.NecropolisConfig{Raft: cfg}, db, logger)
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestManager_GetStatus_WithRunningNode(t *testing.T) {
 	cfg.Bootstrap = true
 	cfg.BindAddr = "127.0.0.1:0"
 
-	manager, err := NewManager(cfg, db, newTestLogger())
+	manager, err := NewManager(core.NecropolisConfig{Raft: cfg}, db, newTestLogger())
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}

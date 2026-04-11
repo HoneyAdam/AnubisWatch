@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/alert"
 	"github.com/AnubisWatch/anubiswatch/internal/api"
@@ -16,6 +17,7 @@ import (
 	"github.com/AnubisWatch/anubiswatch/internal/cluster"
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 	"github.com/AnubisWatch/anubiswatch/internal/dashboard"
+	"github.com/AnubisWatch/anubiswatch/internal/grpcapi"
 	"github.com/AnubisWatch/anubiswatch/internal/journey"
 	"github.com/AnubisWatch/anubiswatch/internal/probe"
 	"github.com/AnubisWatch/anubiswatch/internal/statuspage"
@@ -27,12 +29,13 @@ type ServerDependencies struct {
 	Config            *core.Config
 	Logger            *slog.Logger
 	Store             *storage.CobaltDB
-	Authenticator     *auth.LocalAuthenticator
+	Authenticator     api.Authenticator
 	AlertManager      *alert.Manager
 	ProbeEngine       *probe.Engine
 	JourneyExecutor   *journey.Executor
 	ClusterManager    *cluster.Manager
 	RESTServer        *api.RESTServer
+	GRPCServer        *grpcapi.Server
 	StatusPageRepo    *statusPageRepository
 	ACMEManager       interface{}
 	DashboardHandler  http.Handler
@@ -110,6 +113,15 @@ func (s *Server) Start(ctx context.Context) error {
 		logger.Info("REST API server initialized", "addr", fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port))
 	}
 
+	// Start gRPC server
+	if s.deps.GRPCServer != nil {
+		if err := s.deps.GRPCServer.Start(); err != nil {
+			logger.Warn("failed to start gRPC server", "err", err)
+		} else {
+			logger.Info("gRPC API server initialized", "addr", cfg.Server.GRPCPort)
+		}
+	}
+
 	logger.Info("AnubisWatch is ready. The judgment begins.")
 	return nil
 }
@@ -123,6 +135,11 @@ func (s *Server) Stop(ctx context.Context) error {
 	// Stop REST server
 	if s.deps.RESTServer != nil {
 		s.deps.RESTServer.Stop(ctx)
+	}
+
+	// Stop gRPC server
+	if s.deps.GRPCServer != nil {
+		s.deps.GRPCServer.Stop()
 	}
 
 	// Stop journey executors
@@ -172,6 +189,87 @@ type ServerOptions struct {
 	Logger     *slog.Logger
 }
 
+// grpcProbeAdapter adapts probe.Engine to grpcapi.ProbeEngine
+type grpcProbeAdapter struct {
+	engine *probe.Engine
+}
+
+func (a *grpcProbeAdapter) ForceCheck(soulID string) (interface{}, error) {
+	return a.engine.ForceCheck(soulID)
+}
+
+// grpcStorageAdapter wraps restStorageAdapter to return interface{} for gRPC compatibility
+type grpcStorageAdapter struct {
+	inner *restStorageAdapter
+}
+
+func (a *grpcStorageAdapter) GetSoulNoCtx(id string) (interface{}, error)     { return a.inner.GetSoulNoCtx(id) }
+func (a *grpcStorageAdapter) ListSoulsNoCtx(ws string, o, l int) ([]interface{}, error) {
+	souls, err := a.inner.ListSoulsNoCtx(ws, o, l)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(souls))
+	for i, s := range souls {
+		result[i] = s
+	}
+	return result, nil
+}
+func (a *grpcStorageAdapter) SaveSoulNoCtx(s interface{}) error    { return nil }
+func (a *grpcStorageAdapter) DeleteSoulNoCtx(id string) error      { return a.inner.DeleteSoulNoCtx(id) }
+func (a *grpcStorageAdapter) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]interface{}, error) {
+	judgments, err := a.inner.ListJudgmentsNoCtx(soulID, start, end, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(judgments))
+	for i, j := range judgments {
+		result[i] = j
+	}
+	return result, nil
+}
+func (a *grpcStorageAdapter) GetChannelNoCtx(id string) (interface{}, error) { return a.inner.GetChannelNoCtx(id) }
+func (a *grpcStorageAdapter) ListChannelsNoCtx(ws string) ([]interface{}, error) {
+	channels, err := a.inner.ListChannelsNoCtx(ws)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(channels))
+	for i, c := range channels {
+		result[i] = c
+	}
+	return result, nil
+}
+func (a *grpcStorageAdapter) SaveChannelNoCtx(ch interface{}) error { return nil }
+func (a *grpcStorageAdapter) DeleteChannelNoCtx(id string) error    { return a.inner.DeleteChannelNoCtx(id) }
+func (a *grpcStorageAdapter) GetRuleNoCtx(id string) (interface{}, error) { return a.inner.GetRuleNoCtx(id) }
+func (a *grpcStorageAdapter) ListRulesNoCtx(ws string) ([]interface{}, error) {
+	rules, err := a.inner.ListRulesNoCtx(ws)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(rules))
+	for i, r := range rules {
+		result[i] = r
+	}
+	return result, nil
+}
+func (a *grpcStorageAdapter) SaveRuleNoCtx(rule interface{}) error { return nil }
+func (a *grpcStorageAdapter) DeleteRuleNoCtx(id string) error      { return a.inner.DeleteRuleNoCtx(id) }
+func (a *grpcStorageAdapter) GetJourneyNoCtx(id string) (interface{}, error) { return a.inner.GetJourneyNoCtx(id) }
+func (a *grpcStorageAdapter) ListJourneysNoCtx(ws string, o, l int) ([]interface{}, error) {
+	journeys, err := a.inner.ListJourneysNoCtx(ws, o, l)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(journeys))
+	for i, j := range journeys {
+		result[i] = j
+	}
+	return result, nil
+}
+func (a *grpcStorageAdapter) SaveJourneyNoCtx(j interface{}) error { return nil }
+func (a *grpcStorageAdapter) DeleteJourneyNoCtx(id string) error   { return a.inner.DeleteJourneyNoCtx(id) }
 // BuildServerDependencies builds all server dependencies
 func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 	logger := opts.Logger
@@ -222,7 +320,18 @@ func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 	if cfg.Auth.Local.AdminPassword != "" {
 		adminPassword = cfg.Auth.Local.AdminPassword
 	}
-	authenticator := auth.NewLocalAuthenticator(sessionPath, adminEmail, adminPassword)
+
+	var authenticator api.Authenticator
+	switch cfg.Auth.Type {
+	case "oidc":
+		authenticator = auth.NewOIDCAuthenticator(cfg.Auth.OIDC, sessionPath, adminEmail, adminPassword)
+		logger.Info("OIDC authentication initialized", "issuer", cfg.Auth.OIDC.Issuer)
+	case "ldap":
+		authenticator = auth.NewLDAPAuthenticator(cfg.Auth.LDAP, sessionPath, adminEmail, adminPassword)
+		logger.Info("LDAP authentication initialized", "url", cfg.Auth.LDAP.URL)
+	default:
+		authenticator = auth.NewLocalAuthenticator(sessionPath, adminEmail, adminPassword)
+	}
 
 	// Initialize alert manager
 	alertStorage := &alertStorageAdapter{store: store}
@@ -243,7 +352,7 @@ func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 	journeyExec := journey.NewExecutor(store, logger)
 
 	// Initialize cluster manager
-	clusterMgr, err := cluster.NewManager(cfg.Necropolis.Raft, store, logger)
+	clusterMgr, err := cluster.NewManager(cfg.Necropolis, store, logger)
 	if err != nil {
 		logger.Warn("failed to initialize cluster manager", "err", err)
 		clusterMgr = nil
@@ -278,6 +387,18 @@ func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 	// Wire up WebSocket broadcast for real-time judgment updates
 	probeEngine.SetOnJudgment(restServer.OnJudgmentCallback())
 
+	// Initialize gRPC server
+	var grpcServer *grpcapi.Server
+	if cfg.Server.GRPCPort > 0 {
+		grpcStore := &grpcStorageAdapter{inner: restStore}
+		grpcServer = grpcapi.NewServer(
+			fmt.Sprintf(":%d", cfg.Server.GRPCPort),
+			grpcStore,
+			&grpcProbeAdapter{engine: probeEngine},
+			logger,
+		)
+	}
+
 	return &ServerDependencies{
 		Config:            cfg,
 		Logger:            logger,
@@ -288,6 +409,7 @@ func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 		JourneyExecutor:   journeyExec,
 		ClusterManager:    clusterMgr,
 		RESTServer:        restServer,
+		GRPCServer:        grpcServer,
 		StatusPageRepo:    statusPageRepo,
 		ACMEManager:       acmeMgr,
 		DashboardHandler:  dashboardHandler,

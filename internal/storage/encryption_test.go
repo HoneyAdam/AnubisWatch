@@ -1,0 +1,196 @@
+package storage
+
+import (
+	"bytes"
+	"testing"
+
+	"github.com/AnubisWatch/anubiswatch/internal/core"
+)
+
+func TestEncryptor_EncryptDecrypt(t *testing.T) {
+	enc, err := newEncryptor("test-secret-key")
+	if err != nil {
+		t.Fatalf("newEncryptor failed: %v", err)
+	}
+
+	plaintext := []byte(`{"key":"value","nested":{"data":42}}`)
+
+	ciphertext, err := enc.encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("encrypt failed: %v", err)
+	}
+
+	if len(ciphertext) <= len(plaintext) {
+		t.Errorf("ciphertext (%d bytes) should be longer than plaintext (%d bytes)",
+			len(ciphertext), len(plaintext))
+	}
+
+	if bytes.Equal(ciphertext, plaintext) {
+		t.Error("ciphertext should differ from plaintext")
+	}
+
+	decrypted, err := enc.decrypt(ciphertext)
+	if err != nil {
+		t.Fatalf("decrypt failed: %v", err)
+	}
+
+	if !bytes.Equal(decrypted, plaintext) {
+		t.Errorf("decrypted != plaintext\ngot:  %s\nwant: %s", decrypted, plaintext)
+	}
+}
+
+func TestEncryptor_DifferentKeys(t *testing.T) {
+	enc1, _ := newEncryptor("key-one")
+	enc2, _ := newEncryptor("key-two")
+
+	plaintext := []byte("secret data")
+	ciphertext, _ := enc1.encrypt(plaintext)
+
+	_, err := enc2.decrypt(ciphertext)
+	if err == nil {
+		t.Error("expected error when decrypting with wrong key")
+	}
+}
+
+func TestEncryptor_EmptyKey(t *testing.T) {
+	_, err := newEncryptor("")
+	if err == nil {
+		t.Error("expected error for empty key")
+	}
+}
+
+func TestEncryptor_DecryptTampered(t *testing.T) {
+	enc, _ := newEncryptor("test-key")
+
+	plaintext := []byte("original data")
+	ciphertext, _ := enc.encrypt(plaintext)
+
+	ciphertext[len(ciphertext)-1] ^= 0xFF
+
+	_, err := enc.decrypt(ciphertext)
+	if err == nil {
+		t.Error("expected error when decrypting tampered data")
+	}
+}
+
+func TestEncryptor_IsEncrypted(t *testing.T) {
+	enc, _ := newEncryptor("test-key")
+
+	plaintext := []byte("hello")
+	ciphertext, _ := enc.encrypt(plaintext)
+
+	if !enc.isEncrypted(ciphertext) {
+		t.Error("should detect encrypted data")
+	}
+
+	if enc.isEncrypted([]byte{0x01, 0x02}) {
+		t.Error("short data should not be detected as encrypted")
+	}
+}
+
+func TestCobaltDB_EncryptedPutGet(t *testing.T) {
+	dir := t.TempDir()
+	cfg := core.StorageConfig{
+		Path: dir,
+		Encryption: core.EncryptionConfig{
+			Enabled: true,
+			Key:     "test-encryption-key-32bytes!!",
+		},
+	}
+
+	db, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	defer db.Close()
+
+	if db.encryptor == nil {
+		t.Fatal("encryptor should be set when encryption is enabled")
+	}
+
+	key := "test/encrypted/key"
+	value := []byte(`{"soul_id":"abc123","status":"alive"}`)
+
+	if err := db.Put(key, value); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	got, err := db.Get(key)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if !bytes.Equal(got, value) {
+		t.Errorf("Get returned wrong value\ngot:  %s\nwant: %s", got, value)
+	}
+}
+
+func TestCobaltDB_NoEncryption(t *testing.T) {
+	dir := t.TempDir()
+	cfg := core.StorageConfig{Path: dir}
+
+	db, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	defer db.Close()
+
+	if db.encryptor != nil {
+		t.Fatal("encryptor should be nil when encryption is disabled")
+	}
+
+	key := "test/noencrypt/key"
+	value := []byte(`{"data":"plain"}`)
+
+	if err := db.Put(key, value); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	got, err := db.Get(key)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if !bytes.Equal(got, value) {
+		t.Errorf("Get returned wrong value\ngot:  %s\nwant: %s", got, value)
+	}
+}
+
+func TestCobaltDB_EncryptedSoulRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	cfg := core.StorageConfig{
+		Path: dir,
+		Encryption: core.EncryptionConfig{
+			Enabled: true,
+			Key:     "another-test-key-for-souls!!",
+		},
+	}
+
+	db, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	defer db.Close()
+
+	soul := &core.Soul{
+		ID:          "enc-soul-1",
+		WorkspaceID: "default",
+		Name:        "Encrypted Soul",
+		Type:        core.CheckHTTP,
+		Target:      "example.com",
+		Enabled:     true,
+	}
+
+	if err := db.SaveSoul(nil, soul); err != nil {
+		t.Fatalf("SaveSoul failed: %v", err)
+	}
+
+	got, err := db.GetSoul(nil, "default", "enc-soul-1")
+	if err != nil {
+		t.Fatalf("GetSoul failed: %v", err)
+	}
+
+	if got.ID != soul.ID || got.Name != soul.Name || got.Target != soul.Target {
+		t.Errorf("GetSoul returned wrong soul\ngot:  %+v\nwant: %+v", got, soul)
+	}
+}

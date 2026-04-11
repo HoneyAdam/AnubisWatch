@@ -14,6 +14,7 @@ import (
 // Manager handles cluster coordination
 type Manager struct {
 	mu            sync.RWMutex
+	necroConfig   core.NecropolisConfig
 	config        core.RaftConfig
 	node          *raft.Node
 	db            *storage.CobaltDB
@@ -26,15 +27,19 @@ type Manager struct {
 
 	// Distribution
 	distributor *Distributor
+
+	// Discovery
+	discovery *raft.Discovery
 }
 
 // NewManager creates a new cluster manager
-func NewManager(cfg core.RaftConfig, db *storage.CobaltDB, logger *slog.Logger) (*Manager, error) {
+func NewManager(cfg core.NecropolisConfig, db *storage.CobaltDB, logger *slog.Logger) (*Manager, error) {
 	m := &Manager{
-		config:      cfg,
+		necroConfig: cfg,
+		config:      cfg.Raft,
 		db:          db,
 		logger:      logger.With("component", "cluster"),
-		isClustered: cfg.Bootstrap || len(cfg.Peers) > 0,
+		isClustered: cfg.Raft.Bootstrap || len(cfg.Raft.Peers) > 0,
 	}
 
 	// Create Raft storage components
@@ -83,6 +88,37 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	m.logger.Info("Raft node started")
 
+	// Initialize and start discovery service
+	if cfg := m.necroConfig.Discovery; cfg.Mode != "" && cfg.Mode != "manual" {
+		disc, err := raft.NewDiscovery(m.config, m.logger)
+		if err != nil {
+			m.logger.Warn("failed to create discovery service", "err", err)
+		} else {
+			// Wire peer discovery callbacks to Raft node
+			disc.RegisterPeerCallback(
+				func(peer core.RaftPeer) {
+					m.logger.Info("peer discovered", "id", peer.ID, "addr", peer.Address)
+					if m.node != nil {
+						m.node.AddPeer(peer)
+					}
+				},
+				func(nodeID string) {
+					m.logger.Info("peer lost", "id", nodeID)
+					if m.node != nil {
+						m.node.RemovePeer(nodeID)
+					}
+				},
+			)
+
+			if err := disc.Start(); err != nil {
+				m.logger.Warn("failed to start discovery service", "err", err)
+			} else {
+				m.discovery = disc
+				m.logger.Info("auto-discovery started", "mode", cfg.Mode)
+			}
+		}
+	}
+
 	// Initialize distributor
 	strategy := StrategyLoadBased
 	m.distributor = NewDistributor(m.config.NodeID, m.config.Region, strategy, m.logger)
@@ -110,6 +146,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 	if m.distributor != nil {
 		m.logger.Info("stopping distributor")
 		m.distributor.Stop()
+	}
+
+	if m.discovery != nil {
+		m.logger.Info("stopping discovery")
+		m.discovery.Stop()
 	}
 
 	if m.node != nil {
@@ -167,6 +208,17 @@ func (m *Manager) GetStatus() *ClusterStatus {
 	}
 
 	return status
+}
+
+// GetDiscoveredPeers returns peers discovered via mDNS/gossip
+func (m *Manager) GetDiscoveredPeers() []raft.DiscoveredPeer {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.discovery == nil {
+		return nil
+	}
+	return m.discovery.GetPeers()
 }
 
 // ClusterStatus contains cluster status information

@@ -67,6 +67,8 @@ func main() {
 			logsCommand()
 		case "config":
 			configCommand()
+		case "souls":
+			soulsCommand()
 		case "help", "-h", "--help":
 			printUsage()
 		default:
@@ -100,6 +102,7 @@ Commands:
   export          Export configuration to JSON/YAML
   logs            View recent logs
   config          Configuration management
+  souls           Souls import/export
   help            Show this help
 
 Subcommands:
@@ -364,6 +367,10 @@ func (a *restStorageAdapter) SaveSoul(ctx context.Context, soul *core.Soul) erro
 
 func (a *restStorageAdapter) DeleteSoul(ctx context.Context, id string) error {
 	return a.store.DeleteSoul(ctx, "default", id)
+}
+
+func (a *restStorageAdapter) DeleteSoulNoCtx(id string) error {
+	return a.store.DeleteSoul(context.Background(), "default", id)
 }
 
 func (a *restStorageAdapter) GetJudgmentNoCtx(id string) (*core.Judgment, error) {
@@ -2181,5 +2188,201 @@ func configCommand() {
 		fmt.Fprintf(os.Stderr, "Unknown config subcommand: %s\n", subcmd)
 		fmt.Println("Run 'anubis config' for usage information")
 		os.Exit(1)
+	}
+}
+
+// soulsCommand handles souls import/export subcommands
+func soulsCommand() {
+	if len(os.Args) < 3 {
+		fmt.Println("⚖️  Souls Management")
+		fmt.Println("────────────────────────────────────────────")
+		fmt.Println()
+		fmt.Println("Usage: anubis souls <subcommand> [options]")
+		fmt.Println()
+		fmt.Println("Subcommands:")
+		fmt.Println("  export       Export all souls to JSON or YAML")
+		fmt.Println("  import       Import souls from JSON or YAML file")
+		fmt.Println()
+		fmt.Println("Options for export:")
+		fmt.Println("  --format json|yaml   Output format (default: json)")
+		fmt.Println("  --output <file>      Write to file instead of stdout")
+		fmt.Println()
+		fmt.Println("Options for import:")
+		fmt.Println("  --replace            Replace existing souls (default: merge)")
+		fmt.Println()
+		fmt.Println("Examples:")
+		fmt.Println("  anubis souls export > souls.json")
+		fmt.Println("  anubis souls export --format yaml --output souls.yaml")
+		fmt.Println("  anubis souls import souls.json")
+		fmt.Println("  anubis souls import --replace souls.yaml")
+		return
+	}
+
+	subcmd := os.Args[2]
+
+	store, err := openLocalStorage()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening storage: %v\n", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	switch subcmd {
+	case "export":
+		exportSouls(store, ctx)
+	case "import":
+		importSouls(store, ctx)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown souls subcommand: %s\n", subcmd)
+		fmt.Println("Run 'anubis souls' for usage information")
+		os.Exit(1)
+	}
+}
+
+// exportSouls exports souls to JSON or YAML
+func exportSouls(store *storage.CobaltDB, ctx context.Context) {
+	format := "json"
+	outputPath := ""
+
+	for i := 3; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--format", "-f":
+			if i+1 < len(os.Args) {
+				format = os.Args[i+1]
+				i++
+			}
+		case "--output", "-o":
+			if i+1 < len(os.Args) {
+				outputPath = os.Args[i+1]
+				i++
+			}
+		}
+	}
+
+	if format != "json" && format != "yaml" {
+		fmt.Fprintf(os.Stderr, "Error: unsupported format %q (use json or yaml)\n", format)
+		os.Exit(1)
+	}
+
+	souls, err := store.ListSouls(ctx, "default", 0, 10000)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error listing souls: %v\n", err)
+		os.Exit(1)
+	}
+
+	var output []byte
+	if format == "yaml" {
+		output, err = yaml.Marshal(souls)
+	} else {
+		output, err = json.MarshalIndent(souls, "", "  ")
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error marshaling souls: %v\n", err)
+		os.Exit(1)
+	}
+
+	if outputPath != "" {
+		if err := os.WriteFile(outputPath, output, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing file: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✓ Exported %d souls to %s\n", len(souls), outputPath)
+	} else {
+		fmt.Println(string(output))
+	}
+}
+
+// importSouls imports souls from a JSON or YAML file
+func importSouls(store *storage.CobaltDB, ctx context.Context) {
+	replace := false
+	filePath := ""
+
+	for i := 3; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--replace":
+			replace = true
+		default:
+			if !strings.HasPrefix(os.Args[i], "-") {
+				filePath = os.Args[i]
+			}
+		}
+	}
+
+	if filePath == "" {
+		fmt.Fprintf(os.Stderr, "Error: no input file specified\n")
+		fmt.Println("Usage: anubis souls import [--replace] <file.json|file.yaml>")
+		os.Exit(1)
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
+		os.Exit(1)
+	}
+
+	var souls []*core.Soul
+	if strings.HasSuffix(filePath, ".yaml") || strings.HasSuffix(filePath, ".yml") {
+		if err := yaml.Unmarshal(data, &souls); err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing YAML: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		if err := json.Unmarshal(data, &souls); err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	if len(souls) == 0 {
+		fmt.Println("No souls found in input file")
+		return
+	}
+
+	// If replace mode, delete existing souls first
+	if replace {
+		existing, _ := store.ListSouls(ctx, "default", 0, 10000)
+		for _, s := range existing {
+			store.DeleteSoul(ctx, "default", s.ID)
+		}
+	}
+
+	imported := 0
+	skipped := 0
+	for _, soul := range souls {
+		if soul.ID == "" {
+			soul.ID = core.GenerateID()
+		}
+		if soul.WorkspaceID == "" {
+			soul.WorkspaceID = "default"
+		}
+		soul.UpdatedAt = time.Now()
+		if soul.CreatedAt.IsZero() {
+			soul.CreatedAt = time.Now()
+		}
+
+		// Check if soul already exists
+		_, err := store.GetSoulNoCtx(soul.ID)
+		if err == nil && !replace {
+			skipped++
+			continue
+		}
+
+		if err := store.SaveSoul(ctx, soul); err != nil {
+			fmt.Fprintf(os.Stderr, "Error importing soul %q: %v\n", soul.Name, err)
+			continue
+		}
+		imported++
+	}
+
+	fmt.Printf("✓ Imported %d souls", imported)
+	if skipped > 0 {
+		fmt.Printf(", skipped %d (already exist)", skipped)
+	}
+	fmt.Println()
+	fmt.Println()
+	for _, soul := range souls {
+		fmt.Printf("  %s  %s (%s)\n", soul.ID, soul.Name, soul.Type)
 	}
 }

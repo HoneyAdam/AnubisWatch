@@ -97,7 +97,7 @@ func ensureConfigDir(configPath string) error {
 
 // listInstances lists all Anubis instances (config files)
 func listInstances() []string {
-	var instances []string
+	instances := make([]string, 0)
 
 	// Local
 	if _, err := os.Stat("./anubis.json"); err == nil {

@@ -164,29 +164,27 @@ func TestBuildJudgmentMetrics_WithJudgments(t *testing.T) {
 	}
 }
 
-// TestBuildJudgmentMetrics_WithAllStatuses tests buildJudgmentMetrics with different soul statuses
+// TestBuildJudgmentMetrics_WithAllStatuses tests buildJudgmentMetrics with judgments in different statuses
 func TestBuildJudgmentMetrics_WithAllStatuses(t *testing.T) {
 	store := newMockStorage()
 
-	// Add souls with different statuses by creating judgments
+	// Add souls with different statuses
 	now := time.Now()
 	statuses := []core.SoulStatus{core.SoulAlive, core.SoulDead, core.SoulDegraded}
 
 	for i, status := range statuses {
 		soulID := fmt.Sprintf("soul-%d", i)
-		soulName := fmt.Sprintf("Test Soul %d", i)
 		store.SaveSoul(context.Background(), &core.Soul{
 			ID:   soulID,
-			Name: soulName,
+			Name: fmt.Sprintf("Test Soul %d", i),
 			Type: core.CheckHTTP,
 		})
 
-		// Add a judgment for this soul
 		store.SaveJudgment(context.Background(), &core.Judgment{
-			ID:       fmt.Sprintf("judgment-%d", i),
-			SoulID:   soulID,
-			Status:   status,
-			Duration: time.Duration(100+i*50) * time.Millisecond,
+			ID:        fmt.Sprintf("judgment-%d", i),
+			SoulID:    soulID,
+			Status:    status,
+			Duration:  time.Duration(100+i*50) * time.Millisecond,
 			Timestamp: now,
 		})
 	}
@@ -197,13 +195,12 @@ func TestBuildJudgmentMetrics_WithAllStatuses(t *testing.T) {
 
 	metrics := server.buildJudgmentMetrics()
 
-	// Should contain all status values
-	if !strings.Contains(metrics, "anubis_soul_status") {
-		t.Error("Expected anubis_soul_status metric")
+	// Should contain judgment count metrics
+	if !strings.Contains(metrics, "anubis_judgments_in_24h") {
+		t.Error("Expected anubis_judgments_in_24h metric")
 	}
-
-	if !strings.Contains(metrics, "anubis_soul_latency_seconds") {
-		t.Error("Expected anubis_soul_latency_seconds metric")
+	if !strings.Contains(metrics, "anubis_judgments_failed_in_24h") {
+		t.Error("Expected anubis_judgments_failed_in_24h metric")
 	}
 }
 
@@ -216,14 +213,13 @@ func TestBuildJudgmentMetrics_StorageError(t *testing.T) {
 	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, logger)
 
 	metrics := server.buildJudgmentMetrics()
-	// When storage fails, it should still return the metric headers but no data
+	// Should return metric headers even on storage error
 	if metrics == "" {
 		t.Error("Expected metric headers even on storage error")
 	}
 
-	// Should contain metric definitions but no actual values
-	if !strings.Contains(metrics, "anubis_soul_status") {
-		t.Error("Expected anubis_soul_status metric header")
+	if !strings.Contains(metrics, "anubis_judgments_in_24h") {
+		t.Error("Expected anubis_judgments_in_24h metric header")
 	}
 }
 
@@ -244,6 +240,9 @@ func TestBuildSystemMetrics(t *testing.T) {
 		"anubis_memory_alloc_bytes",
 		"anubis_memory_sys_bytes",
 		"anubis_goroutines",
+		"anubis_judgments_total",
+		"anubis_verdicts_fired_total",
+		"anubis_verdicts_resolved_total",
 	}
 
 	for _, expected := range expectedMetrics {
@@ -321,17 +320,18 @@ func TestBuildSoulMetrics_StorageError(t *testing.T) {
 	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, logger)
 
 	metrics := server.buildSoulMetrics()
-	// Should return empty string when storage fails
-	if metrics != "" {
-		t.Errorf("Expected empty metrics on storage error, got: %s", metrics)
+	// Should return a fallback metric when storage fails
+	if !strings.Contains(metrics, "anubis_souls_total") {
+		t.Errorf("Expected anubis_souls_total metric on storage error, got: %s", metrics)
 	}
 }
 
-// TestBuildJudgmentMetrics_WithAllStatuses_Detailed tests buildJudgmentMetrics with detailed verification
-func TestBuildJudgmentMetrics_WithAllStatuses_Detailed(t *testing.T) {
+// TestBuildSoulMetrics_WithAllStatuses_Detailed tests buildSoulMetrics with detailed verification
+func TestBuildSoulMetrics_WithAllStatuses_Detailed(t *testing.T) {
 	store := newMockStorage()
 
-	now := time.Now()
+	// Use a fixed time in the past for judgments to avoid timing issues
+	now := time.Now().Add(-1 * time.Hour)
 
 	// Test SoulAlive
 	store.SaveSoul(context.Background(), &core.Soul{
@@ -379,7 +379,7 @@ func TestBuildJudgmentMetrics_WithAllStatuses_Detailed(t *testing.T) {
 	logger := newTestLogger()
 	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, logger)
 
-	metrics := server.buildJudgmentMetrics()
+	metrics := server.buildSoulMetrics()
 
 	// Verify all status values appear
 	if !strings.Contains(metrics, "Alive Soul") {
@@ -392,12 +392,12 @@ func TestBuildJudgmentMetrics_WithAllStatuses_Detailed(t *testing.T) {
 		t.Error("Expected 'Degraded Soul' in metrics")
 	}
 
-	// Verify latency values
-	if !strings.Contains(metrics, "0.150000") {
-		t.Log("Expected latency 0.150000 for 150ms")
+	// Verify latency values (format: 0.150000 or 0.150)
+	if !strings.Contains(metrics, "0.150") {
+		t.Log("Expected latency 0.150 for 150ms")
 	}
-	if !strings.Contains(metrics, "0.500000") {
-		t.Log("Expected latency 0.500000 for 500ms")
+	if !strings.Contains(metrics, "0.500") {
+		t.Log("Expected latency 0.500 for 500ms")
 	}
 }
 

@@ -1,0 +1,425 @@
+syntax = "proto3";
+
+package anubiswatch.v1;
+
+option go_package = "github.com/AnubisWatch/anubiswatch/internal/grpcapi/v1;v1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// AnubisWatchService provides gRPC access to all monitoring resources
+service AnubisWatchService {
+  // Soul management
+  rpc ListSouls(ListSoulsRequest) returns (ListSoulsResponse);
+  rpc GetSoul(GetSoulRequest) returns (Soul);
+  rpc CreateSoul(CreateSoulRequest) returns (Soul);
+  rpc UpdateSoul(UpdateSoulRequest) returns (Soul);
+  rpc DeleteSoul(DeleteSoulRequest) returns (google.protobuf.Empty);
+
+  // Judgment (check results)
+  rpc ListJudgments(ListJudgmentsRequest) returns (ListJudgmentsResponse);
+  rpc GetSoulJudgments(GetSoulJudgmentsRequest) returns (ListJudgmentsResponse);
+  rpc JudgeSoul(JudgeSoulRequest) returns (Judgment);
+
+  // Verdict (alert decisions)
+  rpc ListVerdicts(ListVerdictsRequest) returns (ListVerdictsResponse);
+
+  // Alert channels
+  rpc ListChannels(ListChannelsRequest) returns (ListChannelsResponse);
+  rpc GetChannel(GetChannelRequest) returns (Channel);
+  rpc CreateChannel(CreateChannelRequest) returns (Channel);
+  rpc UpdateChannel(UpdateChannelRequest) returns (Channel);
+  rpc DeleteChannel(DeleteChannelRequest) returns (google.protobuf.Empty);
+
+  // Alert rules
+  rpc ListRules(ListRulesRequest) returns (ListRulesResponse);
+  rpc GetRule(GetRuleRequest) returns (Rule);
+  rpc CreateRule(CreateRuleRequest) returns (Rule);
+  rpc UpdateRule(UpdateRuleRequest) returns (Rule);
+  rpc DeleteRule(DeleteRuleRequest) returns (google.protobuf.Empty);
+
+  // Journeys
+  rpc ListJourneys(ListJourneysRequest) returns (ListJourneysResponse);
+  rpc GetJourney(GetJourneyRequest) returns (Journey);
+  rpc CreateJourney(CreateJourneyRequest) returns (Journey);
+  rpc UpdateJourney(UpdateJourneyRequest) returns (Journey);
+  rpc DeleteJourney(DeleteJourneyRequest) returns (google.protobuf.Empty);
+
+  // Cluster
+  rpc GetClusterStatus(google.protobuf.Empty) returns (ClusterStatus);
+
+  // Streaming
+  rpc StreamJudgments(StreamRequest) returns (stream Judgment);
+  rpc StreamVerdicts(StreamRequest) returns (stream Verdict);
+}
+
+// --- Pagination ---
+message Pagination {
+  int32 total = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+  bool has_more = 4;
+  optional int32 next_offset = 5;
+}
+
+// --- Soul ---
+message Soul {
+  string id = 1;
+  string name = 2;
+  string type = 3; // http, tcp, udp, dns, smtp, imap, icmp, grpc, websocket, tls
+  string target = 4;
+  int32 interval = 5;
+  int32 timeout = 6;
+  int32 retries = 7;
+  string status = 8; // alive, dead, degraded, unknown, embalmed
+  string workspace = 9;
+  repeated string tags = 10;
+  bool enabled = 11;
+  map<string, string> labels = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+
+  // Type-specific config (oneof based on soul type)
+  oneof check_config {
+    HTTPCheck http = 100;
+    TCPCheck tcp = 101;
+    DNSCheck dns = 102;
+    TLSCheck tls = 103;
+    GRPCCheck grpc = 104;
+  }
+}
+
+message HTTPCheck {
+  string method = 1;
+  map<string, string> headers = 2;
+  string body = 3;
+  bool follow_redirects = 4;
+  repeated string body_contains = 5;
+  string body_regex = 6;
+  string json_path = 7;
+  string json_schema = 8;
+  bool ipv6 = 9;
+  repeated string response_headers = 10;
+  optional string feather = 11; // max avg latency
+}
+
+message TCPCheck {
+  string banner_match = 1;
+  string send = 2;
+  string expect_regex = 3;
+}
+
+message DNSCheck {
+  string record_type = 1;
+  repeated string nameservers = 2;
+  string expected = 3;
+  bool propagation_check = 4;
+}
+
+message TLSCheck {
+  string min_protocol = 1;
+  string expected_issuer = 2;
+  string expected_san = 3;
+  int32 min_days_before_expiry = 4;
+  bool check_chain = 5;
+}
+
+message GRPCCheck {
+  string service = 1;
+  bool tls = 2;
+  string tls_ca = 3;
+  map<string, string> metadata = 4;
+}
+
+message CreateSoulRequest {
+  string name = 1;
+  string type = 2;
+  string target = 3;
+  int32 interval = 4;
+  int32 timeout = 5;
+  int32 retries = 6;
+  repeated string tags = 7;
+  bool enabled = 8;
+  map<string, string> labels = 9;
+  oneof check_config {
+    HTTPCheck http = 100;
+    TCPCheck tcp = 101;
+    DNSCheck dns = 102;
+    TLSCheck tls = 103;
+    GRPCCheck grpc = 104;
+  }
+}
+
+message UpdateSoulRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string target = 3;
+  optional int32 interval = 4;
+  optional int32 timeout = 5;
+  optional int32 retries = 6;
+  repeated string tags = 7;
+  optional bool enabled = 8;
+  map<string, string> labels = 9;
+}
+
+message GetSoulRequest {
+  string id = 1;
+}
+
+message ListSoulsRequest {
+  int32 offset = 1;
+  int32 limit = 2;
+  optional string status = 3;
+  optional string type = 4;
+  optional string tag = 5;
+  optional string workspace = 6;
+}
+
+message ListSoulsResponse {
+  repeated Soul souls = 1;
+  Pagination pagination = 2;
+}
+
+message DeleteSoulRequest {
+  string id = 1;
+}
+
+// --- Judgment ---
+message Judgment {
+  string id = 1;
+  string soul_id = 2;
+  string soul_name = 3;
+  string status = 4; // alive, dead, degraded
+  int64 latency_ms = 5;
+  string message = 6;
+  google.protobuf.Timestamp timestamp = 7;
+  string node_id = 8;
+  string region = 9;
+}
+
+message ListJudgmentsRequest {
+  int32 offset = 1;
+  int32 limit = 2;
+  optional string status = 3;
+  optional string soul_id = 4;
+  optional google.protobuf.Timestamp since = 5;
+  optional google.protobuf.Timestamp until = 6;
+}
+
+message ListJudgmentsResponse {
+  repeated Judgment judgments = 1;
+  Pagination pagination = 2;
+}
+
+message GetSoulJudgmentsRequest {
+  string soul_id = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message JudgeSoulRequest {
+  string soul_id = 1;
+}
+
+// --- Verdict ---
+message Verdict {
+  string id = 1;
+  string soul_id = 2;
+  string soul_name = 3;
+  string rule_id = 4;
+  string status = 5; // firing, resolved
+  string severity = 6;
+  string message = 7;
+  google.protobuf.Timestamp fired_at = 8;
+  optional google.protobuf.Timestamp resolved_at = 9;
+}
+
+message ListVerdictsRequest {
+  int32 offset = 1;
+  int32 limit = 2;
+  optional string status = 3;
+  optional string soul_id = 4;
+  optional string severity = 5;
+}
+
+message ListVerdictsResponse {
+  repeated Verdict verdicts = 1;
+  Pagination pagination = 2;
+}
+
+// --- Alert Channel ---
+message Channel {
+  string id = 1;
+  string name = 2;
+  string type = 3; // webhook, slack, discord, telegram, email, pagerduty, opsgenie, sms, ntfy
+  bool enabled = 4;
+  map<string, string> config = 5;
+  string workspace = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message ListChannelsRequest {
+  int32 offset = 1;
+  int32 limit = 2;
+  optional string workspace = 3;
+}
+
+message ListChannelsResponse {
+  repeated Channel channels = 1;
+  Pagination pagination = 2;
+}
+
+message GetChannelRequest {
+  string id = 1;
+}
+
+message CreateChannelRequest {
+  string name = 1;
+  string type = 2;
+  bool enabled = 3;
+  map<string, string> config = 4;
+  string workspace = 5;
+}
+
+message UpdateChannelRequest {
+  string id = 1;
+  optional string name = 2;
+  optional bool enabled = 3;
+  map<string, string> config = 4;
+}
+
+message DeleteChannelRequest {
+  string id = 1;
+}
+
+// --- Alert Rule ---
+message Rule {
+  string id = 1;
+  string name = 2;
+  string condition_type = 3; // consecutive_failures, threshold, status_change, recovery, degraded, anomaly, compound
+  string channel_id = 4;
+  string workspace = 5;
+  bool enabled = 6;
+  map<string, string> config = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message ListRulesRequest {
+  int32 offset = 1;
+  int32 limit = 2;
+  optional string workspace = 3;
+}
+
+message ListRulesResponse {
+  repeated Rule rules = 1;
+  Pagination pagination = 2;
+}
+
+message GetRuleRequest {
+  string id = 1;
+}
+
+message CreateRuleRequest {
+  string name = 1;
+  string condition_type = 2;
+  string channel_id = 3;
+  string workspace = 4;
+  bool enabled = 5;
+  map<string, string> config = 6;
+}
+
+message UpdateRuleRequest {
+  string id = 1;
+  optional string name = 2;
+  optional bool enabled = 3;
+  map<string, string> config = 4;
+}
+
+message DeleteRuleRequest {
+  string id = 1;
+}
+
+// --- Journey ---
+message Journey {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  int32 interval = 4;
+  bool enabled = 5;
+  string workspace = 6;
+  repeated JourneyStep steps = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message JourneyStep {
+  string id = 1;
+  string name = 2;
+  string type = 3; // http, tcp, dns, tls
+  string target = 4;
+  int32 timeout = 5;
+  bool continue_on_failure = 6;
+  map<string, string> config = 7;
+}
+
+message ListJourneysRequest {
+  int32 offset = 1;
+  int32 limit = 2;
+  optional string workspace = 3;
+}
+
+message ListJourneysResponse {
+  repeated Journey journeys = 1;
+  Pagination pagination = 2;
+}
+
+message GetJourneyRequest {
+  string id = 1;
+}
+
+message CreateJourneyRequest {
+  string name = 1;
+  string description = 2;
+  int32 interval = 3;
+  bool enabled = 4;
+  string workspace = 5;
+  repeated JourneyStep steps = 6;
+}
+
+message UpdateJourneyRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional int32 interval = 4;
+  optional bool enabled = 5;
+  repeated JourneyStep steps = 6;
+}
+
+message DeleteJourneyRequest {
+  string id = 1;
+}
+
+// --- Cluster ---
+message ClusterStatus {
+  bool clustered = 1;
+  bool is_leader = 2;
+  string node_id = 3;
+  string leader_id = 4;
+  int32 node_count = 5;
+  repeated ClusterNode nodes = 6;
+  int64 raft_term = 7;
+  int64 raft_commit_index = 8;
+}
+
+message ClusterNode {
+  string id = 1;
+  string address = 2;
+  string role = 3; // leader, follower, candidate
+  string region = 4;
+  bool healthy = 5;
+}
+
+// --- Streaming ---
+message StreamRequest {
+  optional string soul_id = 1;
+  optional string workspace = 2;
+}

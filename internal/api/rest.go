@@ -34,6 +34,12 @@ type RESTServer struct {
 	cluster    ClusterManager
 	dashboard  http.Handler
 	statusPage http.Handler
+
+	// Prometheus-style counters (in-memory, reset on restart)
+	metricsMu  sync.RWMutex
+	judgmentsTotal   uint64
+	verdictsFired    uint64
+	verdictsResolved uint64
 }
 
 // Router handles HTTP routing
@@ -154,6 +160,14 @@ type Authenticator interface {
 	Authenticate(token string) (*User, error)
 	Login(email, password string) (*User, string, error)
 	Logout(token string) error
+	Shutdown()
+}
+
+// OIDCAuth extends Authenticator with OIDC methods
+type OIDCAuth interface {
+	Authenticator
+	OIDCLoginURL() (string, string, error)
+	OIDCCallback(code, state string) (*User, string, error)
 }
 
 // ClusterManager interface for cluster operations
@@ -238,6 +252,12 @@ func (s *RESTServer) setupRoutes() {
 	s.router.Handle("POST", "/api/v1/auth/login", s.handleLogin)
 	s.router.Handle("POST", "/api/v1/auth/logout", s.handleLogout)
 	s.router.Handle("GET", "/api/v1/auth/me", s.requireAuth(s.handleMe))
+
+	// OIDC Auth (if configured)
+	if _, ok := s.auth.(OIDCAuth); ok {
+		s.router.Handle("GET", "/api/v1/auth/oidc/login", s.handleOIDCLogin)
+		s.router.Handle("GET", "/api/v1/auth/oidc/callback", s.handleOIDCCallback)
+	}
 
 	// Souls
 	s.router.Handle("GET", "/api/v1/souls", s.requireAuth(s.handleListSouls))
@@ -417,6 +437,58 @@ func (s *RESTServer) handleLogout(ctx *Context) error {
 
 func (s *RESTServer) handleMe(ctx *Context) error {
 	return ctx.JSON(http.StatusOK, ctx.User)
+}
+
+// OIDC handlers
+
+func (s *RESTServer) handleOIDCLogin(ctx *Context) error {
+	oidcAuth, ok := s.auth.(OIDCAuth)
+	if !ok {
+		return ctx.Error(http.StatusBadRequest, "OIDC not configured")
+	}
+
+	loginURL, _, err := oidcAuth.OIDCLoginURL()
+	if err != nil {
+		s.logger.Error("OIDC login failed", "error", err)
+		return ctx.Error(http.StatusInternalServerError, "OIDC login failed: "+err.Error())
+	}
+
+	// Redirect to OIDC provider
+	ctx.Response.Header().Set("Location", loginURL)
+	ctx.Response.WriteHeader(http.StatusFound)
+	return nil
+}
+
+func (s *RESTServer) handleOIDCCallback(ctx *Context) error {
+	oidcAuth, ok := s.auth.(OIDCAuth)
+	if !ok {
+		return ctx.Error(http.StatusBadRequest, "OIDC not configured")
+	}
+
+	code := ctx.Request.URL.Query().Get("code")
+	state := ctx.Request.URL.Query().Get("state")
+
+	if code == "" || state == "" {
+		return ctx.Error(http.StatusBadRequest, "missing code or state")
+	}
+
+	// Check for OIDC error
+	if errParam := ctx.Request.URL.Query().Get("error"); errParam != "" {
+		errDesc := ctx.Request.URL.Query().Get("error_description")
+		return ctx.Error(http.StatusBadRequest, fmt.Sprintf("OIDC error: %s (%s)", errParam, errDesc))
+	}
+
+	user, token, err := oidcAuth.OIDCCallback(code, state)
+	if err != nil {
+		s.logger.Error("OIDC callback failed", "error", err)
+		return ctx.Error(http.StatusUnauthorized, "OIDC authentication failed: "+err.Error())
+	}
+
+	// Return token (in production, redirect to dashboard with token in cookie)
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
+		"user":  user,
+		"token": token,
+	})
 }
 
 // Soul handlers
@@ -1471,6 +1543,10 @@ func (c *Context) Bind(v interface{}) error {
 // OnJudgmentCallback returns a callback function for broadcasting judgments via WebSocket
 func (s *RESTServer) OnJudgmentCallback() func(*core.Judgment) {
 	return func(judgment *core.Judgment) {
+		s.metricsMu.Lock()
+		s.judgmentsTotal++
+		s.metricsMu.Unlock()
+
 		if s.ws != nil {
 			s.ws.BroadcastJudgment(judgment)
 		}

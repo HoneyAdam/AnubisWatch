@@ -27,6 +27,8 @@ type Discovery struct {
 	mdnsClient *MDNSClient
 
 	// Gossip
+	gossipConn   *net.UDPConn
+	gossipPort   int
 	gossipInterval time.Duration
 	gossipNodes    int
 	knownPeers     map[string]*DiscoveredPeer
@@ -147,6 +149,16 @@ func NewDiscovery(config core.RaftConfig, logger *slog.Logger) (*Discovery, erro
 
 // Start starts the discovery service
 func (d *Discovery) Start() error {
+	// Start gossip UDP listener
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: 7948})
+	if err != nil {
+		d.logger.Warn("gossip UDP listener failed", "error", err)
+	} else {
+		d.gossipConn = conn
+		d.gossipPort = 7948
+		go d.gossipListen()
+	}
+
 	// Start mDNS server (advertise ourselves)
 	if err := d.mdnsServer.Start(); err != nil {
 		d.logger.Warn("mDNS server failed to start", "error", err)
@@ -175,6 +187,9 @@ func (d *Discovery) Stop() error {
 	d.cancel()
 	d.mdnsServer.Stop()
 	d.mdnsClient.Stop()
+	if d.gossipConn != nil {
+		d.gossipConn.Close()
+	}
 	close(d.done)
 	return nil
 }
@@ -282,10 +297,64 @@ func (d *Discovery) selectGossipPeers(n int) []*DiscoveredPeer {
 
 // sendGossip sends a gossip message to a peer
 func (d *Discovery) sendGossip(peer *DiscoveredPeer, msg GossipMessage) {
-	// In a real implementation, this would use the transport layer
-	// For now, just update last gossip time
+	// Encode the message
+	data, err := encodeGossip(&msg)
+	if err != nil {
+		d.logger.Debug("failed to encode gossip", "error", err)
+		return
+	}
+
+	// Parse peer address
+	addr, err := net.ResolveUDPAddr("udp4", peer.Address)
+	if err != nil {
+		d.logger.Debug("invalid peer address", "addr", peer.Address, "error", err)
+		return
+	}
+
+	// Send via UDP if we have a connection
+	if d.gossipConn != nil {
+		d.gossipConn.WriteToUDP(data, addr)
+	}
+
+	// Update local tracking
 	peer.LastGossip = time.Now()
 	peer.GossipCount++
+}
+
+// gossipListen listens for incoming gossip messages
+func (d *Discovery) gossipListen() {
+	buf := make([]byte, 4096)
+	for {
+		n, addr, err := d.gossipConn.ReadFromUDP(buf)
+		if err != nil {
+			if d.ctx.Err() != nil {
+				return
+			}
+			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+				continue
+			}
+			return
+		}
+
+		msg, err := decodeGossip(buf[:n])
+		if err != nil {
+			d.logger.Debug("failed to decode gossip", "error", err)
+			continue
+		}
+
+		d.handleGossip(msg)
+
+		// Also respond with our info so the sender learns about us
+		resp := GossipMessage{
+			Type:      "gossip",
+			NodeID:    d.nodeID,
+			Address:   d.bindAddr,
+			Region:    d.region,
+			Version:   "0.1.0",
+			Timestamp: time.Now().Unix(),
+		}
+		d.sendGossip(&DiscoveredPeer{ID: msg.NodeID, Address: addr.String()}, resp)
+	}
 }
 
 // handleGossip processes an incoming gossip message
@@ -570,8 +639,8 @@ func (d *Discovery) newMDNSClient() *MDNSClient {
 }
 
 func (c *MDNSClient) Start() error {
-	// Bind to UDP port
-	addr, err := net.ResolveUDPAddr("udp4", ":7947")
+	// Bind to UDP port with random port to avoid conflict with server
+	addr, err := net.ResolveUDPAddr("udp4", ":0")
 	if err != nil {
 		return err
 	}
