@@ -270,6 +270,17 @@ func (a *grpcStorageAdapter) ListJourneysNoCtx(ws string, o, l int) ([]interface
 }
 func (a *grpcStorageAdapter) SaveJourneyNoCtx(j interface{}) error { return nil }
 func (a *grpcStorageAdapter) DeleteJourneyNoCtx(id string) error   { return a.inner.DeleteJourneyNoCtx(id) }
+func (a *grpcStorageAdapter) ListEvents(soulID string, limit int) ([]interface{}, error) {
+	events, err := a.inner.store.ListAlertEvents(soulID, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(events))
+	for i, e := range events {
+		result[i] = e
+	}
+	return result, nil
+}
 // BuildServerDependencies builds all server dependencies
 func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 	logger := opts.Logger
