@@ -206,9 +206,10 @@ This assessment revisits the codebase after the previous v3.1.0 audit claimed a 
 | DNS test does real DNS queries | CI timeout risk | FIXED — passes without timeout |
 | API integration tests t.Skip | Incomplete validation | FIXED — properly guarded with build tags |
 | No frontend page/component tests | UI regressions | FIXED — 40 tests covering API client, widgets, components |
-| No E2E tests | Full flow untested | Deferred — low priority |
+| E2E tests | Full flow coverage | Complete — Playwright smoke test passing |
 | No fuzz tests | Edge cases | Deferred — low priority |
 | OIDC forgery not tested | Auth bypass | FIXED — test added for forged JWT rejection |
+| E2E smoke test | Full flow coverage | FIXED — Playwright E2E login + soul creation passes |
 
 ---
 
@@ -334,7 +335,7 @@ This assessment revisits the codebase after the previous v3.1.0 audit claimed a 
 ### Remaining Deferred Items (Non-blocking)
 
 1. **CLI Refactoring** — `cmd/anubis/main.go` (2,851 lines) could be split into sub-packages. Deferred — current CLI is functional, risk > benefit.
-2. **E2E Tests** — No end-to-end test framework. Deferred — low priority given comprehensive unit + integration + frontend tests.
+2. **E2E Tests** — Playwright smoke test implemented and passing. Complete.
 3. **Fuzz Tests** — No fuzz testing. Deferred — low priority.
 
 ---
@@ -369,6 +370,7 @@ This assessment revisits the codebase after the previous v3.1.0 audit claimed a 
 17. DNS test timeout — fixed ✓
 18. Integration tests properly guarded with build tags — 5/7 run ✓
 19. Frontend tests (40 total: API client, widgets, components) — 20h ✓
+20. E2E smoke test — Playwright login + soul creation flow — 4h ✓
 
 ### Phase 6: Performance Optimization (COMPLETED)
 20. Compaction memory O(N*M)->O(1) weighted percentile — 4h ✓
