@@ -235,7 +235,7 @@ export function Journeys() {
       } as unknown as Omit<Journey, 'id'>)
       setShowCreateModal(false)
       resetForm()
-    } catch (err) {
+    } catch {
       // Failed to create journey
     } finally {
       setSaving(false)
@@ -260,7 +260,7 @@ export function Journeys() {
     try {
       await runJourney(id)
       await refetch()
-    } catch (err) {
+    } catch {
       // Journey run failed
     } finally {
       setRunningId(null)

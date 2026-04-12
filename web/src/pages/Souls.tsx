@@ -104,7 +104,7 @@ export function Souls() {
     if (!confirm('Are you sure you want to delete this soul?')) return
     try {
       await deleteSoul(id)
-    } catch (err) {
+    } catch {
       alert('Failed to delete soul')
     }
   }
@@ -112,7 +112,7 @@ export function Souls() {
   const handleToggle = async (soul: SoulWithStatus) => {
     try {
       await updateSoul(soul.id, { enabled: !soul.enabled })
-    } catch (err) {
+    } catch {
       alert('Failed to update soul')
     }
   }

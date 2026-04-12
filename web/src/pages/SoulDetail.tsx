@@ -45,7 +45,7 @@ export function SoulDetail() {
   const { soul, loading: soulLoading, error: soulError, refetch, updateSoul, deleteSoul, forceCheck } = useSoul(id)
   const { data: judgmentsData, loading: judgmentsLoading, error: judgmentsError } = useSoulJudgments(id)
 
-  const judgments = judgmentsData || []
+  const judgments = useMemo(() => judgmentsData || [], [judgmentsData])
 
   // Calculate stats from real data
   const stats = useMemo(() => {

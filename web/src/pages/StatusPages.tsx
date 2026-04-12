@@ -21,6 +21,7 @@ import {
   Check
 } from 'lucide-react'
 import { useStatusPages, useSouls } from '../api/hooks'
+import type { StatusPage } from '../api/client'
 
 interface ServiceStatus {
   id: string
@@ -82,10 +83,10 @@ export function StatusPages() {
         souls: formSelectedSouls,
         subscribers: 0,
         uptime_days: 90
-      } as any)
+      } as Omit<StatusPage, 'id'>)
       setShowCreateModal(false)
       resetForm()
-    } catch (err) {
+    } catch {
       // Failed to create page
     } finally {
       setSaving(false)

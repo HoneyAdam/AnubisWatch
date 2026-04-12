@@ -25,6 +25,7 @@ import {
   X
 } from 'lucide-react'
 import { useChannels, useRules } from '../api/hooks'
+import type { AlertChannel, AlertRule } from '../api/client'
 
 type Severity = 'critical' | 'warning' | 'info'
 type ChannelType = 'slack' | 'email' | 'pagerduty' | 'webhook' | 'discord'
@@ -175,10 +176,10 @@ export function Alerts() {
         type: chType,
         config,
         enabled: chEnabled
-      } as any)
+      } as Omit<AlertChannel, 'id'>)
       setShowChannelModal(false)
       resetChannelForm()
-    } catch (err) {
+    } catch {
       // Failed to create channel
     } finally {
       setSaving(false)
@@ -197,10 +198,10 @@ export function Alerts() {
         consecutive: ruleConsecutive,
         enabled: ruleEnabled,
         channels: []
-      } as any)
+      } as unknown as Omit<AlertRule, 'id'>)
       setShowRuleModal(false)
       resetRuleForm()
-    } catch (err) {
+    } catch {
       // Failed to create rule
     } finally {
       setSaving(false)

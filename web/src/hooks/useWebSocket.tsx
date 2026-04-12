@@ -24,6 +24,7 @@ const WebSocketContext = createContext<WebSocketContextType>({
   disconnect: () => {}
 })
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useWebSocket() {
   return useContext(WebSocketContext)
 }
