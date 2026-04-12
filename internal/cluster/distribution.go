@@ -3,6 +3,7 @@ package cluster
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -34,6 +35,7 @@ type Distributor struct {
 
 	logger *slog.Logger
 	stopCh chan struct{}
+	wg     sync.WaitGroup
 }
 
 // DistributionStrategy determines how souls are assigned to nodes
@@ -91,12 +93,14 @@ func (d *Distributor) Start() {
 		"strategy", d.strategy.String(),
 		"rebalance_interval", d.rebalanceInterval)
 
+	d.wg.Add(1)
 	go d.rebalanceLoop()
 }
 
 // Stop stops the distributor
 func (d *Distributor) Stop() {
 	close(d.stopCh)
+	d.wg.Wait()
 }
 
 // RegisterNode registers a node in the cluster
@@ -117,16 +121,16 @@ func (d *Distributor) RegisterNode(nodeID, region string) {
 // UnregisterNode removes a node and triggers failover
 func (d *Distributor) UnregisterNode(nodeID string) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	node, exists := d.nodeLoads[nodeID]
 	if !exists {
+		d.mu.Unlock()
 		return
 	}
 
 	node.Healthy = false
 
-	// Find souls assigned to this node and mark for reassignment
+	// Copy soul IDs to reassign while holding the lock (copy-on-write pattern)
 	var soulsToMove []string
 	for soulID, assignedNode := range d.soulMap {
 		if assignedNode == nodeID {
@@ -134,9 +138,10 @@ func (d *Distributor) UnregisterNode(nodeID string) {
 		}
 	}
 
+	delete(d.nodeLoads, nodeID)
 	d.mu.Unlock()
 
-	// Reassign souls
+	// Reassign souls outside the lock
 	for _, soulID := range soulsToMove {
 		if err := d.ReassignSoul(soulID); err != nil {
 			d.logger.Error("Failed to reassign soul after node failure",
@@ -144,8 +149,6 @@ func (d *Distributor) UnregisterNode(nodeID string) {
 		}
 	}
 
-	d.mu.Lock()
-	delete(d.nodeLoads, nodeID)
 	d.logger.Info("Node unregistered", "node_id", nodeID, "souls_moved", len(soulsToMove))
 }
 
@@ -373,12 +376,13 @@ func (d *Distributor) selectHashBased(candidates []*NodeLoad, key string) string
 		hash = 31*hash + int(key[i])
 	}
 
-	index := hash % len(candidates)
+	index := int(math.Abs(float64(hash))) % len(candidates)
 	return candidates[index].NodeID
 }
 
 // rebalanceLoop periodically checks and rebalances load
 func (d *Distributor) rebalanceLoop() {
+	defer d.wg.Done()
 	ticker := time.NewTicker(d.rebalanceInterval)
 	defer ticker.Stop()
 

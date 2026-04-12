@@ -1,6 +1,15 @@
 package auth
 
 import (
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -172,15 +181,81 @@ func TestOIDCAuthenticator_TokenExpiration(t *testing.T) {
 	}
 }
 
+// Helper: create a signed JWT using an RSA key
+func createTestJWT(t *testing.T, priv *rsa.PrivateKey, claims map[string]interface{}) string {
+	t.Helper()
+	header := map[string]interface{}{"alg": "RS256", "typ": "JWT", "kid": "test-key"}
+	headerJSON, _ := json.Marshal(header)
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+
+	claimsJSON, _ := json.Marshal(claims)
+	claimsB64 := base64.RawURLEncoding.EncodeToString(claimsJSON)
+
+	signingInput := headerB64 + "." + claimsB64
+	hash := sha256.Sum256([]byte(signingInput))
+	sig, err := rsa.SignPKCS1v15(rand.Reader, priv, crypto.SHA256, hash[:])
+	if err != nil {
+		t.Fatalf("failed to sign JWT: %v", err)
+	}
+	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
+	return headerB64 + "." + claimsB64 + "." + sigB64
+}
+
+// Helper: create a test RSA key and JWK set
+func createTestJWK(priv *rsa.PrivateKey) *jwkSet {
+	n := base64.RawURLEncoding.EncodeToString(priv.N.Bytes())
+	eBytes := big.NewInt(int64(priv.E)).Bytes()
+	e := base64.RawURLEncoding.EncodeToString(eBytes)
+	return &jwkSet{Keys: []jwk{{Kty: "RSA", Use: "sig", Kid: "test-key", Alg: "RS256", N: n, E: e}}}
+}
+
+// Helper: create a JWK set HTTP server
+func newJWKServer(t *testing.T, jwks *jwkSet) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(jwks)
+	}))
+}
+
 func TestOIDCAuthenticator_ParseIDToken(t *testing.T) {
-	auth := &OIDCAuthenticator{}
+	// Generate RSA key pair
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
 
-	// Valid JWT-like payload (base64url encoded JSON)
-	// {"sub":"1234567890","email":"test@example.com","name":"Test User","email_verified":true}
-	// base64url: eyJzdWIiOiIxMjM0NTY3ODkwIiwiZW1haWwiOiJ0ZXN0QGV4YW1wbGUuY29tIiwibmFtZSI6IlRlc3QgVXNlciIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlfQ
-	validToken := "header.eyJzdWIiOiIxMjM0NTY3ODkwIiwiZW1haWwiOiJ0ZXN0QGV4YW1wbGUuY29tIiwibmFtZSI6IlRlc3QgVXNlciIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlfQ.sig"
+	// Create JWK set
+	jwks := createTestJWK(priv)
 
-	userInfo, err := auth.parseIDToken(validToken)
+	// Create claims
+	claims := map[string]interface{}{
+		"sub":            "1234567890",
+		"email":          "test@example.com",
+		"name":           "Test User",
+		"email_verified": true,
+		"iss":            "https://test.example.com",
+		"aud":            "test-client-id",
+		"exp":            time.Now().Add(time.Hour).Unix(),
+		"nbf":            time.Now().Add(-time.Minute).Unix(),
+	}
+
+	// Create signed JWT
+	token := createTestJWT(t, priv, claims)
+
+	// Create authenticator with pre-loaded JWKs (skip network fetch)
+	cfg := core.OIDCAuth{
+		Issuer:   "https://test.example.com",
+		ClientID: "test-client-id",
+	}
+	auth := &OIDCAuthenticator{
+		config:      cfg,
+		jwks:        jwks,
+		jwksFetched: time.Now(),
+		jwksTTL:     time.Hour,
+	}
+
+	userInfo, err := auth.parseIDToken(token)
 	if err != nil {
 		t.Fatalf("parseIDToken failed: %v", err)
 	}
@@ -188,18 +263,94 @@ func TestOIDCAuthenticator_ParseIDToken(t *testing.T) {
 	if userInfo.Email != "test@example.com" {
 		t.Errorf("Expected email test@example.com, got %s", userInfo.Email)
 	}
-
 	if userInfo.Name != "Test User" {
 		t.Errorf("Expected name 'Test User', got %s", userInfo.Name)
 	}
-
 	if userInfo.Sub != "1234567890" {
 		t.Errorf("Expected sub '1234567890', got %s", userInfo.Sub)
 	}
-
 	if !userInfo.EmailVerified {
 		t.Error("Expected email_verified to be true")
 	}
+}
+
+func TestOIDCAuthenticator_ParseIDToken_RejectForged(t *testing.T) {
+	// Generate two different key pairs
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
+	forgeryKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate forgery key: %v", err)
+	}
+
+	// JWK set contains the legitimate key
+	jwks := createTestJWK(priv)
+
+	claims := map[string]interface{}{
+		"sub":            "attacker",
+		"email":          "admin@example.com",
+		"name":           "Attacker",
+		"email_verified": true,
+		"iss":            "https://test.example.com",
+		"aud":            "test-client-id",
+		"exp":            time.Now().Add(time.Hour).Unix(),
+		"nbf":            time.Now().Add(-time.Minute).Unix(),
+	}
+	forgedToken := createTestJWT(t, forgeryKey, claims)
+
+	cfg := core.OIDCAuth{
+		Issuer:   "https://test.example.com",
+		ClientID: "test-client-id",
+	}
+	auth := &OIDCAuthenticator{
+		config:      cfg,
+		jwks:        jwks,
+		jwksFetched: time.Now(),
+		jwksTTL:     time.Hour,
+	}
+
+	_, err = auth.parseIDToken(forgedToken)
+	if err == nil {
+		t.Fatal("EXPECTED forged JWT to be rejected, but it was accepted!")
+	}
+	t.Logf("Correctly rejected forged JWT: %v", err)
+}
+
+func TestOIDCAuthenticator_ParseIDToken_RejectExpired(t *testing.T) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
+
+	jwks := createTestJWK(priv)
+
+	claims := map[string]interface{}{
+		"sub":   "123",
+		"email": "test@example.com",
+		"iss":   "https://test.example.com",
+		"aud":   "test-client-id",
+		"exp":   time.Now().Add(-time.Hour).Unix(),
+	}
+	token := createTestJWT(t, priv, claims)
+
+	cfg := core.OIDCAuth{
+		Issuer:   "https://test.example.com",
+		ClientID: "test-client-id",
+	}
+	auth := &OIDCAuthenticator{
+		config:      cfg,
+		jwks:        jwks,
+		jwksFetched: time.Now(),
+		jwksTTL:     time.Hour,
+	}
+
+	_, err = auth.parseIDToken(token)
+	if err == nil {
+		t.Fatal("EXPECTED expired token to be rejected")
+	}
+	t.Logf("Correctly rejected expired token: %v", err)
 }
 
 func TestOIDCAuthenticator_ParseIDToken_Invalid(t *testing.T) {
@@ -221,6 +372,70 @@ func TestOIDCAuthenticator_ParseIDToken_Invalid(t *testing.T) {
 	_, err = auth.parseIDToken("header.!!!invalid!!!.sig")
 	if err == nil {
 		t.Error("Expected error for invalid base64")
+	}
+}
+
+// Test EC key support (ES256)
+func TestOIDCAuthenticator_ParseIDToken_ECKey(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate EC key: %v", err)
+	}
+
+	// Build JWK
+	x := base64.RawURLEncoding.EncodeToString(priv.X.Bytes())
+	y := base64.RawURLEncoding.EncodeToString(priv.Y.Bytes())
+	jwks := &jwkSet{Keys: []jwk{{Kty: "EC", Use: "sig", Kid: "ec-key", Alg: "ES256", Crv: "P-256", X: x, Y: y}}}
+
+	// Create ES256 signed JWT
+	header := map[string]interface{}{"alg": "ES256", "typ": "JWT", "kid": "ec-key"}
+	headerJSON, _ := json.Marshal(header)
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+
+	claims := map[string]interface{}{
+		"sub":   "ec-user",
+		"email": "ecuser@example.com",
+		"name":  "EC User",
+		"iss":   "https://test.example.com",
+		"aud":   "ec-client",
+		"exp":   time.Now().Add(time.Hour).Unix(),
+	}
+	claimsJSON, _ := json.Marshal(claims)
+	claimsB64 := base64.RawURLEncoding.EncodeToString(claimsJSON)
+
+	signingInput := headerB64 + "." + claimsB64
+	hash := sha256.Sum256([]byte(signingInput))
+	r, s, err := ecdsa.Sign(rand.Reader, priv, hash[:])
+	if err != nil {
+		t.Fatalf("failed to sign: %v", err)
+	}
+	// ECDSA signature: R || S, each padded to curve byte length
+	keyLen := priv.Params().BitSize / 8
+	sigBytes := append(r.Bytes(), s.Bytes()...)
+	// Pad to 2*keyLen
+	padded := make([]byte, 2*keyLen)
+	copy(padded[2*keyLen-len(sigBytes):], sigBytes)
+	sigB64 := base64.RawURLEncoding.EncodeToString(padded)
+
+	token := headerB64 + "." + claimsB64 + "." + sigB64
+
+	cfg := core.OIDCAuth{
+		Issuer:   "https://test.example.com",
+		ClientID: "ec-client",
+	}
+	auth := &OIDCAuthenticator{
+		config:      cfg,
+		jwks:        jwks,
+		jwksFetched: time.Now(),
+		jwksTTL:     time.Hour,
+	}
+
+	userInfo, err := auth.parseIDToken(token)
+	if err != nil {
+		t.Fatalf("parseIDToken with EC key failed: %v", err)
+	}
+	if userInfo.Email != "ecuser@example.com" {
+		t.Errorf("Expected email ecuser@example.com, got %s", userInfo.Email)
 	}
 }
 

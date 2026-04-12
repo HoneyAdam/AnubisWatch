@@ -265,12 +265,16 @@ func (a *LocalAuthenticator) Logout(token string) error {
 
 func generateToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("failed to read random bytes for token: " + err.Error())
+	}
 	return "aw_" + hex.EncodeToString(b)
 }
 
 func generateID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("failed to read random bytes for ID: " + err.Error())
+	}
 	return "usr_" + hex.EncodeToString(b)[:16]
 }

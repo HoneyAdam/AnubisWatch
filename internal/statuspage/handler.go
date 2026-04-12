@@ -941,6 +941,152 @@ func (h *Handler) BadgeHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(svg))
 }
 
+// WidgetHandler serves an embeddable HTML/JS status badge widget
+func (h *Handler) WidgetHandler(w http.ResponseWriter, r *http.Request) {
+	pageID := r.URL.Query().Get("page")
+	if pageID == "" {
+		http.Error(w, "Page ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Get page
+	page, err := h.repository.GetStatusPageBySlug(pageID)
+	if err != nil {
+		http.Error(w, "Status page not found", http.StatusNotFound)
+		return
+	}
+
+	// Get souls status
+	souls := make([]core.SoulStatusInfo, 0, len(page.Souls))
+	for _, soulID := range page.Souls {
+		soul, err := h.repository.GetSoul(soulID)
+		if err != nil {
+			continue
+		}
+
+		judgments, err := h.repository.GetSoulJudgments(soulID, 1)
+		var lastJudgment core.Judgment
+		if err == nil && len(judgments) > 0 {
+			lastJudgment = judgments[0]
+		}
+
+		status := "unknown"
+		if lastJudgment.ID != "" {
+			status = string(lastJudgment.Status)
+		}
+
+		souls = append(souls, core.SoulStatusInfo{
+			ID:     soul.ID,
+			Name:   soul.Name,
+			Status: status,
+		})
+	}
+
+	overallStatus := core.CalculateOverallStatus(souls)
+
+	var statusColor string
+	switch overallStatus.Status {
+	case "operational":
+		statusColor = "#22c55e"
+	case "degraded":
+		statusColor = "#f59e0b"
+	case "down", "major_outage":
+		statusColor = "#ef4444"
+	default:
+		statusColor = "#6b7280"
+	}
+
+	style := r.URL.Query().Get("style")
+	showDetails := style == "detailed"
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Frame-Options", "ALLOWALL")
+
+	if showDetails {
+		soulRows := ""
+		for _, soul := range souls {
+			dotColor := statusColor
+			switch soul.Status {
+			case "alive", "operational":
+				dotColor = "#22c55e"
+			case "degraded":
+				dotColor = "#f59e0b"
+			case "dead", "down":
+				dotColor = "#ef4444"
+			default:
+				dotColor = "#6b7280"
+			}
+			soulRows += fmt.Sprintf(`<tr>
+				<td style="padding:4px 8px;font-size:12px;">%s</td>
+				<td style="padding:4px 8px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%%;background:%s;"></span></td>
+			</tr>`, soul.Name, dotColor)
+		}
+
+		html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;background:transparent}
+.widget{border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff;min-width:200px}
+.header{display:flex;align-items:center;gap:6px;padding:8px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb}
+.dot{width:10px;height:10px;border-radius:50%%;background:%s;flex-shrink:0}
+.title{font-weight:600;color:#111827;flex:1}
+.status{font-weight:500;color:%s;font-size:12px}
+table{width:100%%;border-collapse:collapse}
+tbody tr:hover{background:#f3f4f6}
+.footer{padding:4px 8px;text-align:right;font-size:10px;color:#9ca3af;border-top:1px solid #e5e7eb}
+.footer a{color:#6366f1;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="widget">
+  <div class="header">
+    <span class="dot"></span>
+    <span class="title">%s</span>
+    <span class="status">%s</span>
+  </div>
+  <table>
+    <tbody>%s</tbody>
+  </table>
+  <div class="footer">Powered by <a href="https://anubiswatch.com" target="_blank">AnubisWatch</a></div>
+</div>
+</body>
+</html>`, statusColor, statusColor, page.Name, strings.ToTitle(string(overallStatus.Status[0]))+overallStatus.Status[1:], soulRows)
+
+		w.Write([]byte(html))
+	} else {
+		// Compact badge style
+		html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:transparent}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;background:%s;color:#fff;font-size:12px;font-weight:500;cursor:pointer;text-decoration:none;transition:opacity .2s}
+.badge:hover{opacity:.85}
+.dot{width:8px;height:8px;border-radius:50%%;background:#fff;animation:pulse 2s infinite}
+@keyframes pulse{0%%,100%%{opacity:1}50%%{opacity:.4}}
+</style>
+</head>
+<body>
+<a class="badge" href="/status/%s" target="_blank">
+  <span class="dot"></span>
+  %s: %s
+</a>
+</body>
+</html>`, statusColor, pageID, page.Name, strings.ToTitle(string(overallStatus.Status[0]))+overallStatus.Status[1:])
+
+		w.Write([]byte(html))
+	}
+}
+
 // RSSFeedHandler serves RSS feed for status page updates
 func (h *Handler) RSSFeedHandler(w http.ResponseWriter, r *http.Request) {
 	pageID := strings.TrimPrefix(r.URL.Path, "/status/")
@@ -1017,6 +1163,9 @@ func (h *Handler) Router() http.Handler {
 
 	// Badge endpoint (embeddable status badge)
 	mux.HandleFunc("/badge/", h.BadgeHandler)
+
+	// Widget endpoint (embeddable HTML status widget)
+	mux.HandleFunc("/widget", h.WidgetHandler)
 
 	// ACME challenge handler for Let's Encrypt
 	mux.Handle("/.well-known/acme-challenge/", h.acmeManager.ChallengeHandler())

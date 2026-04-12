@@ -89,13 +89,9 @@ func (db *CobaltDB) ListVerdicts(ctx context.Context, workspaceID string, status
 	}
 
 	// Sort by fired time descending
-	for i := 0; i < len(verdicts)-1; i++ {
-		for j := i + 1; j < len(verdicts); j++ {
-			if verdicts[i].FiredAt.Before(verdicts[j].FiredAt) {
-				verdicts[i], verdicts[j] = verdicts[j], verdicts[i]
-			}
-		}
-	}
+	sort.Slice(verdicts, func(i, j int) bool {
+		return verdicts[i].FiredAt.After(verdicts[j].FiredAt)
+	})
 
 	return verdicts, nil
 }
@@ -287,13 +283,9 @@ func (db *CobaltDB) QueryJourneyRuns(ctx context.Context, workspaceID, journeyID
 	}
 
 	// Sort by started time descending
-	for i := 0; i < len(runs)-1; i++ {
-		for j := i + 1; j < len(runs); j++ {
-			if runs[i].StartedAt < runs[j].StartedAt {
-				runs[i], runs[j] = runs[j], runs[i]
-			}
-		}
-	}
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].StartedAt > runs[j].StartedAt
+	})
 
 	if limit > 0 && len(runs) > limit {
 		runs = runs[:limit]
@@ -332,7 +324,7 @@ func (db *CobaltDB) GetJourneyRun(ctx context.Context, workspaceID, journeyID, r
 
 // SaveChannel saves an alert channel configuration
 func (db *CobaltDB) SaveChannel(ctx context.Context, ch *core.ChannelConfig) error {
-	workspaceID := "default"
+	workspaceID := core.WorkspaceIDFromContext(ctx)
 	key := fmt.Sprintf("%s/channels/%s", workspaceID, ch.Name)
 
 	data, err := json.Marshal(ch)
@@ -345,7 +337,7 @@ func (db *CobaltDB) SaveChannel(ctx context.Context, ch *core.ChannelConfig) err
 
 // GetChannel retrieves a channel by name
 func (db *CobaltDB) GetChannel(ctx context.Context, id string) (*core.ChannelConfig, error) {
-	workspaceID := "default"
+	workspaceID := core.WorkspaceIDFromContext(ctx)
 	key := fmt.Sprintf("%s/channels/%s", workspaceID, id)
 
 	data, err := db.Get(key)
@@ -391,14 +383,15 @@ func (db *CobaltDB) ListChannels(ctx context.Context, workspaceID string) ([]*co
 
 // DeleteChannel removes a channel
 func (db *CobaltDB) DeleteChannel(ctx context.Context, id string) error {
-	workspaceID := "default"
+	workspaceID := core.WorkspaceIDFromContext(ctx)
 	key := fmt.Sprintf("%s/channels/%s", workspaceID, id)
 	return db.Delete(key)
 }
 
 // ListJudgments returns judgments for a soul within a time range
 func (db *CobaltDB) ListJudgments(ctx context.Context, soulID string, start, end time.Time, limit int) ([]*core.Judgment, error) {
-	prefix := fmt.Sprintf("default/judgments/%s/", soulID)
+	workspaceID := core.WorkspaceIDFromContext(ctx)
+	prefix := fmt.Sprintf("%s/judgments/%s/", workspaceID, soulID)
 	results, err := db.PrefixScan(prefix)
 	if err != nil {
 		return nil, err
@@ -418,6 +411,10 @@ func (db *CobaltDB) ListJudgments(ctx context.Context, soulID string, start, end
 			judgments = append(judgments, &j)
 		}
 	}
+
+	sort.Slice(judgments, func(i, j int) bool {
+		return judgments[i].Timestamp.After(judgments[j].Timestamp)
+	})
 
 	if len(judgments) > limit {
 		judgments = judgments[:limit]
@@ -620,7 +617,11 @@ func (db *CobaltDB) GetRaftLogEntry(ctx context.Context, index uint64) (term uin
 
 // SaveAlertChannel saves an alert channel
 func (db *CobaltDB) SaveAlertChannel(ch *core.AlertChannel) error {
-	key := fmt.Sprintf("default/alerts/channels/%s", ch.ID)
+	ws := ch.WorkspaceID
+	if ws == "" {
+		ws = "default"
+	}
+	key := fmt.Sprintf("%s/alerts/channels/%s", ws, ch.ID)
 	data, err := json.Marshal(ch)
 	if err != nil {
 		return fmt.Errorf("failed to marshal channel: %w", err)
@@ -629,8 +630,11 @@ func (db *CobaltDB) SaveAlertChannel(ch *core.AlertChannel) error {
 }
 
 // GetAlertChannel retrieves an alert channel by ID
-func (db *CobaltDB) GetAlertChannel(id string) (*core.AlertChannel, error) {
-	key := fmt.Sprintf("default/alerts/channels/%s", id)
+func (db *CobaltDB) GetAlertChannel(id string, workspace string) (*core.AlertChannel, error) {
+	if workspace == "" {
+		workspace = "default"
+	}
+	key := fmt.Sprintf("%s/alerts/channels/%s", workspace, id)
 	data, err := db.Get(key)
 	if err != nil {
 		return nil, err
@@ -643,8 +647,11 @@ func (db *CobaltDB) GetAlertChannel(id string) (*core.AlertChannel, error) {
 }
 
 // ListAlertChannels returns all alert channels
-func (db *CobaltDB) ListAlertChannels() ([]*core.AlertChannel, error) {
-	prefix := "default/alerts/channels/"
+func (db *CobaltDB) ListAlertChannels(workspace string) ([]*core.AlertChannel, error) {
+	if workspace == "" {
+		workspace = "default"
+	}
+	prefix := fmt.Sprintf("%s/alerts/channels/", workspace)
 	results, err := db.PrefixScan(prefix)
 	if err != nil {
 		return nil, err
@@ -666,13 +673,20 @@ func (db *CobaltDB) ListAlertChannels() ([]*core.AlertChannel, error) {
 }
 
 // DeleteAlertChannel removes an alert channel
-func (db *CobaltDB) DeleteAlertChannel(id string) error {
-	return db.Delete(fmt.Sprintf("default/alerts/channels/%s", id))
+func (db *CobaltDB) DeleteAlertChannel(id string, workspace string) error {
+	if workspace == "" {
+		workspace = "default"
+	}
+	return db.Delete(fmt.Sprintf("%s/alerts/channels/%s", workspace, id))
 }
 
 // SaveAlertRule saves an alert rule
 func (db *CobaltDB) SaveAlertRule(rule *core.AlertRule) error {
-	key := fmt.Sprintf("default/alerts/rules/%s", rule.ID)
+	ws := rule.WorkspaceID
+	if ws == "" {
+		ws = "default"
+	}
+	key := fmt.Sprintf("%s/alerts/rules/%s", ws, rule.ID)
 	data, err := json.Marshal(rule)
 	if err != nil {
 		return fmt.Errorf("failed to marshal rule: %w", err)
@@ -681,8 +695,11 @@ func (db *CobaltDB) SaveAlertRule(rule *core.AlertRule) error {
 }
 
 // GetAlertRule retrieves an alert rule by ID
-func (db *CobaltDB) GetAlertRule(id string) (*core.AlertRule, error) {
-	key := fmt.Sprintf("default/alerts/rules/%s", id)
+func (db *CobaltDB) GetAlertRule(id string, workspace string) (*core.AlertRule, error) {
+	if workspace == "" {
+		workspace = "default"
+	}
+	key := fmt.Sprintf("%s/alerts/rules/%s", workspace, id)
 	data, err := db.Get(key)
 	if err != nil {
 		return nil, err
@@ -695,8 +712,11 @@ func (db *CobaltDB) GetAlertRule(id string) (*core.AlertRule, error) {
 }
 
 // ListAlertRules returns all alert rules
-func (db *CobaltDB) ListAlertRules() ([]*core.AlertRule, error) {
-	prefix := "default/alerts/rules/"
+func (db *CobaltDB) ListAlertRules(workspace string) ([]*core.AlertRule, error) {
+	if workspace == "" {
+		workspace = "default"
+	}
+	prefix := fmt.Sprintf("%s/alerts/rules/", workspace)
 	results, err := db.PrefixScan(prefix)
 	if err != nil {
 		return nil, err
@@ -718,8 +738,11 @@ func (db *CobaltDB) ListAlertRules() ([]*core.AlertRule, error) {
 }
 
 // DeleteAlertRule removes an alert rule
-func (db *CobaltDB) DeleteAlertRule(id string) error {
-	return db.Delete(fmt.Sprintf("default/alerts/rules/%s", id))
+func (db *CobaltDB) DeleteAlertRule(id string, workspace string) error {
+	if workspace == "" {
+		workspace = "default"
+	}
+	return db.Delete(fmt.Sprintf("%s/alerts/rules/%s", workspace, id))
 }
 
 // SaveAlertEvent saves an alert event
@@ -757,13 +780,9 @@ func (db *CobaltDB) ListAlertEvents(soulID string, limit int) ([]*core.AlertEven
 	}
 
 	// Sort by timestamp descending
-	for i := 0; i < len(events)-1; i++ {
-		for j := i + 1; j < len(events); j++ {
-			if events[i].Timestamp.Before(events[j].Timestamp) {
-				events[i], events[j] = events[j], events[i]
-			}
-		}
-	}
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].Timestamp.After(events[j].Timestamp)
+	})
 
 	if limit > 0 && len(events) > limit {
 		events = events[:limit]
@@ -1035,5 +1054,58 @@ func (db *CobaltDB) ListDashboards() ([]*core.CustomDashboard, error) {
 
 func (db *CobaltDB) DeleteDashboard(id string) error {
 	key := fmt.Sprintf("default/dashboards/%s", id)
+	return db.Delete(key)
+}
+
+// MaintenanceWindow storage methods
+
+func (db *CobaltDB) SaveMaintenanceWindow(w *core.MaintenanceWindow) error {
+	if w.ID == "" {
+		w.ID = core.GenerateID()
+	}
+	key := fmt.Sprintf("default/maintenance/%s", w.ID)
+	data, err := json.Marshal(w)
+	if err != nil {
+		return fmt.Errorf("failed to marshal maintenance window: %w", err)
+	}
+	return db.Put(key, data)
+}
+
+func (db *CobaltDB) GetMaintenanceWindow(id string) (*core.MaintenanceWindow, error) {
+	key := fmt.Sprintf("default/maintenance/%s", id)
+	data, err := db.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	var w core.MaintenanceWindow
+	if err := json.Unmarshal(data, &w); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal maintenance window: %w", err)
+	}
+	return &w, nil
+}
+
+func (db *CobaltDB) ListMaintenanceWindows() ([]*core.MaintenanceWindow, error) {
+	prefix := "default/maintenance/"
+	results, err := db.PrefixScan(prefix)
+	if err != nil {
+		return nil, err
+	}
+	windows := make([]*core.MaintenanceWindow, 0, len(results))
+	for _, data := range results {
+		if data == nil {
+			continue
+		}
+		var w core.MaintenanceWindow
+		if err := json.Unmarshal(data, &w); err != nil {
+			db.logger.Warn("failed to unmarshal maintenance window", "err", err)
+			continue
+		}
+		windows = append(windows, &w)
+	}
+	return windows, nil
+}
+
+func (db *CobaltDB) DeleteMaintenanceWindow(id string) error {
+	key := fmt.Sprintf("default/maintenance/%s", id)
 	return db.Delete(key)
 }

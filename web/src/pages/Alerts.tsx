@@ -65,12 +65,50 @@ export function Alerts() {
   const [showRuleModal, setShowRuleModal] = useState(false)
   const [testingChannel, setTestingChannel] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<{ id: string; success: boolean; message: string } | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  // Channel form state
+  const [chName, setChName] = useState('')
+  const [chType, setChType] = useState<ChannelType>('webhook')
+  const [chWebhookUrl, setChWebhookUrl] = useState('')
+  const [chEmail, setChEmail] = useState('')
+  const [chSlackUrl, setChSlackUrl] = useState('')
+  const [chEnabled, setChEnabled] = useState(true)
+
+  // Rule form state
+  const [ruleName, setRuleName] = useState('')
+  const [ruleCondition, setRuleCondition] = useState('response_time')
+  const [ruleThreshold, setRuleThreshold] = useState(5000)
+  const [ruleSeverity, setRuleSeverity] = useState<Severity>('critical')
+  const [ruleConsecutive, setRuleConsecutive] = useState(3)
+  const [ruleEnabled, setRuleEnabled] = useState(true)
+
+  const resetChannelForm = () => {
+    setChName('')
+    setChType('webhook')
+    setChWebhookUrl('')
+    setChEmail('')
+    setChSlackUrl('')
+    setChEnabled(true)
+    setSaving(false)
+  }
+
+  const resetRuleForm = () => {
+    setRuleName('')
+    setRuleCondition('response_time')
+    setRuleThreshold(5000)
+    setRuleSeverity('critical')
+    setRuleConsecutive(3)
+    setRuleEnabled(true)
+    setSaving(false)
+  }
 
   const {
     channels,
     loading: channelsLoading,
     error: channelsError,
     refetch: refetchChannels,
+    createChannel,
     updateChannel,
     deleteChannel,
     testChannel
@@ -81,6 +119,7 @@ export function Alerts() {
     loading: rulesLoading,
     error: rulesError,
     refetch: refetchRules,
+    createRule,
     updateRule,
     deleteRule
   } = useRules()
@@ -120,6 +159,52 @@ export function Alerts() {
   const handleDeleteRule = async (id: string) => {
     if (!confirm('Are you sure you want to delete this rule?')) return
     await deleteRule(id)
+  }
+
+  const handleCreateChannel = async () => {
+    if (!chName.trim()) return
+    setSaving(true)
+    try {
+      const config: Record<string, string> = {}
+      if (chType === 'webhook') config.url = chWebhookUrl
+      else if (chType === 'email') config.email = chEmail
+      else if (chType === 'slack') config.webhook_url = chSlackUrl
+
+      await createChannel({
+        name: chName,
+        type: chType,
+        config,
+        enabled: chEnabled
+      } as any)
+      setShowChannelModal(false)
+      resetChannelForm()
+    } catch (err) {
+      // Failed to create channel
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCreateRule = async () => {
+    if (!ruleName.trim()) return
+    setSaving(true)
+    try {
+      await createRule({
+        name: ruleName,
+        condition: ruleCondition,
+        threshold: ruleThreshold,
+        severity: ruleSeverity,
+        consecutive: ruleConsecutive,
+        enabled: ruleEnabled,
+        channels: []
+      } as any)
+      setShowRuleModal(false)
+      resetRuleForm()
+    } catch (err) {
+      // Failed to create rule
+    } finally {
+      setSaving(false)
+    }
   }
 
   const stats = {
@@ -168,12 +253,13 @@ export function Alerts() {
           <button
             onClick={handleRefresh}
             className={`p-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl transition-all ${loading ? 'animate-spin' : ''}`}
+            aria-label="Refresh"
           >
             <RefreshCw className="w-5 h-5" />
           </button>
           {activeTab === 'rules' && (
             <button
-              onClick={() => setShowRuleModal(true)}
+              onClick={() => { resetRuleForm(); setShowRuleModal(true) }}
               className="flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl transition-all font-medium shadow-lg shadow-amber-600/20"
             >
               <Plus className="w-4 h-4" />
@@ -182,7 +268,7 @@ export function Alerts() {
           )}
           {activeTab === 'channels' && (
             <button
-              onClick={() => setShowChannelModal(true)}
+              onClick={() => { resetChannelForm(); setShowChannelModal(true) }}
               className="flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl transition-all font-medium shadow-lg shadow-amber-600/20"
             >
               <Plus className="w-4 h-4" />
@@ -256,7 +342,7 @@ export function Alerts() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-gray-700/50">
+      <div className="flex items-center gap-2 border-b border-gray-700/50" role="tablist" aria-label="Alerts sections">
         {[
           { id: 'rules' as const, label: 'Alert Rules', count: stats.totalRules },
           { id: 'channels' as const, label: 'Channels', count: stats.totalChannels },
@@ -265,6 +351,10 @@ export function Alerts() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            aria-controls={`alerts-panel-${tab.id}`}
+            id={`alerts-tab-${tab.id}`}
             className={`px-6 py-3 font-medium text-sm transition-all border-b-2 flex items-center gap-2 ${
               activeTab === tab.id
                 ? 'text-amber-400 border-amber-400'
@@ -327,14 +417,14 @@ export function Alerts() {
 
       {/* Content */}
       {activeTab === 'rules' && (
-        <div className="bg-gradient-to-br from-gray-900 to-gray-800/50 border border-gray-700/50 rounded-2xl overflow-hidden">
+        <div className="bg-gradient-to-br from-gray-900 to-gray-800/50 border border-gray-700/50 rounded-2xl overflow-hidden" role="tabpanel" id="alerts-panel-rules" aria-labelledby="alerts-tab-rules">
           {filteredRules.length === 0 ? (
             <div className="text-center py-16">
               <Settings className="w-12 h-12 text-gray-600 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-white mb-2">No alert rules yet</h3>
               <p className="text-gray-400 mb-4">Create your first alert rule to get notified when issues occur</p>
               <button
-                onClick={() => setShowRuleModal(true)}
+                onClick={() => { resetRuleForm(); setShowRuleModal(true) }}
                 className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors"
               >
                 Create Rule
@@ -384,6 +474,9 @@ export function Alerts() {
                     <td className="px-6 py-4">
                       <button
                         onClick={() => handleToggleRule(rule.id, rule.enabled)}
+                        role="switch"
+                        aria-checked={rule.enabled}
+                        aria-label={`${rule.enabled ? 'Disable' : 'Enable'} rule ${rule.name}`}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                           rule.enabled ? 'bg-emerald-500' : 'bg-gray-700'
                         }`}
@@ -397,12 +490,13 @@ export function Alerts() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-1">
-                        <button className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors" title="Edit">
+                        <button className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors" aria-label={`Edit rule`} title="Edit">
                           <Edit className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDeleteRule(rule.id)}
                           className="p-2 text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                          aria-label={`Delete rule`}
                           title="Delete"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -418,7 +512,7 @@ export function Alerts() {
       )}
 
       {activeTab === 'channels' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4" role="tabpanel" id="alerts-panel-channels" aria-labelledby="alerts-tab-channels">
           {channels.map((channel) => {
             const config = channelConfig[channel.type as ChannelType] || channelConfig.webhook
             const Icon = config.icon
@@ -459,6 +553,7 @@ export function Alerts() {
                     onClick={() => handleTestChannel(channel.id)}
                     disabled={testingChannel === channel.id}
                     className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
+                    aria-label={`Test channel ${channel.name}`}
                     title="Test"
                   >
                     {testingChannel === channel.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <TestTube className="w-4 h-4" />}
@@ -466,16 +561,22 @@ export function Alerts() {
                   <button
                     onClick={() => handleToggleChannel(channel.id, channel.enabled)}
                     className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                    aria-label={channel.enabled ? `Disable ${channel.name}` : `Enable ${channel.name}`}
                     title={channel.enabled ? 'Disable' : 'Enable'}
                   >
                     <ToggleRight className={`w-4 h-4 ${channel.enabled ? 'text-emerald-400' : ''}`} />
                   </button>
-                  <button className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors" title="Edit">
+                  <button
+                    className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                    aria-label={`Edit channel ${channel.name}`}
+                    title="Edit"
+                  >
                     <Edit className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDeleteChannel(channel.id)}
                     className="p-2 text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                    aria-label={`Delete channel ${channel.name}`}
                     title="Delete"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -485,7 +586,7 @@ export function Alerts() {
             )
           })}
           <button
-            onClick={() => setShowChannelModal(true)}
+            onClick={() => { resetChannelForm(); setShowChannelModal(true) }}
             className="bg-gradient-to-br from-gray-900 to-gray-800/50 border border-dashed border-gray-700/50 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 hover:border-amber-500 transition-all text-gray-500 min-h-[180px]"
           >
             <div className="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center">
@@ -500,7 +601,7 @@ export function Alerts() {
       )}
 
       {activeTab === 'history' && (
-        <div className="bg-gradient-to-br from-gray-900 to-gray-800/50 border border-gray-700/50 rounded-2xl overflow-hidden">
+        <div className="bg-gradient-to-br from-gray-900 to-gray-800/50 border border-gray-700/50 rounded-2xl overflow-hidden" role="tabpanel" id="alerts-panel-history" aria-labelledby="alerts-tab-history">
           {alertHistory.length === 0 ? (
             <div className="text-center py-16">
               <Bell className="w-12 h-12 text-gray-600 mx-auto mb-4" />
@@ -575,32 +676,241 @@ export function Alerts() {
         </div>
       )}
 
-      {/* Channel Modal Placeholder */}
+      {/* Channel Modal */}
       {showChannelModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-6 w-full max-w-lg">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-white">Add Notification Channel</h2>
-              <button onClick={() => setShowChannelModal(false)} className="p-2 text-gray-400 hover:text-white">
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="channel-modal-title"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowChannelModal(false) }}
+        >
+          <div className="bg-gray-900 border border-gray-700/50 rounded-2xl w-full max-w-lg">
+            <div className="flex items-center justify-between p-6 border-b border-gray-700/50">
+              <div>
+                <h2 id="channel-modal-title" className="text-xl font-semibold text-white">Add Notification Channel</h2>
+                <p className="text-sm text-gray-400 mt-1">Where alerts will be sent</p>
+              </div>
+              <button onClick={() => setShowChannelModal(false)} className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition-colors" aria-label="Close dialog">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-gray-400">Channel creation form coming soon...</p>
+
+            <div className="p-6 space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Name</label>
+                <input
+                  type="text"
+                  value={chName}
+                  onChange={(e) => setChName(e.target.value)}
+                  placeholder="e.g., Ops Slack"
+                  className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-500/50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-3">Type</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {([
+                    { value: 'webhook' as ChannelType, label: 'Webhook' },
+                    { value: 'slack' as ChannelType, label: 'Slack' },
+                    { value: 'email' as ChannelType, label: 'Email' },
+                    { value: 'discord' as ChannelType, label: 'Discord' },
+                    { value: 'pagerduty' as ChannelType, label: 'PagerDuty' },
+                  ]).map((t) => (
+                    <button
+                      key={t.value}
+                      onClick={() => setChType(t.value)}
+                      className={`p-3 rounded-xl text-sm font-medium transition-all ${
+                        chType === t.value
+                          ? 'bg-amber-500/10 border-2 border-amber-500 text-amber-400'
+                          : 'bg-gray-950 border border-gray-700/50 text-gray-400 hover:border-gray-600'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {chType === 'webhook' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Webhook URL</label>
+                  <input
+                    type="url"
+                    value={chWebhookUrl}
+                    onChange={(e) => setChWebhookUrl(e.target.value)}
+                    placeholder="https://example.com/webhook"
+                    className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+              )}
+
+              {chType === 'slack' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Slack Webhook URL</label>
+                  <input
+                    type="url"
+                    value={chSlackUrl}
+                    onChange={(e) => setChSlackUrl(e.target.value)}
+                    placeholder="https://hooks.slack.com/services/..."
+                    className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+              )}
+
+              {chType === 'email' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Email Address</label>
+                  <input
+                    type="email"
+                    value={chEmail}
+                    onChange={(e) => setChEmail(e.target.value)}
+                    placeholder="ops@example.com"
+                    className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+              )}
+
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={chEnabled}
+                  onChange={(e) => setChEnabled(e.target.checked)}
+                  className="w-5 h-5 rounded border-gray-600 bg-gray-800 text-emerald-500 focus:ring-emerald-500"
+                />
+                <span className="text-sm text-gray-300">Enabled</span>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-700/50">
+              <button onClick={() => setShowChannelModal(false)} className="px-5 py-2.5 text-gray-400 hover:text-white transition-colors">Cancel</button>
+              <button
+                onClick={handleCreateChannel}
+                disabled={saving || !chName.trim()}
+                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-colors font-medium"
+              >
+                {saving ? 'Creating...' : 'Add Channel'}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Rule Modal Placeholder */}
+      {/* Rule Modal */}
       {showRuleModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-6 w-full max-w-lg">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-white">Add Alert Rule</h2>
-              <button onClick={() => setShowRuleModal(false)} className="p-2 text-gray-400 hover:text-white">
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="rule-modal-title"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowRuleModal(false) }}
+        >
+          <div className="bg-gray-900 border border-gray-700/50 rounded-2xl w-full max-w-lg">
+            <div className="flex items-center justify-between p-6 border-b border-gray-700/50">
+              <div>
+                <h2 id="rule-modal-title" className="text-xl font-semibold text-white">Add Alert Rule</h2>
+                <p className="text-sm text-gray-400 mt-1">Define when to trigger alerts</p>
+              </div>
+              <button onClick={() => setShowRuleModal(false)} className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition-colors" aria-label="Close dialog">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-gray-400">Rule creation form coming soon...</p>
+
+            <div className="p-6 space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Name</label>
+                <input
+                  type="text"
+                  value={ruleName}
+                  onChange={(e) => setRuleName(e.target.value)}
+                  placeholder="e.g., High Latency"
+                  className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-500/50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Condition</label>
+                <select
+                  value={ruleCondition}
+                  onChange={(e) => setRuleCondition(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50"
+                >
+                  <option value="response_time">Response Time &gt; threshold</option>
+                  <option value="error_rate">Error Rate &gt; threshold</option>
+                  <option value="downtime">Service Down</option>
+                  <option value="ssl_expiry">SSL Certificate Expiring</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Threshold (ms)</label>
+                  <input
+                    type="number"
+                    value={ruleThreshold}
+                    onChange={(e) => setRuleThreshold(parseInt(e.target.value) || 5000)}
+                    min={100}
+                    className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Consecutive Failures</label>
+                  <input
+                    type="number"
+                    value={ruleConsecutive}
+                    onChange={(e) => setRuleConsecutive(parseInt(e.target.value) || 3)}
+                    min={1}
+                    max={10}
+                    className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-3">Severity</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {([
+                    { value: 'critical' as Severity, label: 'Critical', color: 'text-rose-400 bg-rose-500/10' },
+                    { value: 'warning' as Severity, label: 'Warning', color: 'text-amber-400 bg-amber-500/10' },
+                    { value: 'info' as Severity, label: 'Info', color: 'text-blue-400 bg-blue-500/10' },
+                  ]).map((s) => (
+                    <button
+                      key={s.value}
+                      onClick={() => setRuleSeverity(s.value)}
+                      className={`p-3 rounded-xl text-sm font-medium transition-all ${
+                        ruleSeverity === s.value
+                          ? `${s.color} border-2 border-current`
+                          : 'bg-gray-950 border border-gray-700/50 text-gray-400 hover:border-gray-600'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={ruleEnabled}
+                  onChange={(e) => setRuleEnabled(e.target.checked)}
+                  className="w-5 h-5 rounded border-gray-600 bg-gray-800 text-emerald-500 focus:ring-emerald-500"
+                />
+                <span className="text-sm text-gray-300">Enabled</span>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-700/50">
+              <button onClick={() => setShowRuleModal(false)} className="px-5 py-2.5 text-gray-400 hover:text-white transition-colors">Cancel</button>
+              <button
+                onClick={handleCreateRule}
+                disabled={saving || !ruleName.trim()}
+                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-colors font-medium"
+              >
+                {saving ? 'Creating...' : 'Add Rule'}
+              </button>
+            </div>
           </div>
         </div>
       )}

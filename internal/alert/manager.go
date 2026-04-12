@@ -54,14 +54,14 @@ type ChannelDispatcher interface {
 // AlertStorage persists alert data
 type AlertStorage interface {
 	SaveChannel(channel *core.AlertChannel) error
-	GetChannel(id string) (*core.AlertChannel, error)
-	ListChannels() ([]*core.AlertChannel, error)
-	DeleteChannel(id string) error
+	GetChannel(id string, workspace string) (*core.AlertChannel, error)
+	ListChannels(workspace string) ([]*core.AlertChannel, error)
+	DeleteChannel(id string, workspace string) error
 
 	SaveRule(rule *core.AlertRule) error
-	GetRule(id string) (*core.AlertRule, error)
-	ListRules() ([]*core.AlertRule, error)
-	DeleteRule(id string) error
+	GetRule(id string, workspace string) (*core.AlertRule, error)
+	ListRules(workspace string) ([]*core.AlertRule, error)
+	DeleteRule(id string, workspace string) error
 
 	SaveEvent(event *core.AlertEvent) error
 	ListEvents(soulID string, limit int) ([]*core.AlertEvent, error)
@@ -112,7 +112,7 @@ func (m *Manager) Start() error {
 
 	// Load channels and rules from storage
 	if m.storage != nil {
-		channels, err := m.storage.ListChannels()
+		channels, err := m.storage.ListChannels("")
 		if err != nil {
 			m.logger.Warn("Failed to load channels", "error", err)
 		} else {
@@ -121,7 +121,7 @@ func (m *Manager) Start() error {
 			}
 		}
 
-		rules, err := m.storage.ListRules()
+		rules, err := m.storage.ListRules("")
 		if err != nil {
 			m.logger.Warn("Failed to load rules", "error", err)
 		} else {
@@ -187,12 +187,21 @@ func (m *Manager) RegisterChannel(channel *core.AlertChannel) error {
 
 // DeleteChannel removes an alert channel
 func (m *Manager) DeleteChannel(id string) error {
+	m.mu.RLock()
+	ch := m.channels[id]
+	m.mu.RUnlock()
+
+	workspace := "default"
+	if ch != nil && ch.WorkspaceID != "" {
+		workspace = ch.WorkspaceID
+	}
+
 	m.mu.Lock()
 	delete(m.channels, id)
 	m.mu.Unlock()
 
 	if m.storage != nil {
-		if err := m.storage.DeleteChannel(id); err != nil {
+		if err := m.storage.DeleteChannel(id, workspace); err != nil {
 			m.logger.Warn("Failed to delete channel", "error", err)
 		}
 	}
@@ -221,12 +230,21 @@ func (m *Manager) RegisterRule(rule *core.AlertRule) error {
 
 // DeleteRule removes an alert rule
 func (m *Manager) DeleteRule(id string) error {
+	m.mu.RLock()
+	rule := m.rules[id]
+	m.mu.RUnlock()
+
+	workspace := "default"
+	if rule != nil && rule.WorkspaceID != "" {
+		workspace = rule.WorkspaceID
+	}
+
 	m.mu.Lock()
 	delete(m.rules, id)
 	m.mu.Unlock()
 
 	if m.storage != nil {
-		if err := m.storage.DeleteRule(id); err != nil {
+		if err := m.storage.DeleteRule(id, workspace); err != nil {
 			m.logger.Warn("Failed to delete rule", "error", err)
 		}
 	}

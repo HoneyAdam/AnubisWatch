@@ -19,6 +19,7 @@ type TimeSeriesStore struct {
 	db     *CobaltDB
 	config core.TimeSeriesConfig
 	logger *slog.Logger
+	stopCh chan struct{}
 }
 
 // TimeResolution represents different time granularities
@@ -213,7 +214,15 @@ func truncateToResolution(t time.Time, resolution TimeResolution) time.Time {
 
 // StartCompaction starts the background compaction goroutine
 func (ts *TimeSeriesStore) StartCompaction() {
+	ts.stopCh = make(chan struct{})
 	go ts.compactionLoop()
+}
+
+// StopCompaction gracefully stops the compaction goroutine
+func (ts *TimeSeriesStore) StopCompaction() {
+	if ts.stopCh != nil {
+		close(ts.stopCh)
+	}
 }
 
 // compactionLoop runs compaction at regular intervals
@@ -221,9 +230,15 @@ func (ts *TimeSeriesStore) compactionLoop() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		if err := ts.runCompaction(); err != nil {
-			ts.logger.Error("compaction failed", "err", err)
+	for {
+		select {
+		case <-ts.stopCh:
+			ts.logger.Info("compaction stopped")
+			return
+		case <-ticker.C:
+			if err := ts.runCompaction(); err != nil {
+				ts.logger.Error("compaction failed", "err", err)
+			}
 		}
 	}
 }
@@ -341,7 +356,14 @@ func (ts *TimeSeriesStore) compactToResolution(srcRes, tgtRes TimeResolution, th
 	return nil
 }
 
+// weightedLatency represents a latency value with its weight (count)
+type weightedLatency struct {
+	value float64
+	count int
+}
+
 // aggregateAndSave aggregates multiple source summaries into a target summary
+// Uses weighted percentile algorithm to avoid O(N*M) memory expansion.
 func (ts *TimeSeriesStore) aggregateAndSave(workspaceID, soulID string, resolution TimeResolution, bucketTime time.Time, sources []*JudgmentSummary) error {
 	key := fmt.Sprintf("%s/ts/%s/%s/%d", workspaceID, soulID, resolution, bucketTime.Unix())
 
@@ -362,17 +384,23 @@ func (ts *TimeSeriesStore) aggregateAndSave(workspaceID, soulID string, resoluti
 
 	totalCount := 0
 	successCount := 0
-	var latencies []float64
+	totalLatencySum := 0.0
+	var weighted []weightedLatency
+	globalMin := math.Inf(1)
+	globalMax := math.Inf(-1)
 
 	for _, src := range sources {
 		totalCount += src.Count
 		successCount += src.SuccessCount
+		totalLatencySum += src.AvgLatency * float64(src.Count)
 
-		// Collect latency estimates
 		if src.Count > 0 {
-			// Weight by count for accurate averaging
-			for i := 0; i < src.Count; i++ {
-				latencies = append(latencies, src.AvgLatency)
+			weighted = append(weighted, weightedLatency{value: src.AvgLatency, count: src.Count})
+			if src.MinLatency < globalMin {
+				globalMin = src.MinLatency
+			}
+			if src.MaxLatency > globalMax {
+				globalMax = src.MaxLatency
 			}
 		}
 	}
@@ -382,37 +410,21 @@ func (ts *TimeSeriesStore) aggregateAndSave(workspaceID, soulID string, resoluti
 	target.FailureCount = totalCount - successCount
 	target.UptimePercent = float64(successCount) / float64(totalCount) * 100
 
-	// Calculate aggregated latency stats
-	if len(latencies) > 0 {
-		sort.Float64s(latencies)
-		target.MinLatency = latencies[0]
-		target.MaxLatency = latencies[len(latencies)-1]
+	// Calculate aggregated latency stats using weighted percentiles
+	if len(weighted) > 0 {
+		sort.Slice(weighted, func(i, j int) bool {
+			return weighted[i].value < weighted[j].value
+		})
 
-		sum := 0.0
-		for _, l := range latencies {
-			sum += l
-		}
-		target.AvgLatency = sum / float64(len(latencies))
+		target.MinLatency = globalMin
+		target.MaxLatency = globalMax
+		target.AvgLatency = totalLatencySum / float64(totalCount)
 
-		// Percentiles
-		if len(latencies) >= 2 {
-			p50Idx := int(float64(len(latencies)) * 0.50)
-			p95Idx := int(float64(len(latencies)) * 0.95)
-			p99Idx := int(float64(len(latencies)) * 0.99)
-
-			if p50Idx >= len(latencies) {
-				p50Idx = len(latencies) - 1
-			}
-			if p95Idx >= len(latencies) {
-				p95Idx = len(latencies) - 1
-			}
-			if p99Idx >= len(latencies) {
-				p99Idx = len(latencies) - 1
-			}
-
-			target.P50Latency = latencies[p50Idx]
-			target.P95Latency = latencies[p95Idx]
-			target.P99Latency = latencies[p99Idx]
+		// Weighted percentile calculation
+		if totalCount >= 2 {
+			target.P50Latency = weightedPercentile(weighted, 0.50, totalCount)
+			target.P95Latency = weightedPercentile(weighted, 0.95, totalCount)
+			target.P99Latency = weightedPercentile(weighted, 0.99, totalCount)
 		}
 	}
 
@@ -423,4 +435,19 @@ func (ts *TimeSeriesStore) aggregateAndSave(workspaceID, soulID string, resoluti
 	}
 
 	return ts.db.Put(key, newData)
+}
+
+// weightedPercentile computes the p-th percentile from weighted values
+// without expanding the array. cumulative count determines boundaries.
+func weightedPercentile(weighted []weightedLatency, percentile float64, totalCount int) float64 {
+	targetRank := float64(totalCount) * percentile
+	cumulative := 0
+	for _, w := range weighted {
+		cumulative += w.count
+		if float64(cumulative) >= targetRank {
+			return w.value
+		}
+	}
+	// Fallback: return the largest value
+	return weighted[len(weighted)-1].value
 }

@@ -20,7 +20,8 @@ import {
   CheckCircle2
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { useSoulStore, Soul } from '../stores/soulStore'
+import { useSoulStore } from '../stores/soulStore'
+import type { Soul } from '../api/client'
 
 type SoulType = Soul['type']
 
@@ -164,6 +165,7 @@ export function Souls() {
           <button
             onClick={handleRefresh}
             className={`p-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl transition-all ${refreshing ? 'animate-spin' : ''}`}
+            aria-label="Refresh souls"
           >
             <RefreshCw className="w-5 h-5" />
           </button>
@@ -275,6 +277,7 @@ export function Souls() {
             <button
               onClick={() => setViewMode('list')}
               className={`p-2 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
+              aria-label="List view"
             >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
@@ -283,6 +286,7 @@ export function Souls() {
             <button
               onClick={() => setViewMode('grid')}
               className={`p-2 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
+              aria-label="Grid view"
             >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
@@ -321,7 +325,7 @@ export function Souls() {
                         <div>
                           <p className="font-semibold text-white">{soul.name}</p>
                           <div className="flex gap-1.5 mt-1.5">
-                            {soul.tags.slice(0, 2).map(tag => (
+                            {(soul.tags ?? []).slice(0, 2).map(tag => (
                               <span key={tag} className="text-[10px] uppercase tracking-wider bg-gray-800 text-gray-400 px-2 py-0.5 rounded-md font-medium">
                                 {tag}
                               </span>
@@ -361,18 +365,20 @@ export function Souls() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-1">
-                        <Link to={`/souls/${soul.id}`} className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors">
+                        <Link to={`/souls/${soul.id}`} className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors" aria-label={`Edit soul ${soul.name || soul.target}`}>
                           <Edit className="w-4 h-4" />
                         </Link>
                         <button
                           onClick={() => handleToggle(soul)}
                           className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                          aria-label={soul.enabled ? `Pause ${soul.name || soul.target}` : `Resume ${soul.name || soul.target}`}
                         >
                           {soul.enabled ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                         </button>
                         <button
                           onClick={() => handleDelete(soul.id)}
                           className="p-2 text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                          aria-label={`Delete soul ${soul.name || soul.target}`}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -421,18 +427,20 @@ export function Souls() {
                 </div>
 
                 <div className="flex gap-1 pt-4 border-t border-gray-700/50">
-                  <Link to={`/souls/${soul.id}`} className="flex-1 p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors">
+                  <Link to={`/souls/${soul.id}`} className="flex-1 p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors" aria-label={`Edit soul ${soul.name || soul.target}`}>
                     <Edit className="w-4 h-4 mx-auto" />
                   </Link>
                   <button
                     onClick={() => handleToggle(soul)}
                     className="flex-1 p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                    aria-label={soul.enabled ? `Pause ${soul.name || soul.target}` : `Resume ${soul.name || soul.target}`}
                   >
                     {soul.enabled ? <Pause className="w-4 h-4 mx-auto" /> : <Play className="w-4 h-4 mx-auto" />}
                   </button>
                   <button
                     onClick={() => handleDelete(soul.id)}
                     className="flex-1 p-2 text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                    aria-label={`Delete soul ${soul.name || soul.target}`}
                   >
                     <Trash2 className="w-4 h-4 mx-auto" />
                   </button>
@@ -464,13 +472,20 @@ export function Souls() {
 
       {/* Add Soul Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="soul-modal-title"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowModal(false) }}
+        >
           <div className="bg-gradient-to-br from-gray-900 to-gray-800 border border-gray-700/50 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-auto">
             <div className="p-6 border-b border-gray-700/50 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-white">Add New Soul</h2>
+              <h2 id="soul-modal-title" className="text-xl font-bold text-white">Add New Soul</h2>
               <button
                 onClick={() => setShowModal(false)}
                 className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                aria-label="Close dialog"
               >
                 <X className="w-5 h-5" />
               </button>

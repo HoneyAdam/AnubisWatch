@@ -383,8 +383,8 @@ func (a *restStorageAdapter) ListJudgmentsNoCtx(soulID string, start, end time.T
 	return a.store.ListJudgmentsNoCtx(soulID, start, end, limit)
 }
 
-func (a *restStorageAdapter) GetChannelNoCtx(id string) (*core.AlertChannel, error) {
-	return a.store.GetChannelNoCtx(id)
+func (a *restStorageAdapter) GetChannelNoCtx(id string, workspace string) (*core.AlertChannel, error) {
+	return a.store.GetChannelNoCtx(id, workspace)
 }
 
 func (a *restStorageAdapter) ListChannelsNoCtx(workspace string) ([]*core.AlertChannel, error) {
@@ -395,12 +395,12 @@ func (a *restStorageAdapter) SaveChannelNoCtx(ch *core.AlertChannel) error {
 	return a.store.SaveChannelNoCtx(ch)
 }
 
-func (a *restStorageAdapter) DeleteChannelNoCtx(id string) error {
-	return a.store.DeleteChannelNoCtx(id)
+func (a *restStorageAdapter) DeleteChannelNoCtx(id string, workspace string) error {
+	return a.store.DeleteChannelNoCtx(id, workspace)
 }
 
-func (a *restStorageAdapter) GetRuleNoCtx(id string) (*core.AlertRule, error) {
-	return a.store.GetRuleNoCtx(id)
+func (a *restStorageAdapter) GetRuleNoCtx(id string, workspace string) (*core.AlertRule, error) {
+	return a.store.GetRuleNoCtx(id, workspace)
 }
 
 func (a *restStorageAdapter) ListRulesNoCtx(workspace string) ([]*core.AlertRule, error) {
@@ -411,8 +411,8 @@ func (a *restStorageAdapter) SaveRuleNoCtx(rule *core.AlertRule) error {
 	return a.store.SaveRuleNoCtx(rule)
 }
 
-func (a *restStorageAdapter) DeleteRuleNoCtx(id string) error {
-	return a.store.DeleteRuleNoCtx(id)
+func (a *restStorageAdapter) DeleteRuleNoCtx(id string, workspace string) error {
+	return a.store.DeleteRuleNoCtx(id, workspace)
 }
 
 func (a *restStorageAdapter) GetWorkspaceNoCtx(id string) (*core.Workspace, error) {
@@ -486,6 +486,23 @@ func (a *restStorageAdapter) DeleteDashboardNoCtx(id string) error {
 	return a.store.DeleteDashboardNoCtx(id)
 }
 
+// MaintenanceWindow methods
+func (a *restStorageAdapter) GetMaintenanceWindow(id string) (*core.MaintenanceWindow, error) {
+	return a.store.GetMaintenanceWindow(id)
+}
+
+func (a *restStorageAdapter) ListMaintenanceWindows() ([]*core.MaintenanceWindow, error) {
+	return a.store.ListMaintenanceWindows()
+}
+
+func (a *restStorageAdapter) SaveMaintenanceWindow(w *core.MaintenanceWindow) error {
+	return a.store.SaveMaintenanceWindow(w)
+}
+
+func (a *restStorageAdapter) DeleteMaintenanceWindow(id string) error {
+	return a.store.DeleteMaintenanceWindow(id)
+}
+
 // clusterAdapter adapts cluster.Manager to api.ClusterManager interface
 type clusterAdapter struct {
 	mgr *cluster.Manager
@@ -527,32 +544,32 @@ func (a *alertStorageAdapter) SaveChannel(ch *core.AlertChannel) error {
 	return a.store.SaveAlertChannel(ch)
 }
 
-func (a *alertStorageAdapter) GetChannel(id string) (*core.AlertChannel, error) {
-	return a.store.GetAlertChannel(id)
+func (a *alertStorageAdapter) GetChannel(id string, workspace string) (*core.AlertChannel, error) {
+	return a.store.GetAlertChannel(id, workspace)
 }
 
-func (a *alertStorageAdapter) ListChannels() ([]*core.AlertChannel, error) {
-	return a.store.ListAlertChannels()
+func (a *alertStorageAdapter) ListChannels(workspace string) ([]*core.AlertChannel, error) {
+	return a.store.ListAlertChannels(workspace)
 }
 
-func (a *alertStorageAdapter) DeleteChannel(id string) error {
-	return a.store.DeleteAlertChannel(id)
+func (a *alertStorageAdapter) DeleteChannel(id string, workspace string) error {
+	return a.store.DeleteAlertChannel(id, workspace)
 }
 
 func (a *alertStorageAdapter) SaveRule(rule *core.AlertRule) error {
 	return a.store.SaveAlertRule(rule)
 }
 
-func (a *alertStorageAdapter) GetRule(id string) (*core.AlertRule, error) {
-	return a.store.GetAlertRule(id)
+func (a *alertStorageAdapter) GetRule(id string, workspace string) (*core.AlertRule, error) {
+	return a.store.GetAlertRule(id, workspace)
 }
 
-func (a *alertStorageAdapter) ListRules() ([]*core.AlertRule, error) {
-	return a.store.ListAlertRules()
+func (a *alertStorageAdapter) ListRules(workspace string) ([]*core.AlertRule, error) {
+	return a.store.ListAlertRules(workspace)
 }
 
-func (a *alertStorageAdapter) DeleteRule(id string) error {
-	return a.store.DeleteAlertRule(id)
+func (a *alertStorageAdapter) DeleteRule(id string, workspace string) error {
+	return a.store.DeleteAlertRule(id, workspace)
 }
 
 func (a *alertStorageAdapter) SaveEvent(event *core.AlertEvent) error {
@@ -1955,8 +1972,8 @@ func statusCommand() {
 	fmt.Printf("Workspaces: %d\n", len(workspaces))
 
 	// Count alert channels and rules
-	channels, _ := store.ListAlertChannels()
-	rules, _ := store.ListAlertRules()
+	channels, _ := store.ListAlertChannels("")
+	rules, _ := store.ListAlertRules("")
 	fmt.Printf("Alerts:     %d channels, %d rules\n", len(channels), len(rules))
 
 	// Count status pages

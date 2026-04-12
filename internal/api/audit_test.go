@@ -582,6 +582,7 @@ func TestAuditLogger_Log_BufferFull(t *testing.T) {
 		buffer:   make(chan *AuditEvent, 1),
 		shutdown: make(chan struct{}),
 	}
+	al.wg.Add(1)
 	go al.writeLoop()
 	defer al.Stop()
 

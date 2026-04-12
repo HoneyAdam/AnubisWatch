@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Plus, Trash2, RefreshCw, Play } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, RefreshCw } from 'lucide-react'
 import { api } from '../api/client'
 import type { CustomDashboard, WidgetConfig } from '../api/client'
 import { StatWidget } from '../components/widgets/StatWidget'
@@ -107,7 +107,7 @@ export function DashboardDetail() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/dashboards')} className="text-gray-400 hover:text-amber-400 transition-colors">
+          <button onClick={() => navigate('/dashboards')} className="text-gray-400 hover:text-amber-400 transition-colors" aria-label="Back to dashboards">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
@@ -121,6 +121,7 @@ export function DashboardDetail() {
           <button
             onClick={handleRefresh}
             className={`p-2 bg-[#D4AF37]/10 hover:bg-[#D4AF37]/20 text-[#D4AF37] rounded-lg border border-[#D4AF37]/30 transition-all ${refreshing ? 'animate-spin' : ''}`}
+            aria-label="Refresh dashboard"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -181,6 +182,7 @@ export function DashboardDetail() {
                   <button
                     onClick={() => handleDeleteWidget(widget.id)}
                     className="text-gray-500 hover:text-red-400 transition-colors"
+                    aria-label="Delete widget"
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>
@@ -206,7 +208,7 @@ function AddWidgetForm({ onAdd, onCancel }: { onAdd: (w: Omit<WidgetConfig, 'id'
   const [type, setType] = useState<WidgetConfig['type']>('stat')
   const [source, setSource] = useState('souls')
   const [metric, setMetric] = useState('count')
-  const [timeRange, setTimeRange] = useState('24h')
+  const [timeRange] = useState('24h')
   const [width, setWidth] = useState(4)
   const [height, setHeight] = useState(2)
 

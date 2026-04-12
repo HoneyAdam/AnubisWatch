@@ -126,6 +126,7 @@ export function Cluster() {
           <button
             onClick={handleRefresh}
             className={`p-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl transition-all ${refreshing ? 'animate-spin' : ''}`}
+            aria-label="Refresh cluster status"
           >
             <RefreshCw className="w-5 h-5" />
           </button>

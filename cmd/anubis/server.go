@@ -215,7 +215,13 @@ func (a *grpcStorageAdapter) ListSoulsNoCtx(ws string, o, l int) ([]interface{},
 	}
 	return result, nil
 }
-func (a *grpcStorageAdapter) SaveSoulNoCtx(s interface{}) error    { return nil }
+func (a *grpcStorageAdapter) SaveSoulNoCtx(s interface{}) error {
+	soul, ok := s.(*core.Soul)
+	if !ok {
+		return fmt.Errorf("invalid soul type: %T", s)
+	}
+	return a.inner.SaveSoul(context.Background(), soul)
+}
 func (a *grpcStorageAdapter) DeleteSoulNoCtx(id string) error      { return a.inner.DeleteSoulNoCtx(id) }
 func (a *grpcStorageAdapter) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]interface{}, error) {
 	judgments, err := a.inner.ListJudgmentsNoCtx(soulID, start, end, limit)
@@ -228,7 +234,7 @@ func (a *grpcStorageAdapter) ListJudgmentsNoCtx(soulID string, start, end time.T
 	}
 	return result, nil
 }
-func (a *grpcStorageAdapter) GetChannelNoCtx(id string) (interface{}, error) { return a.inner.GetChannelNoCtx(id) }
+func (a *grpcStorageAdapter) GetChannelNoCtx(id string, ws string) (interface{}, error) { return a.inner.GetChannelNoCtx(id, ws) }
 func (a *grpcStorageAdapter) ListChannelsNoCtx(ws string) ([]interface{}, error) {
 	channels, err := a.inner.ListChannelsNoCtx(ws)
 	if err != nil {
@@ -240,9 +246,15 @@ func (a *grpcStorageAdapter) ListChannelsNoCtx(ws string) ([]interface{}, error)
 	}
 	return result, nil
 }
-func (a *grpcStorageAdapter) SaveChannelNoCtx(ch interface{}) error { return nil }
-func (a *grpcStorageAdapter) DeleteChannelNoCtx(id string) error    { return a.inner.DeleteChannelNoCtx(id) }
-func (a *grpcStorageAdapter) GetRuleNoCtx(id string) (interface{}, error) { return a.inner.GetRuleNoCtx(id) }
+func (a *grpcStorageAdapter) SaveChannelNoCtx(ch interface{}) error {
+	channel, ok := ch.(*core.AlertChannel)
+	if !ok {
+		return fmt.Errorf("invalid channel type: %T", ch)
+	}
+	return a.inner.SaveChannelNoCtx(channel)
+}
+func (a *grpcStorageAdapter) DeleteChannelNoCtx(id string, ws string) error { return a.inner.DeleteChannelNoCtx(id, ws) }
+func (a *grpcStorageAdapter) GetRuleNoCtx(id string, ws string) (interface{}, error) { return a.inner.GetRuleNoCtx(id, ws) }
 func (a *grpcStorageAdapter) ListRulesNoCtx(ws string) ([]interface{}, error) {
 	rules, err := a.inner.ListRulesNoCtx(ws)
 	if err != nil {
@@ -254,8 +266,14 @@ func (a *grpcStorageAdapter) ListRulesNoCtx(ws string) ([]interface{}, error) {
 	}
 	return result, nil
 }
-func (a *grpcStorageAdapter) SaveRuleNoCtx(rule interface{}) error { return nil }
-func (a *grpcStorageAdapter) DeleteRuleNoCtx(id string) error      { return a.inner.DeleteRuleNoCtx(id) }
+func (a *grpcStorageAdapter) SaveRuleNoCtx(rule interface{}) error {
+	r, ok := rule.(*core.AlertRule)
+	if !ok {
+		return fmt.Errorf("invalid rule type: %T", rule)
+	}
+	return a.inner.SaveRuleNoCtx(r)
+}
+func (a *grpcStorageAdapter) DeleteRuleNoCtx(id string, ws string) error { return a.inner.DeleteRuleNoCtx(id, ws) }
 func (a *grpcStorageAdapter) GetJourneyNoCtx(id string) (interface{}, error) { return a.inner.GetJourneyNoCtx(id) }
 func (a *grpcStorageAdapter) ListJourneysNoCtx(ws string, o, l int) ([]interface{}, error) {
 	journeys, err := a.inner.ListJourneysNoCtx(ws, o, l)
@@ -268,7 +286,13 @@ func (a *grpcStorageAdapter) ListJourneysNoCtx(ws string, o, l int) ([]interface
 	}
 	return result, nil
 }
-func (a *grpcStorageAdapter) SaveJourneyNoCtx(j interface{}) error { return nil }
+func (a *grpcStorageAdapter) SaveJourneyNoCtx(j interface{}) error {
+	journey, ok := j.(*core.JourneyConfig)
+	if !ok {
+		return fmt.Errorf("invalid journey type: %T", j)
+	}
+	return a.inner.SaveJourneyNoCtx(journey)
+}
 func (a *grpcStorageAdapter) DeleteJourneyNoCtx(id string) error   { return a.inner.DeleteJourneyNoCtx(id) }
 func (a *grpcStorageAdapter) ListEvents(soulID string, limit int) ([]interface{}, error) {
 	events, err := a.inner.store.ListAlertEvents(soulID, limit)

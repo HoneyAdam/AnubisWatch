@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"sync"
 	"time"
@@ -475,80 +476,10 @@ func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 }
 
 // Helper functions for haversine calculation
-func sin(x float64) float64 { return float64(sinFloat64(x)) }
-func cos(x float64) float64 { return float64(cosFloat64(x)) }
-func sqrt(x float64) float64 {
-	if x < 0 {
-		return 0
-	}
-	return float64(sqrtFloat64(x))
-}
-func atan2(y, x float64) float64 { return float64(atan2Float64(y, x)) }
-
-// These are implemented in math package but we use float64 versions
-func sinFloat64(x float64) float64 {
-	// Simple Taylor series approximation
-	result := 0.0
-	term := x
-	for i := 1; i < 10; i += 2 {
-		result += term
-		term *= -x * x / float64((i+1)*(i+2))
-	}
-	return result
-}
-
-func cosFloat64(x float64) float64 {
-	// Simple Taylor series approximation
-	result := 1.0
-	term := 1.0
-	for i := 2; i < 11; i += 2 {
-		term *= -x * x / float64((i-1)*i)
-		result += term
-	}
-	return result
-}
-
-func sqrtFloat64(x float64) float64 {
-	if x == 0 {
-		return 0
-	}
-	z := x
-	for i := 0; i < 10; i++ {
-		z = (z + x/z) / 2
-	}
-	return z
-}
-
-func atan2Float64(y, x float64) float64 {
-	if x > 0 {
-		return atanFloat64(y/x)
-	}
-	if x < 0 {
-		if y >= 0 {
-			return atanFloat64(y/x) + 3.14159265359
-		}
-		return atanFloat64(y/x) - 3.14159265359
-	}
-	if y > 0 {
-		return 3.14159265359 / 2
-	}
-	if y < 0 {
-		return -3.14159265359 / 2
-	}
-	return 0
-}
-
-func atanFloat64(x float64) float64 {
-	// Taylor series approximation for atan
-	result := 0.0
-	term := x
-	x2 := x * x
-	for i := 1; i < 20; i += 2 {
-		result += term / float64(i)
-		term *= -x2
-	}
-	return result
-}
+func sin(x float64) float64 { return math.Sin(x) }
+func cos(x float64) float64 { return math.Cos(x) }
+func sqrt(x float64) float64 { return math.Sqrt(x) }
+func atan2(y, x float64) float64 { return math.Atan2(y, x) }
 
 // GetRegionStatus returns the status of all regions
 func (m *Manager) GetRegionStatus() map[string]RegionStatus {

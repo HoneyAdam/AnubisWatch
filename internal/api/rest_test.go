@@ -118,14 +118,14 @@ func (m *failingMockStorage) ListJudgmentsNoCtx(soulID string, start, end time.T
 	return nil, fmt.Errorf("storage error")
 }
 func (m *failingMockStorage) SaveJudgment(ctx context.Context, j *core.Judgment) error          { return fmt.Errorf("storage error") }
-func (m *failingMockStorage) GetChannelNoCtx(id string) (*core.AlertChannel, error)             { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) GetChannelNoCtx(id string, ws string) (*core.AlertChannel, error)  { return nil, fmt.Errorf("storage error") }
 func (m *failingMockStorage) ListChannelsNoCtx(ws string) ([]*core.AlertChannel, error)         { return nil, fmt.Errorf("storage error") }
 func (m *failingMockStorage) SaveChannelNoCtx(ch *core.AlertChannel) error                      { return fmt.Errorf("storage error") }
-func (m *failingMockStorage) DeleteChannelNoCtx(id string) error                               { return fmt.Errorf("storage error") }
-func (m *failingMockStorage) GetRuleNoCtx(id string) (*core.AlertRule, error)                   { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) DeleteChannelNoCtx(id string, ws string) error                     { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) GetRuleNoCtx(id string, ws string) (*core.AlertRule, error)        { return nil, fmt.Errorf("storage error") }
 func (m *failingMockStorage) ListRulesNoCtx(ws string) ([]*core.AlertRule, error)               { return nil, fmt.Errorf("storage error") }
 func (m *failingMockStorage) SaveRuleNoCtx(rule *core.AlertRule) error                          { return fmt.Errorf("storage error") }
-func (m *failingMockStorage) DeleteRuleNoCtx(id string) error                                   { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) DeleteRuleNoCtx(id string, ws string) error                        { return fmt.Errorf("storage error") }
 func (m *failingMockStorage) GetWorkspaceNoCtx(id string) (*core.Workspace, error)              { return nil, fmt.Errorf("storage error") }
 func (m *failingMockStorage) ListWorkspacesNoCtx() ([]*core.Workspace, error)                   { return nil, fmt.Errorf("storage error") }
 func (m *failingMockStorage) SaveWorkspaceNoCtx(ws *core.Workspace) error                       { return fmt.Errorf("storage error") }
@@ -143,7 +143,11 @@ func (m *failingMockStorage) GetStatusPageNoCtx(id string) (*core.StatusPage, er
 func (m *failingMockStorage) ListStatusPagesNoCtx() ([]*core.StatusPage, error)                 { return nil, fmt.Errorf("storage error") }
 func (m *failingMockStorage) SaveStatusPageNoCtx(page *core.StatusPage) error                   { return fmt.Errorf("storage error") }
 func (m *failingMockStorage) DeleteStatusPageNoCtx(id string) error                            { return fmt.Errorf("storage error") }
-func (m *mockStorage) GetChannelNoCtx(id string) (*core.AlertChannel, error) {
+func (m *failingMockStorage) GetMaintenanceWindow(id string) (*core.MaintenanceWindow, error)  { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) ListMaintenanceWindows() ([]*core.MaintenanceWindow, error)       { return nil, fmt.Errorf("storage error") }
+func (m *failingMockStorage) SaveMaintenanceWindow(w *core.MaintenanceWindow) error            { return fmt.Errorf("storage error") }
+func (m *failingMockStorage) DeleteMaintenanceWindow(id string) error                          { return fmt.Errorf("storage error") }
+func (m *mockStorage) GetChannelNoCtx(id string, ws string) (*core.AlertChannel, error) {
 	if c, ok := m.channels[id]; ok {
 		return c, nil
 	}
@@ -160,11 +164,11 @@ func (m *mockStorage) SaveChannelNoCtx(ch *core.AlertChannel) error {
 	m.channels[ch.ID] = ch
 	return nil
 }
-func (m *mockStorage) DeleteChannelNoCtx(id string) error {
+func (m *mockStorage) DeleteChannelNoCtx(id string, ws string) error {
 	delete(m.channels, id)
 	return nil
 }
-func (m *mockStorage) GetRuleNoCtx(id string) (*core.AlertRule, error) {
+func (m *mockStorage) GetRuleNoCtx(id string, ws string) (*core.AlertRule, error) {
 	if r, ok := m.rules[id]; ok {
 		return r, nil
 	}
@@ -181,10 +185,44 @@ func (m *mockStorage) SaveRuleNoCtx(rule *core.AlertRule) error {
 	m.rules[rule.ID] = rule
 	return nil
 }
-func (m *mockStorage) DeleteRuleNoCtx(id string) error {
+func (m *mockStorage) DeleteRuleNoCtx(id string, ws string) error {
 	delete(m.rules, id)
 	return nil
 }
+
+// AlertManager methods
+func (m *mockStorage) GetStats() core.AlertManagerStats {
+	return core.AlertManagerStats{}
+}
+func (m *mockStorage) GetChannel(id string) (*core.AlertChannel, error) {
+	return m.GetChannelNoCtx(id, "")
+}
+func (m *mockStorage) ListChannels() []*core.AlertChannel {
+	ch, _ := m.ListChannelsNoCtx("")
+	return ch
+}
+func (m *mockStorage) DeleteChannel(id string) error {
+	return m.DeleteChannelNoCtx(id, "")
+}
+func (m *mockStorage) GetRule(id string) (*core.AlertRule, error) {
+	return m.GetRuleNoCtx(id, "")
+}
+func (m *mockStorage) ListRules() []*core.AlertRule {
+	r, _ := m.ListRulesNoCtx("")
+	return r
+}
+func (m *mockStorage) DeleteRule(id string) error {
+	return m.DeleteRuleNoCtx(id, "")
+}
+func (m *mockStorage) RegisterChannel(ch *core.AlertChannel) error {
+	return m.SaveChannelNoCtx(ch)
+}
+func (m *mockStorage) RegisterRule(rule *core.AlertRule) error {
+	return m.SaveRuleNoCtx(rule)
+}
+func (m *mockStorage) AcknowledgeIncident(incidentID, userID string) error { return nil }
+func (m *mockStorage) ResolveIncident(incidentID, userID string) error     { return nil }
+func (m *mockStorage) ListActiveIncidents() []*core.Incident               { return nil }
 func (m *mockStorage) GetWorkspaceNoCtx(id string) (*core.Workspace, error) {
 	if w, ok := m.workspaces[id]; ok {
 		return w, nil
@@ -238,6 +276,16 @@ func (m *mockStorage) SaveDashboardNoCtx(dashboard *core.CustomDashboard) error 
 }
 func (m *mockStorage) DeleteDashboardNoCtx(id string) error { return nil }
 
+// MaintenanceWindow methods
+func (m *mockStorage) GetMaintenanceWindow(id string) (*core.MaintenanceWindow, error) {
+	return nil, fmt.Errorf("maintenance window not found")
+}
+func (m *mockStorage) ListMaintenanceWindows() ([]*core.MaintenanceWindow, error) {
+	return []*core.MaintenanceWindow{}, nil
+}
+func (m *mockStorage) SaveMaintenanceWindow(w *core.MaintenanceWindow) error { return nil }
+func (m *mockStorage) DeleteMaintenanceWindow(id string) error               { return nil }
+
 // mockProbeEngine implements ProbeEngine interface
 type mockProbeEngine struct {
 	souls           map[string]*core.Soul
@@ -271,10 +319,15 @@ func (a *mockAlertManager) GetStats() core.AlertManagerStats {
 }
 func (a *mockAlertManager) ListChannels() []*core.AlertChannel          { return nil }
 func (a *mockAlertManager) ListRules() []*core.AlertRule                { return nil }
+func (a *mockAlertManager) GetChannel(id string) (*core.AlertChannel, error) { return nil, fmt.Errorf("not found") }
+func (a *mockAlertManager) GetRule(id string) (*core.AlertRule, error)   { return nil, fmt.Errorf("not found") }
 func (a *mockAlertManager) RegisterChannel(ch *core.AlertChannel) error { return nil }
 func (a *mockAlertManager) RegisterRule(rule *core.AlertRule) error     { return nil }
 func (a *mockAlertManager) DeleteChannel(id string) error               { return nil }
 func (a *mockAlertManager) DeleteRule(id string) error                  { return nil }
+func (a *mockAlertManager) AcknowledgeIncident(incidentID, userID string) error { return nil }
+func (a *mockAlertManager) ResolveIncident(incidentID, userID string) error { return nil }
+func (a *mockAlertManager) ListActiveIncidents() []*core.Incident       { return nil }
 
 // failingAlertManager is an AlertManager that always returns errors
 type failingAlertManager struct{}
@@ -284,14 +337,15 @@ func (a *failingAlertManager) GetStats() core.AlertManagerStats {
 }
 func (a *failingAlertManager) ListChannels() []*core.AlertChannel          { return nil }
 func (a *failingAlertManager) ListRules() []*core.AlertRule                { return nil }
+func (a *failingAlertManager) GetChannel(id string) (*core.AlertChannel, error) { return nil, fmt.Errorf("alert error") }
+func (a *failingAlertManager) GetRule(id string) (*core.AlertRule, error)   { return nil, fmt.Errorf("alert error") }
 func (a *failingAlertManager) RegisterChannel(ch *core.AlertChannel) error { return fmt.Errorf("alert error") }
 func (a *failingAlertManager) RegisterRule(rule *core.AlertRule) error     { return fmt.Errorf("alert error") }
 func (a *failingAlertManager) DeleteChannel(id string) error               { return fmt.Errorf("alert error") }
 func (a *failingAlertManager) DeleteRule(id string) error                  { return fmt.Errorf("alert error") }
 func (a *failingAlertManager) AcknowledgeIncident(incidentID, userID string) error { return fmt.Errorf("alert error") }
-func (a *failingAlertManager) ResolveIncident(incidentID, userID string) error     { return fmt.Errorf("alert error") }
-func (a *mockAlertManager) AcknowledgeIncident(id, userID string) error { return nil }
-func (a *mockAlertManager) ResolveIncident(id, userID string) error     { return nil }
+func (a *failingAlertManager) ResolveIncident(incidentID, userID string) error { return fmt.Errorf("alert error") }
+func (a *failingAlertManager) ListActiveIncidents() []*core.Incident       { return nil }
 
 // mockAuthenticator implements Authenticator interface
 type mockAuthenticator struct{}
@@ -1629,6 +1683,7 @@ func TestHandleListIncidents(t *testing.T) {
 		auth:    &mockAuthenticator{},
 		logger:  newTestLogger(),
 		cluster: &mockClusterManager{},
+		alert:   &mockAlertManager{},
 	}
 
 	router.Handle("GET", "/api/v1/incidents", server.requireAuth(server.handleListIncidents))
@@ -1937,6 +1992,7 @@ func TestHandleGetChannel(t *testing.T) {
 	server := &RESTServer{
 		config:  core.ServerConfig{Host: "localhost", Port: 8080},
 		store:   storage,
+		alert:   &mockAlertManager{},
 		router:  router,
 		auth:    &mockAuthenticator{},
 		logger:  newTestLogger(),
@@ -2030,6 +2086,7 @@ func TestHandleGetRule(t *testing.T) {
 	server := &RESTServer{
 		config:  core.ServerConfig{Host: "localhost", Port: 8080},
 		store:   storage,
+		alert:   &mockAlertManager{},
 		router:  router,
 		auth:    &mockAuthenticator{},
 		logger:  newTestLogger(),
@@ -3768,6 +3825,7 @@ func TestHandleGetChannel_NotFound(t *testing.T) {
 	server := &RESTServer{
 		config: core.ServerConfig{Host: "localhost", Port: 8080},
 		store:  storage,
+		alert:  &mockAlertManager{},
 		router: router,
 		auth:   &mockAuthenticator{},
 		logger: newTestLogger(),
@@ -3792,6 +3850,7 @@ func TestHandleGetRule_NotFound(t *testing.T) {
 	server := &RESTServer{
 		config: core.ServerConfig{Host: "localhost", Port: 8080},
 		store:  storage,
+		alert:  &mockAlertManager{},
 		router: router,
 		auth:   &mockAuthenticator{},
 		logger: newTestLogger(),

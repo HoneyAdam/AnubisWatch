@@ -51,11 +51,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		filepath = "index.html"
 	}
-	defer file.Close()
 
-	// Get file info
+	// Get file info before deferring close
 	stat, err := file.Stat()
 	if err != nil {
+		file.Close()
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -66,8 +66,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", contentType)
 	}
 
-	// Serve the file
+	// Serve the file and close when done
 	http.ServeContent(w, r, filepath, stat.ModTime(), file)
+	file.Close()
 }
 
 func getContentType(filename string) string {

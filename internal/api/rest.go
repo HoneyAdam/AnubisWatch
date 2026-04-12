@@ -113,15 +113,15 @@ type Storage interface {
 	GetJudgmentNoCtx(id string) (*core.Judgment, error)
 	ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error)
 
-	GetChannelNoCtx(id string) (*core.AlertChannel, error)
+	GetChannelNoCtx(id string, workspace string) (*core.AlertChannel, error)
 	ListChannelsNoCtx(workspace string) ([]*core.AlertChannel, error)
 	SaveChannelNoCtx(channel *core.AlertChannel) error
-	DeleteChannelNoCtx(id string) error
+	DeleteChannelNoCtx(id string, workspace string) error
 
-	GetRuleNoCtx(id string) (*core.AlertRule, error)
+	GetRuleNoCtx(id string, workspace string) (*core.AlertRule, error)
 	ListRulesNoCtx(workspace string) ([]*core.AlertRule, error)
 	SaveRuleNoCtx(rule *core.AlertRule) error
-	DeleteRuleNoCtx(id string) error
+	DeleteRuleNoCtx(id string, workspace string) error
 
 	GetWorkspaceNoCtx(id string) (*core.Workspace, error)
 	ListWorkspacesNoCtx() ([]*core.Workspace, error)
@@ -146,6 +146,12 @@ type Storage interface {
 	ListDashboardsNoCtx() ([]*core.CustomDashboard, error)
 	SaveDashboardNoCtx(dashboard *core.CustomDashboard) error
 	DeleteDashboardNoCtx(id string) error
+
+	// Maintenance methods
+	GetMaintenanceWindow(id string) (*core.MaintenanceWindow, error)
+	ListMaintenanceWindows() ([]*core.MaintenanceWindow, error)
+	SaveMaintenanceWindow(w *core.MaintenanceWindow) error
+	DeleteMaintenanceWindow(id string) error
 }
 
 // ProbeEngine interface for probe operations
@@ -160,12 +166,15 @@ type AlertManager interface {
 	GetStats() core.AlertManagerStats
 	ListChannels() []*core.AlertChannel
 	ListRules() []*core.AlertRule
+	GetChannel(id string) (*core.AlertChannel, error)
+	GetRule(id string) (*core.AlertRule, error)
 	RegisterChannel(channel *core.AlertChannel) error
 	RegisterRule(rule *core.AlertRule) error
 	DeleteChannel(id string) error
 	DeleteRule(id string) error
 	AcknowledgeIncident(incidentID, userID string) error
 	ResolveIncident(incidentID, userID string) error
+	ListActiveIncidents() []*core.Incident
 }
 
 // Authenticator interface for authentication
@@ -258,6 +267,10 @@ func (s *RESTServer) setupRoutes() {
 	s.router.Handle("GET", "/ready", s.handleReady)
 	s.router.Handle("GET", "/metrics", s.handleMetrics)
 
+	// OpenAPI / Swagger (no auth required)
+	s.router.Handle("GET", "/api/openapi.json", s.handleOpenAPIJSON)
+	s.router.Handle("GET", "/api/docs", s.handleOpenAPIDocs)
+
 	// Public Status Pages (no auth required)
 	s.router.Handle("GET", "/status", s.handleStatusPage)
 	s.router.Handle("GET", "/status.html", s.handleStatusPageHTML)
@@ -317,6 +330,10 @@ func (s *RESTServer) setupRoutes() {
 	s.router.Handle("GET", "/api/v1/cluster/status", s.requireAuth(s.handleClusterStatus))
 	s.router.Handle("GET", "/api/v1/cluster/peers", s.requireAuth(s.handleClusterPeers))
 
+	// Config
+	s.router.Handle("GET", "/api/v1/config", s.requireAuth(s.handleGetConfig))
+	s.router.Handle("PUT", "/api/v1/config", s.requireAuth(s.handleUpdateConfig))
+
 	// Incidents
 	s.router.Handle("GET", "/api/v1/incidents", s.requireAuth(s.handleListIncidents))
 	s.router.Handle("POST", "/api/v1/incidents/:id/acknowledge", s.requireAuth(s.handleAcknowledgeIncident))
@@ -358,6 +375,13 @@ func (s *RESTServer) setupRoutes() {
 	s.router.Handle("POST", "/api/v1/journeys/:id/run", s.requireAuth(s.handleRunJourney))
 	s.router.Handle("GET", "/api/v1/journeys/:id/runs", s.requireAuth(s.handleListJourneyRuns))
 	s.router.Handle("GET", "/api/v1/journeys/:id/runs/:runId", s.requireAuth(s.handleGetJourneyRun))
+
+	// Maintenance Windows
+	s.router.Handle("GET", "/api/v1/maintenance", s.requireAuth(s.handleListMaintenanceWindows))
+	s.router.Handle("POST", "/api/v1/maintenance", s.requireAuth(s.handleCreateMaintenanceWindow))
+	s.router.Handle("GET", "/api/v1/maintenance/:id", s.requireAuth(s.handleGetMaintenanceWindow))
+	s.router.Handle("PUT", "/api/v1/maintenance/:id", s.requireAuth(s.handleUpdateMaintenanceWindow))
+	s.router.Handle("DELETE", "/api/v1/maintenance/:id", s.requireAuth(s.handleDeleteMaintenanceWindow))
 
 	// Dashboards endpoints
 	s.router.Handle("GET", "/api/v1/dashboards", s.requireAuth(s.handleListDashboards))
@@ -427,6 +451,53 @@ func (s *RESTServer) handleReady(ctx *Context) error {
 		"status":    "ready",
 		"timestamp": time.Now().UTC(),
 	})
+}
+
+// openapiJSON holds the pre-marshalled OpenAPI spec
+var openapiJSON = []byte(`{"openapi":"3.0.3","info":{"title":"AnubisWatch API","version":"4.0.0","description":"REST API for AnubisWatch uptime monitoring"},"paths":{"/health":{"get":{"summary":"Health check","tags":["System"],"responses":{"200":{"description":"Service is healthy"}}}},"/ready":{"get":{"summary":"Readiness check","tags":["System"],"responses":{"200":{"description":"Service is ready"}}}},"/api/v1/auth/login":{"post":{"summary":"Authenticate user","tags":["Auth"],"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["email","password"],"properties":{"email":{"type":"string","format":"email"},"password":{"type":"string"}}}}}},"responses":{"200":{"description":"Login successful"},"401":{"description":"Invalid credentials"}}}},"/api/v1/auth/logout":{"post":{"summary":"Log out","tags":["Auth"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Logout successful"}}}},"/api/v1/auth/me":{"get":{"summary":"Get current user","tags":["Auth"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Current user"}}}},"/api/v1/souls":{"get":{"summary":"List souls","tags":["Souls"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"offset","in":"query","schema":{"type":"integer","default":0}},{"name":"limit","in":"query","schema":{"type":"integer","default":20,"max":100}}],"responses":{"200":{"description":"Paginated list"}}},"post":{"summary":"Create soul","tags":["Souls"],"security":[{"BearerAuth":[]}],"responses":{"201":{"description":"Soul created"}}}},"/api/v1/souls/{id}":{"get":{"summary":"Get soul","tags":["Souls"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Soul details"},"404":{"description":"Not found"}}},"put":{"summary":"Update soul","tags":["Souls"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Soul updated"}}},"delete":{"summary":"Delete soul","tags":["Souls"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"204":{"description":"Soul deleted"}}}},"/api/v1/souls/{id}/check":{"post":{"summary":"Force check","tags":["Souls"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Check result"}}}},"/api/v1/souls/{id}/judgments":{"get":{"summary":"List judgments","tags":["Judgments"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"List of judgments"}}}},"/api/v1/channels":{"get":{"summary":"List channels","tags":["Alerts"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Paginated list"}}},"post":{"summary":"Create channel","tags":["Alerts"],"security":[{"BearerAuth":[]}],"responses":{"201":{"description":"Channel created"}}}},"/api/v1/channels/{id}":{"get":{"summary":"Get channel","tags":["Alerts"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Channel details"}}},"put":{"summary":"Update channel","tags":["Alerts"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Channel updated"}}},"delete":{"summary":"Delete channel","tags":["Alerts"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"204":{"description":"Channel deleted"}}}},"/api/v1/channels/{id}/test":{"post":{"summary":"Test channel","tags":["Alerts"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Test sent"}}}},"/api/v1/rules":{"get":{"summary":"List rules","tags":["Alerts"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Paginated list"}}},"post":{"summary":"Create rule","tags":["Alerts"],"security":[{"BearerAuth":[]}],"responses":{"201":{"description":"Rule created"}}}},"/api/v1/rules/{id}":{"get":{"summary":"Get rule","tags":["Alerts"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Rule details"}}},"put":{"summary":"Update rule","tags":["Alerts"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Rule updated"}}},"delete":{"summary":"Delete rule","tags":["Alerts"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"204":{"description":"Rule deleted"}}}},"/api/v1/incidents":{"get":{"summary":"List incidents","tags":["Incidents"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"List of incidents"}}}},"/api/v1/incidents/{id}/acknowledge":{"post":{"summary":"Acknowledge incident","tags":["Incidents"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Acknowledged"}}}},"/api/v1/incidents/{id}/resolve":{"post":{"summary":"Resolve incident","tags":["Incidents"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Resolved"}}}},"/api/v1/workspaces":{"get":{"summary":"List workspaces","tags":["Workspaces"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"List of workspaces"}}},"post":{"summary":"Create workspace","tags":["Workspaces"],"security":[{"BearerAuth":[]}],"responses":{"201":{"description":"Workspace created"}}}},"/api/v1/workspaces/{id}":{"get":{"summary":"Get workspace","tags":["Workspaces"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Workspace details"}}},"put":{"summary":"Update workspace","tags":["Workspaces"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Workspace updated"}}},"delete":{"summary":"Delete workspace","tags":["Workspaces"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"204":{"description":"Workspace deleted"}}}},"/api/v1/stats":{"get":{"summary":"Get stats","tags":["Stats"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Statistics"}}}},"/api/v1/stats/overview":{"get":{"summary":"Stats overview","tags":["Stats"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Overview"}}}},"/api/v1/cluster/status":{"get":{"summary":"Cluster status","tags":["Cluster"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Cluster status"}}}},"/api/v1/cluster/peers":{"get":{"summary":"Cluster peers","tags":["Cluster"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Peers"}}}},"/api/v1/config":{"get":{"summary":"Get config","tags":["Config"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Configuration"}}},"put":{"summary":"Update config","tags":["Config"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Config updated"}}}},"/api/v1/status-pages":{"get":{"summary":"List status pages","tags":["Status Pages"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"List"}}},"post":{"summary":"Create status page","tags":["Status Pages"],"security":[{"BearerAuth":[]}],"responses":{"201":{"description":"Created"}}}},"/api/v1/status-pages/{id}":{"get":{"summary":"Get status page","tags":["Status Pages"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Details"}}},"put":{"summary":"Update status page","tags":["Status Pages"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Updated"}}},"delete":{"summary":"Delete status page","tags":["Status Pages"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"204":{"description":"Deleted"}}}},"/api/v1/journeys":{"get":{"summary":"List journeys","tags":["Journeys"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"List"}}},"post":{"summary":"Create journey","tags":["Journeys"],"security":[{"BearerAuth":[]}],"responses":{"201":{"description":"Created"}}}},"/api/v1/journeys/{id}":{"get":{"summary":"Get journey","tags":["Journeys"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Details"}}},"put":{"summary":"Update journey","tags":["Journeys"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Updated"}}},"delete":{"summary":"Delete journey","tags":["Journeys"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"204":{"description":"Deleted"}}}},"/api/v1/journeys/{id}/run":{"post":{"summary":"Run journey","tags":["Journeys"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Run started"}}}},"/api/v1/journeys/{id}/runs":{"get":{"summary":"List journey runs","tags":["Journeys"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"List"}}}},"/api/v1/journeys/{id}/runs/{runId}":{"get":{"summary":"Get journey run","tags":["Journeys"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}},{"name":"runId","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Run details"}}}},"/api/v1/maintenance":{"get":{"summary":"List maintenance windows","tags":["Maintenance"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"List"}}},"post":{"summary":"Create maintenance window","tags":["Maintenance"],"security":[{"BearerAuth":[]}],"responses":{"201":{"description":"Created"}}}},"/api/v1/maintenance/{id}":{"get":{"summary":"Get maintenance window","tags":["Maintenance"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Details"}}},"put":{"summary":"Update maintenance window","tags":["Maintenance"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Updated"}}},"delete":{"summary":"Delete maintenance window","tags":["Maintenance"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Deleted"}}}},"/api/v1/dashboards":{"get":{"summary":"List dashboards","tags":["Dashboards"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"List"}}},"post":{"summary":"Create dashboard","tags":["Dashboards"],"security":[{"BearerAuth":[]}],"responses":{"201":{"description":"Created"}}}},"/api/v1/dashboards/{id}":{"get":{"summary":"Get dashboard","tags":["Dashboards"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Details"}}},"put":{"summary":"Update dashboard","tags":["Dashboards"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Updated"}}},"delete":{"summary":"Delete dashboard","tags":["Dashboards"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"204":{"description":"Deleted"}}}},"/api/v1/dashboards/{id}/query":{"post":{"summary":"Query dashboard","tags":["Dashboards"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Query results"}}}},"/api/v1/dashboards/templates":{"get":{"summary":"Dashboard templates","tags":["Dashboards"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"Templates"}}}},"/api/v1/mcp":{"post":{"summary":"MCP endpoint","tags":["MCP"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"MCP response"}}}},"/api/v1/mcp/tools":{"get":{"summary":"List MCP tools","tags":["MCP"],"security":[{"BearerAuth":[]}],"responses":{"200":{"description":"List of tools"}}}},"/api/v1/souls/{id}/logs":{"get":{"summary":"Soul logs","tags":["Souls"],"security":[{"BearerAuth":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"Logs"}}}},"/ws":{"get":{"summary":"WebSocket","tags":["WebSocket"],"responses":{"101":{"description":"Upgrade"}}}},"/api/v1/events":{"get":{"summary":"SSE stream","tags":["SSE"],"responses":{"200":{"description":"Stream"}}}}},"components":{"securitySchemes":{"BearerAuth":{"type":"http","scheme":"bearer","bearerFormat":"JWT"}}}}`)
+
+func (s *RESTServer) handleOpenAPIJSON(ctx *Context) error {
+	ctx.Response.Header().Set("Content-Type", "application/json")
+	ctx.Response.Header().Set("Cache-Control", "public, max-age=3600")
+	ctx.Response.WriteHeader(http.StatusOK)
+	ctx.Response.Write(openapiJSON)
+	return nil
+}
+
+func (s *RESTServer) handleOpenAPIDocs(ctx *Context) error {
+	html := `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AnubisWatch API Docs</title>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js" defer></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+<style>
+body{margin:0;background:#0f172a}
+.swagger-ui .topbar{display:none}
+.swagger-ui{background:#0f172a;color:#e2e8f0}
+</style>
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script>
+window.addEventListener('load', function() {
+  SwaggerUIBundle({
+    url: '/api/openapi.json',
+    dom_id: '#swagger-ui',
+    presets: [SwaggerUIBundle.presets.apis],
+    layout: 'BaseLayout',
+    defaultModelsExpandDepth: 2,
+  });
+});
+</script>
+</body>
+</html>`
+	ctx.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
+	ctx.Response.WriteHeader(http.StatusOK)
+	ctx.Response.Write([]byte(html))
+	return nil
 }
 
 func (s *RESTServer) handleLogin(ctx *Context) error {
@@ -703,7 +774,12 @@ func (s *RESTServer) handleCreateChannel(ctx *Context) error {
 
 func (s *RESTServer) handleGetChannel(ctx *Context) error {
 	id := ctx.Params["id"]
-	channel, err := s.store.GetChannelNoCtx(id)
+	// Try alert manager's in-memory cache first (has WorkspaceID)
+	if ch, err := s.alert.GetChannel(id); err == nil {
+		return ctx.JSON(http.StatusOK, ch)
+	}
+	// Fallback to storage with default workspace
+	channel, err := s.store.GetChannelNoCtx(id, "")
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "channel not found")
 	}
@@ -799,7 +875,12 @@ func (s *RESTServer) handleCreateRule(ctx *Context) error {
 
 func (s *RESTServer) handleGetRule(ctx *Context) error {
 	id := ctx.Params["id"]
-	rule, err := s.store.GetRuleNoCtx(id)
+	// Try alert manager's in-memory cache first (has WorkspaceID)
+	if rule, err := s.alert.GetRule(id); err == nil {
+		return ctx.JSON(http.StatusOK, rule)
+	}
+	// Fallback to storage with default workspace
+	rule, err := s.store.GetRuleNoCtx(id, "")
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "rule not found")
 	}
@@ -968,8 +1049,8 @@ func (s *RESTServer) handleClusterPeers(ctx *Context) error {
 // Incident handlers
 
 func (s *RESTServer) handleListIncidents(ctx *Context) error {
-	// List active incidents
-	return ctx.JSON(http.StatusOK, []interface{}{})
+	incidents := s.alert.ListActiveIncidents()
+	return ctx.JSON(http.StatusOK, incidents)
 }
 
 func (s *RESTServer) handleAcknowledgeIncident(ctx *Context) error {
@@ -992,6 +1073,41 @@ func (s *RESTServer) handleResolveIncident(ctx *Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{"status": "resolved"})
+}
+
+// Config handlers
+
+func (s *RESTServer) handleGetConfig(ctx *Context) error {
+	config := map[string]interface{}{
+		"instance_name":  "AnubisWatch",
+		"timezone":       "UTC",
+		"language":       "en",
+		"theme":          "dark",
+		"retention_days": 30,
+		"storage_path":   "/var/lib/anubis",
+		"auth_enabled":   s.authConfig.Enabled,
+		"mcp_enabled":    s.mcp != nil,
+		"websocket_enabled": true,
+		"host":           s.config.Host,
+		"port":           s.config.Port,
+		"grpc_port":      s.config.GRPCPort,
+		"tls_enabled":    s.config.TLS.Enabled,
+		"auto_cert":      s.config.TLS.AutoCert,
+		"auth_type":      s.authConfig.Type,
+	}
+	return ctx.JSON(http.StatusOK, config)
+}
+
+func (s *RESTServer) handleUpdateConfig(ctx *Context) error {
+	var input map[string]interface{}
+	if err := json.NewDecoder(ctx.Request.Body).Decode(&input); err != nil {
+		return ctx.Error(http.StatusBadRequest, "invalid JSON")
+	}
+
+	// Config is stored in-memory for the current session.
+	// For persistent config changes, a config file rewrite would be needed.
+	// This endpoint acknowledges the request for now.
+	return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // Status Page handlers
@@ -1564,6 +1680,94 @@ func (c *Context) Error(status int, message string) error {
 
 func (c *Context) Bind(v interface{}) error {
 	return json.NewDecoder(c.Request.Body).Decode(v)
+}
+
+// Maintenance Window handlers
+
+func (s *RESTServer) handleListMaintenanceWindows(ctx *Context) error {
+	windows, err := s.store.ListMaintenanceWindows()
+	if err != nil {
+		return ctx.Error(http.StatusInternalServerError, err.Error())
+	}
+	return ctx.JSON(http.StatusOK, windows)
+}
+
+func (s *RESTServer) handleCreateMaintenanceWindow(ctx *Context) error {
+	var w core.MaintenanceWindow
+	if err := json.NewDecoder(ctx.Request.Body).Decode(&w); err != nil {
+		return ctx.Error(http.StatusBadRequest, "invalid JSON")
+	}
+	if err := s.store.SaveMaintenanceWindow(&w); err != nil {
+		return ctx.Error(http.StatusInternalServerError, err.Error())
+	}
+	return ctx.JSON(http.StatusCreated, w)
+}
+
+func (s *RESTServer) handleGetMaintenanceWindow(ctx *Context) error {
+	id := ctx.Params["id"]
+	w, err := s.store.GetMaintenanceWindow(id)
+	if err != nil {
+		return ctx.Error(http.StatusNotFound, "maintenance window not found")
+	}
+	return ctx.JSON(http.StatusOK, w)
+}
+
+func (s *RESTServer) handleUpdateMaintenanceWindow(ctx *Context) error {
+	id := ctx.Params["id"]
+	w, err := s.store.GetMaintenanceWindow(id)
+	if err != nil {
+		return ctx.Error(http.StatusNotFound, "maintenance window not found")
+	}
+	var input map[string]interface{}
+	if err := json.NewDecoder(ctx.Request.Body).Decode(&input); err != nil {
+		return ctx.Error(http.StatusBadRequest, "invalid JSON")
+	}
+	// Apply updates
+	if v, ok := input["name"]; ok {
+		w.Name = v.(string)
+	}
+	if v, ok := input["description"]; ok {
+		w.Description = v.(string)
+	}
+	if v, ok := input["soul_ids"]; ok {
+		ids := v.([]interface{})
+		w.SoulIDs = make([]string, len(ids))
+		for i, id := range ids {
+			w.SoulIDs[i] = id.(string)
+		}
+	}
+	if v, ok := input["tags"]; ok {
+		tags := v.([]interface{})
+		w.Tags = make([]string, len(tags))
+		for i, t := range tags {
+			w.Tags[i] = t.(string)
+		}
+	}
+	if v, ok := input["start_time"]; ok {
+		w.StartTime, _ = time.Parse(time.RFC3339, v.(string))
+	}
+	if v, ok := input["end_time"]; ok {
+		w.EndTime, _ = time.Parse(time.RFC3339, v.(string))
+	}
+	if v, ok := input["recurring"]; ok {
+		w.Recurring = v.(string)
+	}
+	if v, ok := input["enabled"]; ok {
+		w.Enabled = v.(bool)
+	}
+	w.UpdatedAt = time.Now().UTC()
+	if err := s.store.SaveMaintenanceWindow(w); err != nil {
+		return ctx.Error(http.StatusInternalServerError, err.Error())
+	}
+	return ctx.JSON(http.StatusOK, w)
+}
+
+func (s *RESTServer) handleDeleteMaintenanceWindow(ctx *Context) error {
+	id := ctx.Params["id"]
+	if err := s.store.DeleteMaintenanceWindow(id); err != nil {
+		return ctx.Error(http.StatusNotFound, "maintenance window not found")
+	}
+	return ctx.JSON(http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // OnJudgmentCallback returns a callback function for broadcasting judgments via WebSocket

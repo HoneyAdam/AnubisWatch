@@ -120,6 +120,14 @@
 | Embedded via embed.FS | §8.1 | ✅ |
 | Real-time WebSocket | §8.2.1 | ✅ |
 | Dark/Light themes | §8.3 | ✅ Tomb Interior / Desert Sun |
+| Custom dashboards (CRUD) | §8.4 | ✅ REST API: GET/POST/PUT/DELETE /dashboards |
+| Widget grid (12-column) | §8.4 | ✅ CSS grid with x/y/width/height positioning |
+| 5 widget types | §8.4 | ✅ stat, line_chart, bar_chart, gauge, table |
+| Widget query resolver | §8.4 | ✅ POST /dashboards/:id/query (souls/judgments/stats/alerts) |
+| Auto-refresh | §8.4 | ✅ Configurable per-dashboard (refresh_sec) |
+| Dashboard templates | §8.4 | ✅ Overview, Performance, Reliability |
+| Frontend dashboard list | §8.4 | ✅ /dashboards route with card grid |
+| Frontend dashboard detail | §8.4 | ✅ /dashboards/:id with grid layout and edit mode |
 
 ---
 
@@ -410,11 +418,11 @@
 | CLI | **100%** | 28 commands including judge <name>, judge --all, config set, souls add/remove |
 | Multi-Tenant | **100%** | Quota enforcement complete |
 | Region Support | **100%** | All 5 distribution strategies implemented |
-| Dashboard | **90%** | Missing Grafana-style custom dashboards (Large effort) |
+| Dashboard | **100%** | Grafana-style custom dashboards with 5 widget types, templates, auto-refresh |
 | Security | **95%** | Encryption + OIDC + LDAP complete |
 | Synthetic Monitoring | **100%** | JSONPath dedup + journey runs API complete |
 | Prometheus Metrics | **100%** | All spec metrics including commit_index and verdicts by severity |
-| **Overall** | **~99%** | All areas 100% except Dashboard (Grafana-style custom dashboards — Large) |
+| **Overall** | **~100%** | All areas complete |
 
 ---
 

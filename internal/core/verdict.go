@@ -46,6 +46,7 @@ type AlertRule struct {
 	ID          string            `json:"id" yaml:"id"`
 	Name        string            `json:"name" yaml:"name"`
 	Enabled     bool              `json:"enabled" yaml:"enabled"`
+	WorkspaceID string            `json:"workspace_id,omitempty" yaml:"workspace_id,omitempty"`
 	Scope       RuleScope         `json:"scope" yaml:"scope"`
 	Conditions  []AlertCondition  `json:"conditions" yaml:"conditions"`
 	Channels    []string          `json:"channels" yaml:"channels"`
@@ -185,6 +186,7 @@ type AlertChannel struct {
 	Name        string                 `json:"name" yaml:"name"`
 	Type        AlertChannelType       `json:"type" yaml:"type"`
 	Enabled     bool                   `json:"enabled" yaml:"enabled"`
+	WorkspaceID string                 `json:"workspace_id,omitempty" yaml:"workspace_id,omitempty"`
 	Config      map[string]interface{} `json:"config" yaml:"config"`
 	Filters     []AlertFilter          `json:"filters" yaml:"filters"`
 	RateLimit   RateLimitConfig        `json:"rate_limit" yaml:"rate_limit"`
@@ -476,4 +478,28 @@ func (r AlertRule) validate(index int) error {
 		}
 	}
 	return nil
+}
+
+// MaintenanceWindow represents a scheduled maintenance period
+type MaintenanceWindow struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	SoulIDs     []string  `json:"soul_ids,omitempty"`
+	Tags        []string  `json:"tags,omitempty"`
+	WorkspaceID string    `json:"workspace_id"`
+	StartTime   time.Time `json:"start_time"`
+	EndTime     time.Time `json:"end_time"`
+	Recurring   string    `json:"recurring,omitempty"` // "", "daily", "weekly", "monthly"
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// IsActive checks if the maintenance window is currently active
+func (m *MaintenanceWindow) IsActive(now time.Time) bool {
+	if !m.Enabled {
+		return false
+	}
+	return now.After(m.StartTime) && now.Before(m.EndTime)
 }

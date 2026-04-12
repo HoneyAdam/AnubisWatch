@@ -62,7 +62,7 @@ func (m *mockGRPCStore) DeleteSoulNoCtx(id string) error      { delete(m.souls, 
 func (m *mockGRPCStore) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]interface{}, error) {
 	return m.judgments, nil
 }
-func (m *mockGRPCStore) GetChannelNoCtx(id string) (interface{}, error) { return m.channels[id], nil }
+func (m *mockGRPCStore) GetChannelNoCtx(id string, ws string) (interface{}, error) { return m.channels[id], nil }
 func (m *mockGRPCStore) ListChannelsNoCtx(ws string) ([]interface{}, error) {
 	result := make([]interface{}, 0, len(m.channels))
 	for _, c := range m.channels {
@@ -82,8 +82,8 @@ func (m *mockGRPCStore) SaveChannelNoCtx(ch interface{}) error {
 	m.channels[id] = &mockChannel{id: id, name: name, chType: chType}
 	return nil
 }
-func (m *mockGRPCStore) DeleteChannelNoCtx(id string) error    { delete(m.channels, id); return nil }
-func (m *mockGRPCStore) GetRuleNoCtx(id string) (interface{}, error) { return m.rules[id], nil }
+func (m *mockGRPCStore) DeleteChannelNoCtx(id string, ws string) error { delete(m.channels, id); return nil }
+func (m *mockGRPCStore) GetRuleNoCtx(id string, ws string) (interface{}, error) { return m.rules[id], nil }
 func (m *mockGRPCStore) ListRulesNoCtx(ws string) ([]interface{}, error) {
 	result := make([]interface{}, 0, len(m.rules))
 	for _, r := range m.rules {
@@ -101,7 +101,7 @@ func (m *mockGRPCStore) SaveRuleNoCtx(rule interface{}) error {
 	m.rules[id] = &mockRule{id: id, name: name}
 	return nil
 }
-func (m *mockGRPCStore) DeleteRuleNoCtx(id string) error      { delete(m.rules, id); return nil }
+func (m *mockGRPCStore) DeleteRuleNoCtx(id string, ws string) error { delete(m.rules, id); return nil }
 func (m *mockGRPCStore) GetJourneyNoCtx(id string) (interface{}, error) { return m.journeys[id], nil }
 func (m *mockGRPCStore) ListJourneysNoCtx(ws string, o, l int) ([]interface{}, error) {
 	result := make([]interface{}, 0, len(m.journeys))

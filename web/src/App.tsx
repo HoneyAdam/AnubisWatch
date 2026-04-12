@@ -10,6 +10,8 @@ import { Cluster } from './pages/Cluster'
 import { StatusPages } from './pages/StatusPages'
 import { Dashboards } from './pages/Dashboards'
 import { DashboardDetail } from './pages/DashboardDetail'
+import { Incidents } from './pages/Incidents'
+import { Maintenance } from './pages/Maintenance'
 import { Settings } from './pages/Settings'
 import { Login } from './pages/Login'
 import { WebSocketProvider } from './hooks/useWebSocket'
@@ -20,8 +22,9 @@ function ProtectedRoute() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center" role="status" aria-label="Loading">
         <div className="w-8 h-8 border-2 border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
+        <span className="sr-only">Loading...</span>
       </div>
     )
   }
@@ -36,6 +39,7 @@ function ProtectedRoute() {
 function App() {
   return (
     <WebSocketProvider>
+      <a href="#main-content" className="skip-link">Skip to main content</a>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route element={<ProtectedRoute />}>
@@ -45,6 +49,8 @@ function App() {
             <Route path="/souls/:id" element={<SoulDetail />} />
             <Route path="/judgments" element={<Judgments />} />
             <Route path="/alerts" element={<Alerts />} />
+            <Route path="/incidents" element={<Incidents />} />
+            <Route path="/maintenance" element={<Maintenance />} />
             <Route path="/journeys" element={<Journeys />} />
             <Route path="/cluster" element={<Cluster />} />
             <Route path="/status-pages" element={<StatusPages />} />

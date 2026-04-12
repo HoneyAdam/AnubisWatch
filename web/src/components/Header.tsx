@@ -72,6 +72,7 @@ export function Header() {
         <button
           onClick={() => setDarkMode(!darkMode)}
           className="relative p-2.5 text-gray-400 hover:text-[#D4AF37] hover:bg-[#D4AF37]/10 rounded-xl transition-all group border border-transparent hover:border-[#D4AF37]/20"
+          aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
         >
           {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           <div className="absolute inset-0 rounded-xl bg-[#D4AF37]/10 scale-0 group-hover:scale-100 transition-transform" />
@@ -81,6 +82,7 @@ export function Header() {
         <button
           onClick={() => setShowNotifications(!showNotifications)}
           className="relative p-2.5 text-gray-400 hover:text-[#F4D03F] hover:bg-[#D4AF37]/10 rounded-xl transition-all group border border-transparent hover:border-[#D4AF37]/20"
+          aria-label="Toggle notifications"
         >
           <Bell className="w-5 h-5 group-hover:animate-swing" />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#D4AF37] rounded-full animate-pulse shadow-lg shadow-[#D4AF37]/50" />
@@ -103,7 +105,8 @@ export function Header() {
           <button
             onClick={handleLogout}
             className="p-2 text-gray-400 hover:text-[#D4AF37] hover:bg-[#D4AF37]/10 rounded-lg transition-all"
-            title="Logout"
+            aria-label="Log out"
+            title="Log out"
           >
             <LogOut className="w-4 h-4" />
           </button>

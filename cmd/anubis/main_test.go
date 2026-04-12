@@ -771,14 +771,14 @@ func TestRestStorageAdapter_Methods(t *testing.T) {
 	_ = adapter.DeleteSoul(ctx, "id")
 	_, _ = adapter.GetJudgmentNoCtx("id")
 	_, _ = adapter.ListJudgmentsNoCtx("soul", now, now, 10)
-	_, _ = adapter.GetChannelNoCtx("id")
+	_, _ = adapter.GetChannelNoCtx("id", "workspace")
 	_, _ = adapter.ListChannelsNoCtx("workspace")
 	_ = adapter.SaveChannelNoCtx(nil)
-	_ = adapter.DeleteChannelNoCtx("id")
-	_, _ = adapter.GetRuleNoCtx("id")
+	_ = adapter.DeleteChannelNoCtx("id", "workspace")
+	_, _ = adapter.GetRuleNoCtx("id", "workspace")
 	_, _ = adapter.ListRulesNoCtx("workspace")
 	_ = adapter.SaveRuleNoCtx(nil)
-	_ = adapter.DeleteRuleNoCtx("id")
+	_ = adapter.DeleteRuleNoCtx("id", "workspace")
 	_, _ = adapter.GetWorkspaceNoCtx("id")
 	_, _ = adapter.ListWorkspacesNoCtx()
 	_ = adapter.SaveWorkspaceNoCtx(nil)
@@ -818,13 +818,13 @@ func TestAlertStorageAdapter_Methods(t *testing.T) {
 	}()
 
 	_ = adapter.SaveChannel(nil)
-	_, _ = adapter.GetChannel("id")
-	_, _ = adapter.ListChannels()
-	_ = adapter.DeleteChannel("id")
+	_, _ = adapter.GetChannel("id", "workspace")
+	_, _ = adapter.ListChannels("workspace")
+	_ = adapter.DeleteChannel("id", "workspace")
 	_ = adapter.SaveRule(nil)
-	_, _ = adapter.GetRule("id")
-	_, _ = adapter.ListRules()
-	_ = adapter.DeleteRule("id")
+	_, _ = adapter.GetRule("id", "workspace")
+	_, _ = adapter.ListRules("workspace")
+	_ = adapter.DeleteRule("id", "workspace")
 	_ = adapter.SaveEvent(nil)
 	_, _ = adapter.ListEvents("soul", 10)
 	_ = adapter.SaveIncident(nil)
@@ -2434,7 +2434,7 @@ func TestRestStorageAdapter_Channel(t *testing.T) {
 	}
 
 	// Test GetChannelNoCtx
-	retrieved, err := adapter.GetChannelNoCtx("test-channel-1")
+	retrieved, err := adapter.GetChannelNoCtx("test-channel-1", "default")
 	if err != nil {
 		t.Errorf("GetChannelNoCtx failed: %v", err)
 	}
@@ -2452,7 +2452,7 @@ func TestRestStorageAdapter_Channel(t *testing.T) {
 	}
 
 	// Test DeleteChannelNoCtx
-	if err := adapter.DeleteChannelNoCtx("test-channel-1"); err != nil {
+	if err := adapter.DeleteChannelNoCtx("test-channel-1", "default"); err != nil {
 		t.Errorf("DeleteChannelNoCtx failed: %v", err)
 	}
 }
@@ -2477,7 +2477,7 @@ func TestRestStorageAdapter_Rule(t *testing.T) {
 	}
 
 	// Test GetRuleNoCtx
-	retrieved, err := adapter.GetRuleNoCtx("test-rule-1")
+	retrieved, err := adapter.GetRuleNoCtx("test-rule-1", "default")
 	if err != nil {
 		t.Errorf("GetRuleNoCtx failed: %v", err)
 	}
@@ -2495,7 +2495,7 @@ func TestRestStorageAdapter_Rule(t *testing.T) {
 	}
 
 	// Test DeleteRuleNoCtx
-	if err := adapter.DeleteRuleNoCtx("test-rule-1"); err != nil {
+	if err := adapter.DeleteRuleNoCtx("test-rule-1", "default"); err != nil {
 		t.Errorf("DeleteRuleNoCtx failed: %v", err)
 	}
 }
@@ -2808,7 +2808,7 @@ func TestAlertStorageAdapter_WithRealDB(t *testing.T) {
 		t.Errorf("SaveChannel failed: %v", err)
 	}
 
-	retrieved, err := adapter.GetChannel("alert-test-channel")
+	retrieved, err := adapter.GetChannel("alert-test-channel", "default")
 	if err != nil {
 		t.Errorf("GetChannel failed: %v", err)
 	}
@@ -2817,7 +2817,7 @@ func TestAlertStorageAdapter_WithRealDB(t *testing.T) {
 	}
 
 	// Test ListChannels
-	channels, err := adapter.ListChannels()
+	channels, err := adapter.ListChannels("default")
 	if err != nil {
 		t.Errorf("ListChannels failed: %v", err)
 	}
@@ -2826,7 +2826,7 @@ func TestAlertStorageAdapter_WithRealDB(t *testing.T) {
 	}
 
 	// Test DeleteChannel
-	if err := adapter.DeleteChannel("alert-test-channel"); err != nil {
+	if err := adapter.DeleteChannel("alert-test-channel", "default"); err != nil {
 		t.Errorf("DeleteChannel failed: %v", err)
 	}
 
@@ -2840,7 +2840,7 @@ func TestAlertStorageAdapter_WithRealDB(t *testing.T) {
 		t.Errorf("SaveRule failed: %v", err)
 	}
 
-	retrievedRule, err := adapter.GetRule("alert-test-rule")
+	retrievedRule, err := adapter.GetRule("alert-test-rule", "default")
 	if err != nil {
 		t.Errorf("GetRule failed: %v", err)
 	}
@@ -2849,7 +2849,7 @@ func TestAlertStorageAdapter_WithRealDB(t *testing.T) {
 	}
 
 	// Test ListRules
-	rules, err := adapter.ListRules()
+	rules, err := adapter.ListRules("default")
 	if err != nil {
 		t.Errorf("ListRules failed: %v", err)
 	}
@@ -2858,7 +2858,7 @@ func TestAlertStorageAdapter_WithRealDB(t *testing.T) {
 	}
 
 	// Test DeleteRule
-	if err := adapter.DeleteRule("alert-test-rule"); err != nil {
+	if err := adapter.DeleteRule("alert-test-rule", "default"); err != nil {
 		t.Errorf("DeleteRule failed: %v", err)
 	}
 

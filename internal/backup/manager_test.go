@@ -46,12 +46,24 @@ func (m *mockStorage) ListSouls(ctx context.Context, workspaceID string, offset,
 	return result, nil
 }
 
-func (m *mockStorage) ListAlertChannels() ([]*core.AlertChannel, error) {
-	return m.alertChannels, nil
+func (m *mockStorage) ListAlertChannels(workspace string) ([]*core.AlertChannel, error) {
+	var result []*core.AlertChannel
+	for _, ch := range m.alertChannels {
+		if ch.WorkspaceID == workspace || ch.WorkspaceID == "" {
+			result = append(result, ch)
+		}
+	}
+	return result, nil
 }
 
-func (m *mockStorage) ListAlertRules() ([]*core.AlertRule, error) {
-	return m.alertRules, nil
+func (m *mockStorage) ListAlertRules(workspace string) ([]*core.AlertRule, error) {
+	var result []*core.AlertRule
+	for _, r := range m.alertRules {
+		if r.WorkspaceID == workspace || r.WorkspaceID == "" {
+			result = append(result, r)
+		}
+	}
+	return result, nil
 }
 
 func (m *mockStorage) ListStatusPages() ([]*core.StatusPage, error) {
@@ -160,10 +172,10 @@ func TestManager_Create(t *testing.T) {
 			{ID: "soul3", Name: "Soul 3", WorkspaceID: "ws2"},
 		},
 		alertChannels: []*core.AlertChannel{
-			{ID: "ch1", Name: "Channel 1"},
+			{ID: "ch1", Name: "Channel 1", WorkspaceID: "ws1"},
 		},
 		alertRules: []*core.AlertRule{
-			{ID: "rule1", Name: "Rule 1"},
+			{ID: "rule1", Name: "Rule 1", WorkspaceID: "ws1"},
 		},
 		statusPages: []*core.StatusPage{
 			{ID: "page1", Name: "Status Page 1"},

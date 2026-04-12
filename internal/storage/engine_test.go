@@ -836,7 +836,7 @@ func TestCobaltDB_SaveChannelNoCtx(t *testing.T) {
 		t.Fatalf("SaveChannelNoCtx failed: %v", err)
 	}
 
-	retrieved, err := db.GetChannelNoCtx("channel-noctx")
+	retrieved, err := db.GetChannelNoCtx("channel-noctx", "default")
 	if err != nil {
 		t.Fatalf("GetChannelNoCtx failed: %v", err)
 	}
@@ -860,7 +860,7 @@ func TestCobaltDB_SaveRuleNoCtx(t *testing.T) {
 		t.Fatalf("SaveRuleNoCtx failed: %v", err)
 	}
 
-	retrieved, err := db.GetRuleNoCtx("rule-noctx")
+	retrieved, err := db.GetRuleNoCtx("rule-noctx", "default")
 	if err != nil {
 		t.Fatalf("GetRuleNoCtx failed: %v", err)
 	}
@@ -1144,11 +1144,11 @@ func TestCobaltDB_DeleteChannelNoCtx(t *testing.T) {
 		t.Fatalf("SaveChannelNoCtx failed: %v", err)
 	}
 
-	if err := db.DeleteChannelNoCtx("delete-channel"); err != nil {
+	if err := db.DeleteChannelNoCtx("delete-channel", "default"); err != nil {
 		t.Fatalf("DeleteChannelNoCtx failed: %v", err)
 	}
 
-	_, err := db.GetChannelNoCtx("delete-channel")
+	_, err := db.GetChannelNoCtx("delete-channel", "default")
 	if err == nil {
 		t.Error("expected error getting deleted channel")
 	}
@@ -1168,11 +1168,11 @@ func TestCobaltDB_DeleteRuleNoCtx(t *testing.T) {
 		t.Fatalf("SaveRuleNoCtx failed: %v", err)
 	}
 
-	if err := db.DeleteRuleNoCtx("delete-rule"); err != nil {
+	if err := db.DeleteRuleNoCtx("delete-rule", "default"); err != nil {
 		t.Fatalf("DeleteRuleNoCtx failed: %v", err)
 	}
 
-	_, err := db.GetRuleNoCtx("delete-rule")
+	_, err := db.GetRuleNoCtx("delete-rule", "default")
 	if err == nil {
 		t.Error("expected error getting deleted rule")
 	}
@@ -1475,7 +1475,7 @@ func TestCobaltDB_GetAlertChannel(t *testing.T) {
 		t.Fatalf("SaveAlertChannel failed: %v", err)
 	}
 
-	retrieved, err := db.GetAlertChannel("alert-ch-1")
+	retrieved, err := db.GetAlertChannel("alert-ch-1", "default")
 	if err != nil {
 		t.Fatalf("GetAlertChannel failed: %v", err)
 	}
@@ -1498,7 +1498,7 @@ func TestCobaltDB_ListAlertChannels(t *testing.T) {
 		t.Fatalf("SaveAlertChannel failed: %v", err)
 	}
 
-	channels, err := db.ListAlertChannels()
+	channels, err := db.ListAlertChannels("default")
 	if err != nil {
 		t.Fatalf("ListAlertChannels failed: %v", err)
 	}
@@ -1521,11 +1521,11 @@ func TestCobaltDB_DeleteAlertChannel(t *testing.T) {
 		t.Fatalf("SaveAlertChannel failed: %v", err)
 	}
 
-	if err := db.DeleteAlertChannel("delete-alert-ch"); err != nil {
+	if err := db.DeleteAlertChannel("delete-alert-ch", "default"); err != nil {
 		t.Fatalf("DeleteAlertChannel failed: %v", err)
 	}
 
-	_, err := db.GetAlertChannel("delete-alert-ch")
+	_, err := db.GetAlertChannel("delete-alert-ch", "default")
 	if err == nil {
 		t.Error("expected error getting deleted alert channel")
 	}
@@ -1545,7 +1545,7 @@ func TestCobaltDB_GetAlertRule(t *testing.T) {
 		t.Fatalf("SaveAlertRule failed: %v", err)
 	}
 
-	retrieved, err := db.GetAlertRule("alert-rule-1")
+	retrieved, err := db.GetAlertRule("alert-rule-1", "default")
 	if err != nil {
 		t.Fatalf("GetAlertRule failed: %v", err)
 	}
@@ -1568,7 +1568,7 @@ func TestCobaltDB_ListAlertRules(t *testing.T) {
 		t.Fatalf("SaveAlertRule failed: %v", err)
 	}
 
-	rules, err := db.ListAlertRules()
+	rules, err := db.ListAlertRules("default")
 	if err != nil {
 		t.Fatalf("ListAlertRules failed: %v", err)
 	}
@@ -1591,11 +1591,11 @@ func TestCobaltDB_DeleteAlertRule(t *testing.T) {
 		t.Fatalf("SaveAlertRule failed: %v", err)
 	}
 
-	if err := db.DeleteAlertRule("delete-alert-rule"); err != nil {
+	if err := db.DeleteAlertRule("delete-alert-rule", "default"); err != nil {
 		t.Fatalf("DeleteAlertRule failed: %v", err)
 	}
 
-	_, err := db.GetAlertRule("delete-alert-rule")
+	_, err := db.GetAlertRule("delete-alert-rule", "default")
 	if err == nil {
 		t.Error("expected error getting deleted alert rule")
 	}
@@ -4576,7 +4576,7 @@ func TestCobaltDB_ListRules_WithData(t *testing.T) {
 	}
 
 	// Test ListAlertRules (ListRules has different key pattern)
-	results, err := db.ListAlertRules()
+	results, err := db.ListAlertRules("default")
 	if err != nil {
 		t.Fatalf("ListAlertRules failed: %v", err)
 	}
@@ -4605,7 +4605,7 @@ func TestCobaltDB_ListAlertChannels_WithData(t *testing.T) {
 	}
 
 	// Test ListAlertChannels
-	results, err := db.ListAlertChannels()
+	results, err := db.ListAlertChannels("default")
 	if err != nil {
 		t.Fatalf("ListAlertChannels failed: %v", err)
 	}
@@ -4942,7 +4942,7 @@ func TestCobaltDB_ListAlertChannels_WithCorruptData(t *testing.T) {
 	db.Put(key, []byte("not valid json"))
 
 	// ListAlertChannels should skip corrupt data
-	results, err := db.ListAlertChannels()
+	results, err := db.ListAlertChannels("default")
 	if err != nil {
 		t.Fatalf("ListAlertChannels failed: %v", err)
 	}
@@ -5730,7 +5730,7 @@ func TestCobaltDB_ListAlertChannels_Direct(t *testing.T) {
 		}
 	}
 
-	listed, err := db.ListAlertChannels()
+	listed, err := db.ListAlertChannels("default")
 	if err != nil {
 		t.Fatalf("ListAlertChannels failed: %v", err)
 	}
@@ -5744,7 +5744,7 @@ func TestCobaltDB_ListAlertChannels_Empty(t *testing.T) {
 	db := newTestDB(t)
 	defer db.Close()
 
-	channels, err := db.ListAlertChannels()
+	channels, err := db.ListAlertChannels("default")
 	if err != nil {
 		t.Fatalf("ListAlertChannels failed: %v", err)
 	}
@@ -5765,7 +5765,7 @@ func TestCobaltDB_ListAlertChannels_CorruptData(t *testing.T) {
 	// Store corrupt data
 	db.Put("default/alerts/channels/corrupt", []byte("bad-json"))
 
-	listed, err := db.ListAlertChannels()
+	listed, err := db.ListAlertChannels("default")
 	if err != nil {
 		t.Fatalf("ListAlertChannels failed: %v", err)
 	}
@@ -5792,7 +5792,7 @@ func TestCobaltDB_ListAlertRules_Direct(t *testing.T) {
 		}
 	}
 
-	listed, err := db.ListAlertRules()
+	listed, err := db.ListAlertRules("default")
 	if err != nil {
 		t.Fatalf("ListAlertRules failed: %v", err)
 	}
@@ -5806,7 +5806,7 @@ func TestCobaltDB_ListAlertRules_Empty(t *testing.T) {
 	db := newTestDB(t)
 	defer db.Close()
 
-	rules, err := db.ListAlertRules()
+	rules, err := db.ListAlertRules("default")
 	if err != nil {
 		t.Fatalf("ListAlertRules failed: %v", err)
 	}
@@ -5824,7 +5824,7 @@ func TestCobaltDB_ListAlertRules_CorruptData(t *testing.T) {
 	db.SaveAlertRule(rule)
 	db.Put("default/alerts/rules/corrupt", []byte("bad-json"))
 
-	listed, err := db.ListAlertRules()
+	listed, err := db.ListAlertRules("default")
 	if err != nil {
 		t.Fatalf("ListAlertRules failed: %v", err)
 	}
@@ -6275,7 +6275,7 @@ func TestCobaltDB_GetJudgmentNoCtx_Closed(t *testing.T) {
 func TestCobaltDB_GetChannelNoCtx_Closed(t *testing.T) {
 	db := newTestDB(t)
 	db.Close()
-	_, err := db.GetChannelNoCtx("test-channel")
+	_, err := db.GetChannelNoCtx("test-channel", "default")
 	if err == nil {
 		t.Error("GetChannelNoCtx should error when DB is closed")
 	}

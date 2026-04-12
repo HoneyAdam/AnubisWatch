@@ -289,7 +289,7 @@ func (m *mockAlertStorage) SaveChannel(ch *core.AlertChannel) error {
 	return nil
 }
 
-func (m *mockAlertStorage) GetChannel(id string) (*core.AlertChannel, error) {
+func (m *mockAlertStorage) GetChannel(id string, workspace string) (*core.AlertChannel, error) {
 	ch, ok := m.channels[id]
 	if !ok {
 		return nil, nil
@@ -297,7 +297,7 @@ func (m *mockAlertStorage) GetChannel(id string) (*core.AlertChannel, error) {
 	return ch, nil
 }
 
-func (m *mockAlertStorage) ListChannels() ([]*core.AlertChannel, error) {
+func (m *mockAlertStorage) ListChannels(workspace string) ([]*core.AlertChannel, error) {
 	result := make([]*core.AlertChannel, 0, len(m.channels))
 	for _, ch := range m.channels {
 		result = append(result, ch)
@@ -305,7 +305,7 @@ func (m *mockAlertStorage) ListChannels() ([]*core.AlertChannel, error) {
 	return result, nil
 }
 
-func (m *mockAlertStorage) DeleteChannel(id string) error {
+func (m *mockAlertStorage) DeleteChannel(id string, workspace string) error {
 	delete(m.channels, id)
 	return nil
 }
@@ -315,7 +315,7 @@ func (m *mockAlertStorage) SaveRule(rule *core.AlertRule) error {
 	return nil
 }
 
-func (m *mockAlertStorage) GetRule(id string) (*core.AlertRule, error) {
+func (m *mockAlertStorage) GetRule(id string, workspace string) (*core.AlertRule, error) {
 	rule, ok := m.rules[id]
 	if !ok {
 		return nil, nil
@@ -323,7 +323,7 @@ func (m *mockAlertStorage) GetRule(id string) (*core.AlertRule, error) {
 	return rule, nil
 }
 
-func (m *mockAlertStorage) ListRules() ([]*core.AlertRule, error) {
+func (m *mockAlertStorage) ListRules(workspace string) ([]*core.AlertRule, error) {
 	result := make([]*core.AlertRule, 0, len(m.rules))
 	for _, rule := range m.rules {
 		result = append(result, rule)
@@ -331,7 +331,7 @@ func (m *mockAlertStorage) ListRules() ([]*core.AlertRule, error) {
 	return result, nil
 }
 
-func (m *mockAlertStorage) DeleteRule(id string) error {
+func (m *mockAlertStorage) DeleteRule(id string, workspace string) error {
 	delete(m.rules, id)
 	return nil
 }

@@ -90,6 +90,7 @@ export function Dashboards() {
                   onClick={() => handleDelete(d.id)}
                   disabled={deleting === d.id}
                   className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+                  aria-label={`Delete dashboard ${d.name}`}
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>

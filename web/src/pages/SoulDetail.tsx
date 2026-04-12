@@ -234,6 +234,7 @@ export function SoulDetail() {
           <button
             onClick={() => navigate('/souls')}
             className="p-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl transition-all"
+            aria-label="Back to souls"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -252,6 +253,7 @@ export function SoulDetail() {
               <button
                 onClick={handleCopyTarget}
                 className="p-1 hover:bg-gray-800 rounded transition-colors"
+                aria-label="Copy target"
                 title="Copy target"
               >
                 <Copy className="w-3 h-3" />
@@ -294,6 +296,7 @@ export function SoulDetail() {
             onClick={handleDelete}
             disabled={isDeleting}
             className="p-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl transition-all disabled:opacity-50"
+            aria-label="Delete soul"
           >
             {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
           </button>
@@ -342,11 +345,15 @@ export function SoulDetail() {
 
       {/* Tabs */}
       <div className="border-b border-gray-700/50">
-        <div className="flex gap-6">
+        <div className="flex gap-6" role="tablist" aria-label="Soul detail sections">
           {['overview', 'performance', 'history', 'settings'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
+              role="tab"
+              aria-selected={activeTab === tab}
+              aria-controls={`soul-panel-${tab}`}
+              id={`soul-tab-${tab}`}
               className={`pb-3 text-sm font-medium capitalize transition-colors relative ${
                 activeTab === tab ? 'text-amber-400' : 'text-gray-400 hover:text-gray-300'
               }`}

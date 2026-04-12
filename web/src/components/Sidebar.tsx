@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Ghost, Scale, Bell, Route, Network, Globe, Settings, LogOut, LayoutGrid } from 'lucide-react'
+import { LayoutDashboard, Ghost, Scale, Bell, Route, Network, Globe, Settings, LogOut, LayoutGrid, AlertOctagon, Wrench } from 'lucide-react'
 import { useMemo } from 'react'
 import { useAuth } from '../api/hooks'
 
@@ -8,6 +8,8 @@ const navItems = [
   { path: '/souls', icon: Ghost, label: 'Souls' },
   { path: '/judgments', icon: Scale, label: 'Judgments' },
   { path: '/alerts', icon: Bell, label: 'Alerts' },
+  { path: '/incidents', icon: AlertOctagon, label: 'Incidents' },
+  { path: '/maintenance', icon: Wrench, label: 'Maintenance' },
   { path: '/journeys', icon: Route, label: 'Journeys' },
   { path: '/dashboards', icon: LayoutGrid, label: 'Dashboards' },
   { path: '/cluster', icon: Network, label: 'Necropolis' },

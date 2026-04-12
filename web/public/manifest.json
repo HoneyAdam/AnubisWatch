@@ -1,0 +1,36 @@
+{
+  "name": "AnubisWatch — The Judgment Never Sleeps",
+  "short_name": "AnubisWatch",
+  "description": "Zero-dependency uptime and synthetic monitoring platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/anubis-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["developer tools", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/dashboard",
+      "description": "View monitoring dashboard"
+    },
+    {
+      "name": "Souls",
+      "url": "/souls",
+      "description": "View monitored services"
+    },
+    {
+      "name": "Alerts",
+      "url": "/alerts",
+      "description": "View active alerts"
+    }
+  ]
+}

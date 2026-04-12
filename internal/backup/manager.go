@@ -34,8 +34,8 @@ type BackupStorage interface {
 	ListWorkspaces(ctx context.Context) ([]*core.Workspace, error)
 
 	// Alerting
-	ListAlertChannels() ([]*core.AlertChannel, error)
-	ListAlertRules() ([]*core.AlertRule, error)
+	ListAlertChannels(workspaceID string) ([]*core.AlertChannel, error)
+	ListAlertRules(workspaceID string) ([]*core.AlertRule, error)
 
 	// Status Pages
 	ListStatusPages() ([]*core.StatusPage, error)
@@ -168,23 +168,31 @@ func (m *Manager) Create(ctx context.Context, opts Options) (*Backup, string, er
 	backup.Data.Souls = allSouls
 	backup.Metadata.Souls = len(allSouls)
 
-	// Collect alert channels
-	channels, err := m.storage.ListAlertChannels()
-	if err != nil {
-		m.logger.Warn("Failed to list alert channels", "error", err)
-	} else {
-		backup.Data.AlertChannels = channels
-		backup.Metadata.AlertChannels = len(channels)
+	// Collect alert channels across all workspaces
+	var allChannels []*core.AlertChannel
+	for _, ws := range workspaces {
+		channels, err := m.storage.ListAlertChannels(ws.ID)
+		if err != nil {
+			m.logger.Warn("Failed to list alert channels for workspace", "workspace", ws.ID, "error", err)
+			continue
+		}
+		allChannels = append(allChannels, channels...)
 	}
+	backup.Data.AlertChannels = allChannels
+	backup.Metadata.AlertChannels = len(allChannels)
 
-	// Collect alert rules
-	rules, err := m.storage.ListAlertRules()
-	if err != nil {
-		m.logger.Warn("Failed to list alert rules", "error", err)
-	} else {
-		backup.Data.AlertRules = rules
-		backup.Metadata.AlertRules = len(rules)
+	// Collect alert rules across all workspaces
+	var allRules []*core.AlertRule
+	for _, ws := range workspaces {
+		rules, err := m.storage.ListAlertRules(ws.ID)
+		if err != nil {
+			m.logger.Warn("Failed to list alert rules for workspace", "workspace", ws.ID, "error", err)
+			continue
+		}
+		allRules = append(allRules, rules...)
 	}
+	backup.Data.AlertRules = allRules
+	backup.Metadata.AlertRules = len(allRules)
 
 	// Collect status pages
 	pages, err := m.storage.ListStatusPages()

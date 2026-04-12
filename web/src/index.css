@@ -175,6 +175,46 @@ body {
 /* Input Focus Effects */
 input:focus, textarea:focus, select:focus {
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+  outline: 2px solid rgba(245, 158, 11, 0.5);
+  outline-offset: 1px;
+}
+
+/* Global Keyboard Focus Styles */
+:focus-visible {
+  outline: 2px solid rgba(212, 175, 55, 0.8);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgba(212, 175, 55, 0.8);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Remove outline for mouse users */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Skip link for keyboard navigation */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  padding: 8px 16px;
+  background: #D4AF37;
+  color: #0a0a15;
+  font-weight: 600;
+  border-radius: 0 0 8px 8px;
+  transition: top 0.2s;
+}
+
+.skip-link:focus {
+  top: 0;
 }
 
 /* Button Shine Effect */
@@ -256,5 +296,68 @@ input:focus, textarea:focus, select:focus {
   100% {
     transform: scale(1.5);
     opacity: 0;
+  }
+}
+
+/* Print Styles for PDF Export */
+@media print {
+  /* Reset background for printing */
+  body {
+    background: white !important;
+    color: #1a1a1a !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide non-essential elements */
+  .skip-link,
+  nav,
+  header,
+  button,
+  a[href]::after,
+  .events-feed {
+    display: none !important;
+  }
+
+  /* Ensure charts are visible */
+  .recharts-wrapper {
+    page-break-inside: avoid;
+  }
+
+  /* Card styles for print */
+  main {
+    padding: 2rem !important;
+  }
+
+  /* Prevent page breaks inside cards */
+  .rounded-2xl,
+  .rounded-xl,
+  table,
+  tr {
+    page-break-inside: avoid;
+  }
+
+  /* Add print header */
+  h1, h2, h3 {
+    color: #1a1a1a !important;
+  }
+
+  /* Status colors */
+  .text-emerald-400 { color: #059669 !important; }
+  .text-rose-400 { color: #dc2626 !important; }
+  .text-amber-400 { color: #d97706 !important; }
+  .text-blue-400 { color: #2563eb !important; }
+
+  /* Show URLs for links */
+  a[href^="/"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: #666;
+  }
+
+  /* Print footer */
+  @page {
+    margin: 1cm;
+    size: A4 landscape;
   }
 }

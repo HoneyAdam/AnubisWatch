@@ -13,6 +13,7 @@ type Cache struct {
 	lruList  *list.List
 	maxSize  int
 	defaultTTL time.Duration
+	stopCh   chan struct{}
 }
 
 // cacheItem represents a cached value with metadata
@@ -199,13 +200,31 @@ func (c *Cache) evictOldest() {
 	delete(c.items, item.key)
 }
 
+// StartCleanup starts the periodic cleanup goroutine
+func (c *Cache) StartCleanup() {
+	c.stopCh = make(chan struct{})
+	go c.cleanupLoop()
+}
+
+// StopCleanup stops the periodic cleanup goroutine
+func (c *Cache) StopCleanup() {
+	if c.stopCh != nil {
+		close(c.stopCh)
+	}
+}
+
 // cleanupLoop periodically removes expired items
 func (c *Cache) cleanupLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		c.cleanup()
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case <-ticker.C:
+			c.cleanup()
+		}
 	}
 }
 

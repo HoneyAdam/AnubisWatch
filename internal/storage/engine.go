@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -516,7 +517,7 @@ func insertNode(slice []*btreeNode, idx int, val *btreeNode) []*btreeNode {
 // WAL operations
 
 func newWAL(path string) (*writeAheadLog, error) {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, err
 	}
@@ -597,6 +598,17 @@ func (w *writeAheadLog) Close() error {
 	return w.file.Close()
 }
 
+// Truncate resets the WAL file to empty (called after recovery)
+func (w *writeAheadLog) Truncate() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := w.file.Truncate(0); err != nil {
+		return err
+	}
+	_, err := w.file.Seek(0, io.SeekStart)
+	return err
+}
+
 type walEntry struct {
 	Op    string `json:"op"`
 	Key   string `json:"key"`
@@ -605,31 +617,35 @@ type walEntry struct {
 }
 
 func (db *CobaltDB) recoverFromWAL() error {
-	// Open WAL for reading
-	f, err := os.Open(db.wal.path)
-	if err != nil {
-		return err
+	// Use the WAL writer handle directly (opened with O_RDWR to avoid Windows file locking)
+	db.wal.mu.Lock()
+	defer db.wal.mu.Unlock()
+
+	// Seek to beginning for reading
+	if _, err := db.wal.file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to seek WAL: %w", err)
 	}
-	defer f.Close()
 
 	// Read entries
 	buf := make([]byte, 4)
 	for {
-		// Read length
-		n, err := f.Read(buf)
-		if n == 0 && err != nil {
-			break
+		// Read length prefix — use io.ReadFull to ensure we get all 4 bytes
+		if _, err := io.ReadFull(db.wal.file, buf); err != nil {
+			if err == io.EOF {
+				break // Normal end of WAL
+			}
+			return fmt.Errorf("failed to read WAL entry length: %w", err)
 		}
 
 		length := int(buf[0])<<24 | int(buf[1])<<16 | int(buf[2])<<8 | int(buf[3])
-		if length > 1024*1024 {
+		if length <= 0 || length > 1024*1024 {
 			return fmt.Errorf("invalid WAL entry length: %d", length)
 		}
 
-		// Read entry
+		// Read entry data
 		entryBuf := make([]byte, length)
-		if _, err := f.Read(entryBuf); err != nil {
-			return err
+		if _, err := io.ReadFull(db.wal.file, entryBuf); err != nil {
+			return fmt.Errorf("failed to read WAL entry body: %w", err)
 		}
 
 		var entry walEntry
@@ -653,6 +669,23 @@ func (db *CobaltDB) recoverFromWAL() error {
 			db.data.insert(entry.Key, nil)
 		}
 	}
+
+	// Truncate WAL after successful recovery — entries have been replayed.
+	// On Windows, File.Truncate may fail with "Access denied" when the file
+	// was opened with O_APPEND. Close, remove, and recreate to work around this.
+	walPath := db.wal.file.Name()
+	walFile := db.wal.file
+	if err := walFile.Close(); err != nil {
+		return fmt.Errorf("failed to close WAL before truncate: %w", err)
+	}
+	if err := os.Remove(walPath); err != nil {
+		return fmt.Errorf("failed to remove WAL after recovery: %w", err)
+	}
+	newFile, err := os.OpenFile(walPath, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to recreate WAL: %w", err)
+	}
+	db.wal.file = newFile
 
 	return nil
 }
@@ -901,22 +934,13 @@ func (db *CobaltDB) ListJudgmentsNoCtx(soulID string, start, end time.Time, limi
 }
 
 // GetChannelNoCtx retrieves a channel by ID
-func (db *CobaltDB) GetChannelNoCtx(id string) (*core.AlertChannel, error) {
-	key := "default/alerts/channels/" + id
-	data, err := db.Get(key)
-	if err != nil {
-		return nil, err
-	}
-	var ch core.AlertChannel
-	if err := json.Unmarshal(data, &ch); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal channel: %w", err)
-	}
-	return &ch, nil
+func (db *CobaltDB) GetChannelNoCtx(id string, workspace string) (*core.AlertChannel, error) {
+	return db.GetAlertChannel(id, workspace)
 }
 
 // ListChannelsNoCtx lists channels
 func (db *CobaltDB) ListChannelsNoCtx(workspace string) ([]*core.AlertChannel, error) {
-	return db.ListAlertChannels()
+	return db.ListAlertChannels(workspace)
 }
 
 // SaveChannelNoCtx saves a channel without context
@@ -925,18 +949,18 @@ func (db *CobaltDB) SaveChannelNoCtx(ch *core.AlertChannel) error {
 }
 
 // DeleteChannelNoCtx deletes a channel
-func (db *CobaltDB) DeleteChannelNoCtx(id string) error {
-	return db.DeleteAlertChannel(id)
+func (db *CobaltDB) DeleteChannelNoCtx(id string, workspace string) error {
+	return db.DeleteAlertChannel(id, workspace)
 }
 
 // GetRuleNoCtx retrieves a rule by ID
-func (db *CobaltDB) GetRuleNoCtx(id string) (*core.AlertRule, error) {
-	return db.GetAlertRule(id)
+func (db *CobaltDB) GetRuleNoCtx(id string, workspace string) (*core.AlertRule, error) {
+	return db.GetAlertRule(id, workspace)
 }
 
 // ListRulesNoCtx lists rules
 func (db *CobaltDB) ListRulesNoCtx(workspace string) ([]*core.AlertRule, error) {
-	return db.ListAlertRules()
+	return db.ListAlertRules(workspace)
 }
 
 // SaveRuleNoCtx saves a rule without context
@@ -945,8 +969,8 @@ func (db *CobaltDB) SaveRuleNoCtx(rule *core.AlertRule) error {
 }
 
 // DeleteRuleNoCtx deletes a rule
-func (db *CobaltDB) DeleteRuleNoCtx(id string) error {
-	return db.DeleteAlertRule(id)
+func (db *CobaltDB) DeleteRuleNoCtx(id string, workspace string) error {
+	return db.DeleteAlertRule(id, workspace)
 }
 
 // GetWorkspaceNoCtx retrieves a workspace

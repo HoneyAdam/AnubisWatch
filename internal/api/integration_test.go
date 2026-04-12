@@ -181,7 +181,7 @@ func TestIntegration_ChannelOperations(t *testing.T) {
 	}
 
 	// Retrieve channel
-	retrieved, err := ts.storage.GetAlertChannel(channel.ID)
+	retrieved, err := ts.storage.GetAlertChannel(channel.ID, "default")
 	if err != nil {
 		t.Fatalf("Failed to get channel: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestIntegration_ChannelOperations(t *testing.T) {
 	}
 
 	// List channels
-	channels, err := ts.storage.ListAlertChannels()
+	channels, err := ts.storage.ListAlertChannels("default")
 	if err != nil {
 		t.Fatalf("Failed to list channels: %v", err)
 	}
@@ -201,12 +201,12 @@ func TestIntegration_ChannelOperations(t *testing.T) {
 	}
 
 	// Delete channel
-	if err := ts.storage.DeleteAlertChannel(channel.ID); err != nil {
+	if err := ts.storage.DeleteAlertChannel(channel.ID, "default"); err != nil {
 		t.Fatalf("Failed to delete channel: %v", err)
 	}
 
 	// Verify deletion
-	_, err = ts.storage.GetAlertChannel(channel.ID)
+	_, err = ts.storage.GetAlertChannel(channel.ID, "default")
 	if err == nil {
 		t.Error("Expected error when getting deleted channel")
 	}
@@ -340,32 +340,32 @@ func (a *alertStorageAdapter) SaveChannel(ch *core.AlertChannel) error {
 	return a.store.SaveAlertChannel(ch)
 }
 
-func (a *alertStorageAdapter) GetChannel(id string) (*core.AlertChannel, error) {
-	return a.store.GetAlertChannel(id)
+func (a *alertStorageAdapter) GetChannel(id string, workspace string) (*core.AlertChannel, error) {
+	return a.store.GetAlertChannel(id, workspace)
 }
 
-func (a *alertStorageAdapter) ListChannels() ([]*core.AlertChannel, error) {
-	return a.store.ListAlertChannels()
+func (a *alertStorageAdapter) ListChannels(workspace string) ([]*core.AlertChannel, error) {
+	return a.store.ListAlertChannels(workspace)
 }
 
-func (a *alertStorageAdapter) DeleteChannel(id string) error {
-	return a.store.DeleteAlertChannel(id)
+func (a *alertStorageAdapter) DeleteChannel(id string, workspace string) error {
+	return a.store.DeleteAlertChannel(id, workspace)
 }
 
 func (a *alertStorageAdapter) SaveRule(rule *core.AlertRule) error {
 	return a.store.SaveAlertRule(rule)
 }
 
-func (a *alertStorageAdapter) GetRule(id string) (*core.AlertRule, error) {
-	return a.store.GetAlertRule(id)
+func (a *alertStorageAdapter) GetRule(id string, workspace string) (*core.AlertRule, error) {
+	return a.store.GetAlertRule(id, workspace)
 }
 
-func (a *alertStorageAdapter) ListRules() ([]*core.AlertRule, error) {
-	return a.store.ListAlertRules()
+func (a *alertStorageAdapter) ListRules(workspace string) ([]*core.AlertRule, error) {
+	return a.store.ListAlertRules(workspace)
 }
 
-func (a *alertStorageAdapter) DeleteRule(id string) error {
-	return a.store.DeleteAlertRule(id)
+func (a *alertStorageAdapter) DeleteRule(id string, workspace string) error {
+	return a.store.DeleteAlertRule(id, workspace)
 }
 
 func (a *alertStorageAdapter) SaveEvent(event *core.AlertEvent) error {
@@ -416,8 +416,8 @@ func (a *restStorageAdapter) ListJudgmentsNoCtx(soulID string, start, end time.T
 	return a.store.ListJudgmentsNoCtx(soulID, start, end, limit)
 }
 
-func (a *restStorageAdapter) GetChannelNoCtx(id string) (*core.AlertChannel, error) {
-	return a.store.GetChannelNoCtx(id)
+func (a *restStorageAdapter) GetChannelNoCtx(id string, workspace string) (*core.AlertChannel, error) {
+	return a.store.GetChannelNoCtx(id, workspace)
 }
 
 func (a *restStorageAdapter) ListChannelsNoCtx(workspace string) ([]*core.AlertChannel, error) {
@@ -428,12 +428,12 @@ func (a *restStorageAdapter) SaveChannelNoCtx(ch *core.AlertChannel) error {
 	return a.store.SaveChannelNoCtx(ch)
 }
 
-func (a *restStorageAdapter) DeleteChannelNoCtx(id string) error {
-	return a.store.DeleteChannelNoCtx(id)
+func (a *restStorageAdapter) DeleteChannelNoCtx(id string, workspace string) error {
+	return a.store.DeleteChannelNoCtx(id, workspace)
 }
 
-func (a *restStorageAdapter) GetRuleNoCtx(id string) (*core.AlertRule, error) {
-	return a.store.GetRuleNoCtx(id)
+func (a *restStorageAdapter) GetRuleNoCtx(id string, workspace string) (*core.AlertRule, error) {
+	return a.store.GetRuleNoCtx(id, workspace)
 }
 
 func (a *restStorageAdapter) ListRulesNoCtx(workspace string) ([]*core.AlertRule, error) {
@@ -444,8 +444,8 @@ func (a *restStorageAdapter) SaveRuleNoCtx(rule *core.AlertRule) error {
 	return a.store.SaveRuleNoCtx(rule)
 }
 
-func (a *restStorageAdapter) DeleteRuleNoCtx(id string) error {
-	return a.store.DeleteRuleNoCtx(id)
+func (a *restStorageAdapter) DeleteRuleNoCtx(id string, workspace string) error {
+	return a.store.DeleteRuleNoCtx(id, workspace)
 }
 
 func (a *restStorageAdapter) GetWorkspaceNoCtx(id string) (*core.Workspace, error) {

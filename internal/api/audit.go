@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -31,6 +32,7 @@ type AuditLogger struct {
 	backend  AuditBackend
 	buffer   chan *AuditEvent
 	shutdown chan struct{}
+	wg       sync.WaitGroup
 }
 
 // AuditBackend defines the interface for audit log storage
@@ -61,6 +63,7 @@ func NewAuditLogger(logger *slog.Logger, backend AuditBackend) *AuditLogger {
 	}
 
 	// Start background writer
+	al.wg.Add(1)
 	go al.writeLoop()
 
 	return al
@@ -173,6 +176,7 @@ func (al *AuditLogger) LogSecurity(eventType, userID, resource, action string, s
 
 // writeLoop processes audit events asynchronously
 func (al *AuditLogger) writeLoop() {
+	defer al.wg.Done()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -230,6 +234,7 @@ func (al *AuditLogger) flush(events []*AuditEvent) {
 // Stop gracefully shuts down the audit logger
 func (al *AuditLogger) Stop() {
 	close(al.shutdown)
+	al.wg.Wait()
 }
 
 // Query retrieves audit events based on filter

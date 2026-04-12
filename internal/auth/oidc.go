@@ -1,10 +1,17 @@
 package auth
 
 import (
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -23,6 +30,12 @@ type OIDCAuthenticator struct {
 	users   map[string]*api.User  // email -> user
 	tokens  map[string]*session   // token -> session
 	stopCh  chan struct{}
+
+	// JWK cache
+	jwksMu   sync.RWMutex
+	jwks     *jwkSet
+	jwksFetched time.Time
+	jwksTTL  time.Duration
 }
 
 type oidcState struct {
@@ -37,6 +50,36 @@ type oidcConfig struct {
 	UserInfoURL   string   `json:"userinfo_endpoint"`
 	JWKSURI       string   `json:"jwks_uri"`
 	Scopes        []string `json:"scopes_supported"`
+}
+
+// JWK types for signature verification
+type jwkSet struct {
+	Keys []jwk `json:"keys"`
+}
+
+type jwk struct {
+	Kty string `json:"kty"`
+	Use string `json:"use"`
+	Kid string `json:"kid"`
+	Alg string `json:"alg"`
+	N   string `json:"n"`   // RSA modulus
+	E   string `json:"e"`   // RSA exponent
+	Crv string `json:"crv"` // EC curve
+	X   string `json:"x"`   // EC x-coordinate
+	Y   string `json:"y"`   // EC y-coordinate
+}
+
+// cryptoKey represents a parsed public key ready for verification
+type cryptoKey struct {
+	key     crypto.PublicKey
+	alg     string // RS256, ES256, etc.
+	kid     string
+}
+
+// base64url decode helper (handles both padded and unpadded)
+func base64Decode(s string) ([]byte, error) {
+	// RawURLEncoding handles unpadded input natively
+	return base64.RawURLEncoding.DecodeString(s)
 }
 
 type tokenResponse struct {
@@ -58,12 +101,13 @@ type userInfoResponse struct {
 func NewOIDCAuthenticator(cfg core.OIDCAuth, localPath, adminEmail, adminPassword string) *OIDCAuthenticator {
 	localAuth := NewLocalAuthenticator(localPath, adminEmail, adminPassword)
 	return &OIDCAuthenticator{
-		config: cfg,
-		local:  localAuth,
-		state:  make(map[string]*oidcState),
-		users:  make(map[string]*api.User),
-		tokens: make(map[string]*session),
-		stopCh: make(chan struct{}),
+		config:  cfg,
+		local:   localAuth,
+		state:   make(map[string]*oidcState),
+		users:   make(map[string]*api.User),
+		tokens:  make(map[string]*session),
+		stopCh:  make(chan struct{}),
+		jwksTTL: 24 * time.Hour, // Cache JWKs for 24 hours
 	}
 }
 
@@ -117,13 +161,16 @@ func (o *OIDCAuthenticator) OIDCCallback(code, state string) (*api.User, string,
 		return nil, "", fmt.Errorf("failed to exchange code: %w", err)
 	}
 
-	// Get user info
-	userInfo, err := o.getUserInfo(tokenResp.AccessToken)
+	// Verify ID token signature and claims (always, even if we also fetch userinfo)
+	userInfo, err := o.parseIDToken(tokenResp.IDToken)
 	if err != nil {
-		// Try ID token claims as fallback
-		userInfo, err = o.parseIDToken(tokenResp.IDToken)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to get user info: %w", err)
+		return nil, "", fmt.Errorf("invalid ID token: %w", err)
+	}
+
+	// Optionally refresh from userinfo endpoint if available
+	if info, err := o.getUserInfo(tokenResp.AccessToken); err == nil && info.Email != "" {
+		if userInfo.Email == "" || info.EmailVerified {
+			userInfo = info
 		}
 	}
 
@@ -259,32 +306,286 @@ func (o *OIDCAuthenticator) getUserInfo(accessToken string) (*userInfoResponse, 
 	return &userInfo, nil
 }
 
-// parseIDToken parses a JWT ID token to extract claims (simplified, no signature verification)
-func (o *OIDCAuthenticator) parseIDToken(idToken string) (*userInfoResponse, error) {
+// fetchJWKs fetches the JWK set from the OIDC provider
+func (o *OIDCAuthenticator) fetchJWKs() (*jwkSet, error) {
+	o.jwksMu.RLock()
+	if o.jwks != nil && time.Since(o.jwksFetched) < o.jwksTTL {
+		jwks := o.jwks
+		o.jwksMu.RUnlock()
+		return jwks, nil
+	}
+	o.jwksMu.RUnlock()
+
+	o.jwksMu.Lock()
+	defer o.jwksMu.Unlock()
+
+	// Double-check after write lock
+	if o.jwks != nil && time.Since(o.jwksFetched) < o.jwksTTL {
+		return o.jwks, nil
+	}
+
+	cfg, err := o.fetchOIDCConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch OIDC config for JWKs: %w", err)
+	}
+	if cfg.JWKSURI == "" {
+		return nil, fmt.Errorf("OIDC config missing jwks_uri")
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(cfg.JWKSURI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch JWKs from %s: %w", cfg.JWKSURI, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("JWKs endpoint returned %d", resp.StatusCode)
+	}
+
+	var jwks jwkSet
+	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
+		return nil, fmt.Errorf("failed to parse JWK set: %w", err)
+	}
+
+	if len(jwks.Keys) == 0 {
+		return nil, fmt.Errorf("JWK set is empty")
+	}
+
+	o.jwks = &jwks
+	o.jwksFetched = time.Now()
+	slog.Info("JWK set refreshed", "jwks_uri", cfg.JWKSURI, "key_count", len(jwks.Keys))
+	return &jwks, nil
+}
+
+// findKeyForJWT finds the matching public key for a JWT based on the kid header
+func (o *OIDCAuthenticator) findKeyForJWT(headers map[string]interface{}) (*cryptoKey, error) {
+	kid, _ := headers["kid"].(string)
+
+	// Fetch all JWKs (from cache or network)
+	jwks, err := o.fetchJWKs()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, jwk := range jwks.Keys {
+		// Match by kid if present in JWT
+		if kid != "" && jwk.Kid != kid {
+			continue
+		}
+
+		key, err := jwk.toPublicKey()
+		if err != nil {
+			continue
+		}
+		return key, nil
+	}
+
+	if kid != "" {
+		return nil, fmt.Errorf("no matching key found for kid=%s", kid)
+	}
+	// If no kid in JWT, return first usable key
+	for _, jwk := range jwks.Keys {
+		key, err := jwk.toPublicKey()
+		if err == nil {
+			return key, nil
+		}
+	}
+	return nil, fmt.Errorf("no usable keys found in JWK set")
+}
+
+// toPublicKey converts a JWK to a crypto.PublicKey
+func (j *jwk) toPublicKey() (*cryptoKey, error) {
+	switch j.Kty {
+	case "RSA":
+		return j.toRSAPublicKey()
+	case "EC":
+		return j.toECPublicKey()
+	default:
+		return nil, fmt.Errorf("unsupported key type: %s", j.Kty)
+	}
+}
+
+func (j *jwk) toRSAPublicKey() (*cryptoKey, error) {
+	nBytes, err := base64Decode(j.N)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode RSA modulus: %w", err)
+	}
+	eBytes, err := base64Decode(j.E)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode RSA exponent: %w", err)
+	}
+
+	n := new(big.Int).SetBytes(nBytes)
+	e := int(new(big.Int).SetBytes(eBytes).Uint64())
+
+	pubKey := &rsa.PublicKey{N: n, E: e}
+	alg := j.Alg
+	if alg == "" {
+		alg = "RS256" // Default
+	}
+	return &cryptoKey{key: pubKey, alg: alg, kid: j.Kid}, nil
+}
+
+func (j *jwk) toECPublicKey() (*cryptoKey, error) {
+	xBytes, err := base64Decode(j.X)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode EC X: %w", err)
+	}
+	yBytes, err := base64Decode(j.Y)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode EC Y: %w", err)
+	}
+
+	var curve elliptic.Curve
+	switch j.Crv {
+	case "P-256":
+		curve = elliptic.P256()
+	case "P-384":
+		curve = elliptic.P384()
+	case "P-521":
+		curve = elliptic.P521()
+	default:
+		return nil, fmt.Errorf("unsupported EC curve: %s", j.Crv)
+	}
+
+	pubKey := &ecdsa.PublicKey{Curve: curve, X: new(big.Int).SetBytes(xBytes), Y: new(big.Int).SetBytes(yBytes)}
+	alg := j.Alg
+	if alg == "" {
+		switch j.Crv {
+		case "P-256":
+			alg = "ES256"
+		case "P-384":
+			alg = "ES384"
+		case "P-521":
+			alg = "ES512"
+		}
+	}
+	return &cryptoKey{key: pubKey, alg: alg, kid: j.Kid}, nil
+}
+
+// verifyJWTSignature verifies the JWT signature using the appropriate JWK
+func (o *OIDCAuthenticator) verifyJWTSignature(idToken string) (map[string]interface{}, error) {
 	if idToken == "" {
 		return nil, fmt.Errorf("empty ID token")
 	}
 
-	// JWT format: header.payload.signature
 	parts := strings.Split(idToken, ".")
 	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid JWT format")
+		return nil, fmt.Errorf("invalid JWT format: expected 3 parts, got %d", len(parts))
 	}
 
-	// Decode payload (base64url)
-	decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
+	// Decode header
+	headerBytes, err := base64Decode(parts[0])
 	if err != nil {
-		// Try with padding
-		padded := parts[1] + strings.Repeat("=", (4-len(parts[1])%4)%4)
-		decoded, err = base64.RawURLEncoding.DecodeString(padded)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode JWT payload: %w", err)
+		return nil, fmt.Errorf("failed to decode JWT header: %w", err)
+	}
+	var headers map[string]interface{}
+	if err := json.Unmarshal(headerBytes, &headers); err != nil {
+		return nil, fmt.Errorf("failed to parse JWT header: %w", err)
+	}
+
+	// Find the matching key
+	cryptoKey, err := o.findKeyForJWT(headers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find signing key: %w", err)
+	}
+
+	// Verify signature
+	signingInput := []byte(parts[0] + "." + parts[1])
+	sigBytes, err := base64Decode(parts[2])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JWT signature: %w", err)
+	}
+
+	switch cryptoKey.alg {
+	case "RS256":
+		hash := sha256.Sum256(signingInput)
+		rsaKey, ok := cryptoKey.key.(*rsa.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("key type mismatch for RS256")
+		}
+		if err := rsa.VerifyPKCS1v15(rsaKey, crypto.SHA256, hash[:], sigBytes); err != nil {
+			return nil, fmt.Errorf("JWT signature verification failed (RS256): %w", err)
+		}
+	case "ES256":
+		hash := sha256.Sum256(signingInput)
+		ecKey, ok := cryptoKey.key.(*ecdsa.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("key type mismatch for ES256")
+		}
+		keyLen := ecKey.Params().BitSize / 8
+		if len(sigBytes) != 2*keyLen {
+			return nil, fmt.Errorf("invalid ECDSA signature length: expected %d, got %d", 2*keyLen, len(sigBytes))
+		}
+		r := new(big.Int).SetBytes(sigBytes[:keyLen])
+		s := new(big.Int).SetBytes(sigBytes[keyLen:])
+		if !ecdsa.Verify(ecKey, hash[:], r, s) {
+			return nil, fmt.Errorf("JWT signature verification failed (ES256)")
+		}
+	default:
+		return nil, fmt.Errorf("unsupported JWT signing algorithm: %s", cryptoKey.alg)
+	}
+
+	// Decode and return payload
+	payloadBytes, err := base64Decode(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JWT payload: %w", err)
+	}
+	var claims map[string]interface{}
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return nil, fmt.Errorf("failed to parse JWT claims JSON: %w", err)
+	}
+
+	return claims, nil
+}
+
+// parseIDToken parses a JWT ID token WITH cryptographic signature verification
+func (o *OIDCAuthenticator) parseIDToken(idToken string) (*userInfoResponse, error) {
+	// Verify signature and get claims
+	claims, err := o.verifyJWTSignature(idToken)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate required claims
+	if iss, ok := claims["iss"].(string); ok && iss != "" {
+		issuer := strings.TrimSuffix(o.config.Issuer, "/")
+		if iss != issuer {
+			return nil, fmt.Errorf("issuer mismatch: expected %s, got %s", issuer, iss)
 		}
 	}
 
-	var claims map[string]interface{}
-	if err := json.Unmarshal(decoded, &claims); err != nil {
-		return nil, fmt.Errorf("failed to parse JWT claims JSON: %w", err)
+	// Validate audience
+	if aud, ok := claims["aud"].(string); ok && aud != "" {
+		if aud != o.config.ClientID {
+			return nil, fmt.Errorf("audience mismatch: expected %s, got %s", o.config.ClientID, aud)
+		}
+	} else if audList, ok := claims["aud"].([]interface{}); ok {
+		found := false
+		for _, a := range audList {
+			if s, ok := a.(string); ok && s == o.config.ClientID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("audience not in list: expected %s", o.config.ClientID)
+		}
+	}
+
+	// Validate expiration
+	if exp, ok := claims["exp"].(float64); ok {
+		if time.Now().After(time.Unix(int64(exp), 0)) {
+			return nil, fmt.Errorf("ID token expired")
+		}
+	}
+
+	// Validate not-before
+	if nbf, ok := claims["nbf"].(float64); ok {
+		if time.Now().Before(time.Unix(int64(nbf), 0)) {
+			return nil, fmt.Errorf("ID token not yet valid (nbf in future)")
+		}
 	}
 
 	userInfo := &userInfoResponse{}

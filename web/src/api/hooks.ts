@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { api, ApiResponse, Soul, Judgment, AlertChannel, AlertRule, Workspace, Stats, ClusterStatus, StatusPage, User, CustomDashboard, WidgetConfig } from './client'
+import { api, ApiResponse, Soul, Judgment, AlertChannel, AlertRule, Workspace, Stats, ClusterStatus, StatusPage, User, CustomDashboard } from './client'
 
 // Generic hook for API calls
 function useApi<T>(

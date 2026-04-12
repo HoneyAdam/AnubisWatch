@@ -22,6 +22,8 @@ type HTTPChecker struct {
 	client          *http.Client
 	transportCache  map[string]*http.Transport
 	cacheMu         sync.RWMutex
+	cacheHits       uint64
+	cacheMisses     uint64
 }
 
 // NewHTTPChecker creates a new HTTP checker
@@ -67,6 +69,7 @@ func (c *HTTPChecker) getTransport(cfg *core.HTTPConfig, timeout time.Duration) 
 	// Check cache first
 	c.cacheMu.RLock()
 	if transport, ok := c.transportCache[key]; ok {
+		c.cacheHits++
 		c.cacheMu.RUnlock()
 		return transport
 	}
@@ -78,7 +81,21 @@ func (c *HTTPChecker) getTransport(cfg *core.HTTPConfig, timeout time.Duration) 
 
 	// Double-check after acquiring write lock
 	if transport, ok := c.transportCache[key]; ok {
+		c.cacheHits++
 		return transport
+	}
+
+	c.cacheMisses++
+
+	// Auto-tune MaxIdleConnsPerHost based on cache size:
+	// More unique configs = higher per-host limit to reuse connections
+	cacheSize := len(c.transportCache) + 1
+	idlePerHost := 10
+	if cacheSize > 20 {
+		idlePerHost = 20
+	}
+	if cacheSize > 50 {
+		idlePerHost = 50
 	}
 
 	transport := &http.Transport{
@@ -90,12 +107,27 @@ func (c *HTTPChecker) getTransport(cfg *core.HTTPConfig, timeout time.Duration) 
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 10,
+		MaxIdleConnsPerHost: idlePerHost,
+		MaxConnsPerHost:     idlePerHost * 2,
 		IdleConnTimeout:     90 * time.Second,
+		ForceAttemptHTTP2:   true,
+		ReadBufferSize:      32 * 1024,
+		WriteBufferSize:     32 * 1024,
 	}
 
 	c.transportCache[key] = transport
 	return transport
+}
+
+// TransportCacheStats returns the transport cache hit/miss statistics
+func (c *HTTPChecker) TransportCacheStats() (hits, misses uint64, hitRatio float64) {
+	c.cacheMu.RLock()
+	defer c.cacheMu.RUnlock()
+	total := c.cacheHits + c.cacheMisses
+	if total > 0 {
+		hitRatio = float64(c.cacheHits) / float64(total)
+	}
+	return c.cacheHits, c.cacheMisses, hitRatio
 }
 func (c *HTTPChecker) Judge(ctx context.Context, soul *core.Soul) (*core.Judgment, error) {
 	cfg := soul.HTTP

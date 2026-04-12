@@ -69,7 +69,7 @@ class ApiClient {
     }
 
     if (response.status === 204) {
-      return null as T
+      return undefined as unknown as T
     }
 
     return response.json()
@@ -87,8 +87,8 @@ class ApiClient {
     return this.request<T>('PUT', endpoint, body)
   }
 
-  delete<T>(endpoint: string): Promise<T> {
-    return this.request<T>('DELETE', endpoint)
+  delete(endpoint: string): Promise<void> {
+    return this.request<void>('DELETE', endpoint)
   }
 }
 

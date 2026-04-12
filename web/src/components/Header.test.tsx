@@ -83,6 +83,6 @@ describe('Header', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByTitle('Logout')).toBeInTheDocument()
+    expect(screen.getByTitle('Log out')).toBeInTheDocument()
   })
 })

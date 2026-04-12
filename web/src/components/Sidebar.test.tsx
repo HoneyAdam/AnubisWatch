@@ -30,7 +30,7 @@ describe('Sidebar', () => {
       </MemoryRouter>
     )
 
-    const navItems = ['Dashboard', 'Souls', 'Judgments', 'Alerts', 'Journeys', 'Necropolis', 'Status Pages', 'Settings']
+    const navItems = ['Dashboard', 'Souls', 'Judgments', 'Alerts', 'Incidents', 'Journeys', 'Maintenance', 'Dashboards', 'Necropolis', 'Status Pages', 'Settings']
     navItems.forEach(item => {
       expect(screen.getByText(item)).toBeInTheDocument()
     })

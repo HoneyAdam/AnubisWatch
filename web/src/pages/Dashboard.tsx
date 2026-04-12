@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -13,10 +13,10 @@ import {
   BarChart3,
   Globe,
   ArrowUpRight,
-  Clock
+  Clock,
+  Download
 } from 'lucide-react'
-import { useSoulStore } from '../stores/soulStore'
-import { useStats, useClusterStatus, useJudgments } from '../api/hooks'
+import { useSouls, useStats, useClusterStatus, useJudgments } from '../api/hooks'
 import { Link } from 'react-router-dom'
 import {
   AreaChart,
@@ -39,23 +39,86 @@ interface SystemStatus {
   color: string
 }
 
+type StatCardColor = 'amber' | 'emerald' | 'rose' | 'blue' | 'gold' | 'turquoise' | 'carnelian' | 'lapis'
+
+interface StatCardProps {
+  title: string
+  value: string | number
+  subtext: string
+  icon: typeof Server
+  trend?: string
+  color: StatCardColor
+  delay: number
+}
+
+const StatCard = ({ title, value, subtext, icon: Icon, trend, color, delay }: StatCardProps) => {
+  const colors: Record<StatCardColor, string> = {
+    amber: 'from-amber-500/20 to-amber-600/10 border-amber-500/20 text-amber-400',
+    emerald: 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/20 text-emerald-400',
+    rose: 'from-rose-500/20 to-rose-600/10 border-rose-500/20 text-rose-400',
+    blue: 'from-blue-500/20 to-blue-600/10 border-blue-500/20 text-blue-400',
+    // Ancient Egypt colors
+    gold: 'from-[#D4AF37]/20 to-[#B8860B]/10 border-[#D4AF37]/30 text-[#F4D03F]',
+    turquoise: 'from-[#40E0D0]/20 to-[#20B2AA]/10 border-[#40E0D0]/30 text-[#40E0D0]',
+    carnelian: 'from-[#B7410E]/20 to-[#8B0000]/10 border-[#B7410E]/30 text-[#CD5C5C]',
+    lapis: 'from-[#1E3A5F]/40 to-[#0f172a]/20 border-[#1E3A5F]/40 text-[#60A5FA]',
+  }
+
+  return (
+    <div
+      className={`relative overflow-hidden bg-gradient-to-br ${colors[color]} border rounded-2xl p-6
+                  group hover:scale-[1.02] hover:shadow-xl transition-all duration-500 animate-slide-up`}
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      {/* Background Glow */}
+      <div className="absolute -top-20 -right-20 w-40 h-40 bg-white/5 rounded-full blur-3xl
+                      group-hover:bg-white/10 transition-all duration-700" />
+
+      <div className="relative">
+        <div className="flex items-start justify-between mb-4">
+          <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${colors[color].split(' ')[0]}
+                          flex items-center justify-center shadow-lg`}>
+            <Icon className="w-6 h-6 text-white" />
+          </div>
+          {trend && (
+            <span className={`flex items-center gap-1 text-sm font-medium ${
+              trend.startsWith('+') ? 'text-emerald-400' : 'text-gray-400'
+            }`}>
+              <TrendingUp className="w-4 h-4" />
+              {trend}
+            </span>
+          )}
+        </div>
+
+        <p className="text-gray-400 text-sm font-medium mb-1">{title}</p>
+        <p className="text-3xl font-bold text-white mb-2">{value}</p>
+        <p className="text-gray-500 text-xs">{subtext}</p>
+      </div>
+
+      {/* Hover Shine Effect */}
+      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500
+                      bg-gradient-to-r from-transparent via-white/5 to-transparent -skew-x-12
+                      translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+    </div>
+  )
+}
+
 export function Dashboard() {
-  const { souls, fetchSouls } = useSoulStore()
+  const { souls, refetch: refetchSouls } = useSouls()
   const { data: statsData, refetch: refetchStats } = useStats()
   const { data: clusterData } = useClusterStatus()
   const { data: judgmentsData } = useJudgments()
   const [refreshing, setRefreshing] = useState(false)
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-    fetchSouls()
-  }, [fetchSouls])
+  const mounted = true
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    await Promise.all([fetchSouls(), refetchStats()])
+    await Promise.all([refetchSouls(), refetchStats()])
     setTimeout(() => setRefreshing(false), 500)
+  }
+
+  const handleExportPDF = () => {
+    window.print()
   }
 
   const stats = useMemo(() => {
@@ -155,66 +218,6 @@ export function Dashboard() {
 
   const recentSouls = souls.slice(0, 5)
 
-  const StatCard = ({ title, value, subtext, icon: Icon, trend, color, delay }: {
-    title: string
-    value: string | number
-    subtext: string
-    icon: typeof Server
-    trend?: string
-    color: 'amber' | 'emerald' | 'rose' | 'blue' | 'gold' | 'turquoise' | 'carnelian' | 'lapis'
-    delay: number
-  }) => {
-    const colors = {
-      amber: 'from-amber-500/20 to-amber-600/10 border-amber-500/20 text-amber-400',
-      emerald: 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/20 text-emerald-400',
-      rose: 'from-rose-500/20 to-rose-600/10 border-rose-500/20 text-rose-400',
-      blue: 'from-blue-500/20 to-blue-600/10 border-blue-500/20 text-blue-400',
-      // Ancient Egypt colors
-      gold: 'from-[#D4AF37]/20 to-[#B8860B]/10 border-[#D4AF37]/30 text-[#F4D03F]',
-      turquoise: 'from-[#40E0D0]/20 to-[#20B2AA]/10 border-[#40E0D0]/30 text-[#40E0D0]',
-      carnelian: 'from-[#B7410E]/20 to-[#8B0000]/10 border-[#B7410E]/30 text-[#CD5C5C]',
-      lapis: 'from-[#1E3A5F]/40 to-[#0f172a]/20 border-[#1E3A5F]/40 text-[#60A5FA]',
-    }
-
-    return (
-      <div
-        className={`relative overflow-hidden bg-gradient-to-br ${colors[color]} border rounded-2xl p-6
-                    group hover:scale-[1.02] hover:shadow-xl transition-all duration-500 animate-slide-up`}
-        style={{ animationDelay: `${delay}ms` }}
-      >
-        {/* Background Glow */}
-        <div className="absolute -top-20 -right-20 w-40 h-40 bg-white/5 rounded-full blur-3xl
-                        group-hover:bg-white/10 transition-all duration-700" />
-
-        <div className="relative">
-          <div className="flex items-start justify-between mb-4">
-            <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${colors[color].split(' ')[0]}
-                            flex items-center justify-center shadow-lg`}>
-              <Icon className="w-6 h-6 text-white" />
-            </div>
-            {trend && (
-              <span className={`flex items-center gap-1 text-sm font-medium ${
-                trend.startsWith('+') ? 'text-emerald-400' : 'text-gray-400'
-              }`}>
-                <TrendingUp className="w-4 h-4" />
-                {trend}
-              </span>
-            )}
-          </div>
-
-          <p className="text-gray-400 text-sm font-medium mb-1">{title}</p>
-          <p className="text-3xl font-bold text-white mb-2">{value}</p>
-          <p className="text-gray-500 text-xs">{subtext}</p>
-        </div>
-
-        {/* Hover Shine Effect */}
-        <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500
-                        bg-gradient-to-r from-transparent via-white/5 to-transparent -skew-x-12
-                        translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Background Effects */}
@@ -239,10 +242,19 @@ export function Dashboard() {
 
         <div className="flex items-center gap-3">
           <button
+            onClick={handleExportPDF}
+            className="p-3 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-xl
+                       border border-emerald-500/30 hover:border-emerald-500/50 transition-all duration-300"
+            aria-label="Export dashboard as PDF"
+          >
+            <Download className="w-5 h-5" />
+          </button>
+          <button
             onClick={handleRefresh}
             className={`p-3 bg-[#D4AF37]/10 hover:bg-[#D4AF37]/20 text-[#D4AF37] rounded-xl
                        border border-[#D4AF37]/30 hover:border-[#D4AF37]/50 transition-all duration-300
                        ${refreshing ? 'animate-spin' : 'hover:rotate-180'}`}
+            aria-label="Refresh dashboard"
           >
             <RefreshCw className="w-5 h-5" />
           </button>

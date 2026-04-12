@@ -39,7 +39,28 @@ interface Journey {
   workspace_id?: string
   created_at?: string
   updated_at?: string
+  steps?: JourneyStepForm[]
+  continue_on_failure?: boolean
 }
+
+interface JourneyStepForm {
+  name: string
+  type: string
+  target: string
+  timeout: number
+  assertions: AssertionForm[]
+}
+
+interface AssertionForm {
+  type: string
+  target: string
+  operator: string
+  expected: string
+}
+
+const CHECK_TYPES = ['http', 'tcp', 'dns', 'tls', 'grpc', 'websocket', 'smtp', 'icmp']
+const ASSERTION_TYPES = ['status_code', 'body_contains', 'json_path', 'header', 'response_time']
+const ASSERTION_OPERATORS = ['equals', 'not_equals', 'contains', 'greater_than', 'less_than']
 
 // Custom hook for journeys since it's not in the main hooks file yet
 function useJourneys() {
@@ -108,16 +129,118 @@ export function Journeys() {
   const [filter, setFilter] = useState('all')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [runningId, setRunningId] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  // Create form state
+  const [formName, setFormName] = useState('')
+  const [formDescription, setFormDescription] = useState('')
+  const [formInterval, setFormInterval] = useState(60)
+  const [formTimeout, setFormTimeout] = useState(30)
+  const [formContinueOnFailure, setFormContinueOnFailure] = useState(false)
+  const [formSteps, setFormSteps] = useState<JourneyStepForm[]>([])
 
   const {
     journeys,
     loading,
     error,
     refetch,
+    createJourney,
     deleteJourney,
     updateJourney,
     runJourney
   } = useJourneys()
+
+  const resetForm = () => {
+    setFormName('')
+    setFormDescription('')
+    setFormInterval(60)
+    setFormTimeout(30)
+    setFormContinueOnFailure(false)
+    setFormSteps([])
+    setSaving(false)
+  }
+
+  const handleOpenCreateModal = () => {
+    resetForm()
+    setShowCreateModal(true)
+  }
+
+  const addStep = () => {
+    setFormSteps([...formSteps, {
+      name: '',
+      type: 'http',
+      target: '',
+      timeout: 10,
+      assertions: [{ type: 'status_code', target: '', operator: 'equals', expected: '200' }]
+    }])
+  }
+
+  const removeStep = (index: number) => {
+    setFormSteps(formSteps.filter((_, i) => i !== index))
+  }
+
+  const updateStep = (index: number, field: keyof JourneyStepForm, value: unknown) => {
+    const updated = [...formSteps]
+    updated[index] = { ...updated[index], [field]: value }
+    setFormSteps(updated)
+  }
+
+  const addAssertion = (stepIndex: number) => {
+    const updated = [...formSteps]
+    updated[stepIndex].assertions.push({ type: 'status_code', target: '', operator: 'equals', expected: '200' })
+    setFormSteps(updated)
+  }
+
+  const removeAssertion = (stepIndex: number, assertionIndex: number) => {
+    const updated = [...formSteps]
+    updated[stepIndex].assertions = updated[stepIndex].assertions.filter((_, i) => i !== assertionIndex)
+    setFormSteps(updated)
+  }
+
+  const updateAssertion = (stepIndex: number, assertionIndex: number, field: keyof AssertionForm, value: string) => {
+    const updated = [...formSteps]
+    updated[stepIndex].assertions[assertionIndex] = { ...updated[stepIndex].assertions[assertionIndex], [field]: value }
+    setFormSteps(updated)
+  }
+
+  const handleCreateJourney = async () => {
+    if (!formName.trim()) return
+    if (formSteps.length === 0) return
+
+    setSaving(true)
+    try {
+      await createJourney({
+        name: formName,
+        description: formDescription,
+        enabled: true,
+        weight: formInterval,
+        timeout: formTimeout,
+        step_count: formSteps.length,
+        last_status: 'unknown' as const,
+        avg_duration: 0,
+        success_rate: 100,
+        steps: formSteps.map(s => ({
+          name: s.name,
+          type: s.type,
+          target: s.target,
+          timeout: s.timeout,
+          assertions: s.assertions.map(a => ({
+            type: a.type,
+            target: a.target,
+            operator: a.operator,
+            expected: a.expected
+          }))
+        })),
+        continue_on_failure: formContinueOnFailure
+      } as unknown as Omit<Journey, 'id'>)
+      setShowCreateModal(false)
+      resetForm()
+    } catch (err) {
+      // Failed to create journey
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const handleRefresh = async () => {
     await refetch()
@@ -203,11 +326,12 @@ export function Journeys() {
           <button
             onClick={handleRefresh}
             className="p-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl transition-all"
+            aria-label="Refresh journeys"
           >
             <RefreshCw className="w-5 h-5" />
           </button>
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={handleOpenCreateModal}
             className="flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl transition-all font-medium shadow-lg shadow-amber-600/20"
           >
             <Plus className="w-4 h-4" />
@@ -459,7 +583,7 @@ export function Journeys() {
 
           {/* Create New Card */}
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={handleOpenCreateModal}
             className="bg-gradient-to-br from-gray-900 to-gray-800/50 border border-dashed border-gray-700/50 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 hover:border-amber-500 transition-all text-gray-500 min-h-[280px]"
           >
             <div className="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center">
@@ -480,7 +604,7 @@ export function Journeys() {
             Journeys are multi-step synthetic monitoring workflows. Create your first journey to monitor complex user flows.
           </p>
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={handleOpenCreateModal}
             className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl transition-colors"
           >
             Create Your First Journey
@@ -491,24 +615,205 @@ export function Journeys() {
         </div>
       )}
 
-      {/* Create Modal Placeholder */}
+      {/* Create Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-6 w-full max-w-lg">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-white">Create Journey</h2>
-              <button onClick={() => setShowCreateModal(false)} className="p-2 text-gray-400 hover:text-white">
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="journey-modal-title"
+          onKeyDown={(e) => { if (e.key === 'Escape') { setShowCreateModal(false); resetForm() } }}
+        >
+          <div className="bg-gray-900 border border-gray-700/50 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-700/50">
+              <div>
+                <h2 id="journey-modal-title" className="text-xl font-semibold text-white">Create Journey</h2>
+                <p className="text-sm text-gray-400 mt-1">Multi-step synthetic monitoring workflow</p>
+              </div>
+              <button onClick={() => setShowCreateModal(false)} className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition-colors" aria-label="Close dialog">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="text-center py-8">
-              <Route className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-              <p className="text-gray-400">
-                Journey creation requires backend API support for the /journeys endpoint.
-              </p>
-              <p className="text-sm text-gray-500 mt-2">
-                This feature is planned for a future release.
-              </p>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Basic Info */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Name</label>
+                  <input
+                    type="text"
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    placeholder="e.g., User Login Flow"
+                    className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Description</label>
+                  <textarea
+                    value={formDescription}
+                    onChange={(e) => setFormDescription(e.target.value)}
+                    placeholder="Describe what this journey monitors..."
+                    rows={2}
+                    className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">Interval (s)</label>
+                    <input
+                      type="number"
+                      value={formInterval}
+                      onChange={(e) => setFormInterval(parseInt(e.target.value) || 60)}
+                      min={10}
+                      max={3600}
+                      className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">Timeout (s)</label>
+                    <input
+                      type="number"
+                      value={formTimeout}
+                      onChange={(e) => setFormTimeout(parseInt(e.target.value) || 30)}
+                      min={5}
+                      max={300}
+                      className="w-full bg-gray-950 border border-gray-700/50 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500/50"
+                    />
+                  </div>
+                  <div className="flex items-end pb-3">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formContinueOnFailure}
+                        onChange={(e) => setFormContinueOnFailure(e.target.checked)}
+                        className="w-5 h-5 rounded border-gray-600 bg-gray-800 text-amber-500 focus:ring-amber-500"
+                      />
+                      <span className="text-sm text-gray-300">Continue on failure</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Steps */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-white">Steps ({formSteps.length})</h3>
+                  <button
+                    onClick={addStep}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600/20 text-amber-400 text-sm rounded-lg hover:bg-amber-600/30 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Step
+                  </button>
+                </div>
+
+                {formSteps.length === 0 && (
+                  <p className="text-sm text-gray-500 text-center py-6 border border-dashed border-gray-700/50 rounded-xl">
+                    No steps yet. Click "Add Step" to start building your journey.
+                  </p>
+                )}
+
+                <div className="space-y-4">
+                  {formSteps.map((step, stepIndex) => (
+                    <div key={stepIndex} className="bg-gray-950 border border-gray-700/50 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs font-mono text-amber-400">Step {stepIndex + 1}</span>
+                        <button onClick={() => removeStep(stepIndex)} className="p-1 text-gray-500 hover:text-rose-400 transition-colors" aria-label={`Remove step ${stepIndex + 1}`}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3 mb-3">
+                        <input
+                          type="text"
+                          value={step.name}
+                          onChange={(e) => updateStep(stepIndex, 'name', e.target.value)}
+                          placeholder="Step name"
+                          className="bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-500/50"
+                        />
+                        <select
+                          value={step.type}
+                          onChange={(e) => updateStep(stepIndex, 'type', e.target.value)}
+                          className="bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
+                        >
+                          {CHECK_TYPES.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                        </select>
+                        <input
+                          type="number"
+                          value={step.timeout}
+                          onChange={(e) => updateStep(stepIndex, 'timeout', parseInt(e.target.value) || 10)}
+                          placeholder="Timeout (s)"
+                          className="bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-500/50"
+                        />
+                      </div>
+                      <input
+                        type="text"
+                        value={step.target}
+                        onChange={(e) => updateStep(stepIndex, 'target', e.target.value)}
+                        placeholder="Target URL or host:port"
+                        className="w-full bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-500/50 mb-3"
+                      />
+
+                      {/* Assertions */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500">Assertions</span>
+                          <button onClick={() => addAssertion(stepIndex)} className="text-xs text-amber-400 hover:text-amber-300">+ Add</button>
+                        </div>
+                        {step.assertions.map((a, ai) => (
+                          <div key={ai} className="flex items-center gap-2">
+                            <select
+                              value={a.type}
+                              onChange={(e) => updateAssertion(stepIndex, ai, 'type', e.target.value)}
+                              className="bg-gray-900 border border-gray-700/50 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500/50"
+                            >
+                              {ASSERTION_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                            <select
+                              value={a.operator}
+                              onChange={(e) => updateAssertion(stepIndex, ai, 'operator', e.target.value)}
+                              className="bg-gray-900 border border-gray-700/50 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500/50"
+                            >
+                              {ASSERTION_OPERATORS.map(o => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                            <input
+                              type="text"
+                              value={a.expected}
+                              onChange={(e) => updateAssertion(stepIndex, ai, 'expected', e.target.value)}
+                              placeholder="Expected"
+                              className="flex-1 bg-gray-900 border border-gray-700/50 rounded px-2 py-1.5 text-xs text-white placeholder:text-gray-500 focus:outline-none focus:border-amber-500/50"
+                            />
+                            <button onClick={() => removeAssertion(stepIndex, ai)} className="p-1 text-gray-500 hover:text-rose-400" aria-label={`Remove assertion ${ai + 1}`}>
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-700/50">
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="px-5 py-2.5 text-gray-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateJourney}
+                disabled={saving || !formName.trim() || formSteps.length === 0}
+                className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-colors font-medium"
+              >
+                {saving ? (
+                  <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Creating...</span>
+                ) : (
+                  'Create Journey'
+                )}
+              </button>
             </div>
           </div>
         </div>

@@ -41,15 +41,15 @@ type Store interface {
 
 	ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]interface{}, error)
 
-	GetChannelNoCtx(id string) (interface{}, error)
+	GetChannelNoCtx(id string, workspace string) (interface{}, error)
 	ListChannelsNoCtx(workspace string) ([]interface{}, error)
 	SaveChannelNoCtx(ch interface{}) error
-	DeleteChannelNoCtx(id string) error
+	DeleteChannelNoCtx(id string, workspace string) error
 
-	GetRuleNoCtx(id string) (interface{}, error)
+	GetRuleNoCtx(id string, workspace string) (interface{}, error)
 	ListRulesNoCtx(workspace string) ([]interface{}, error)
 	SaveRuleNoCtx(rule interface{}) error
-	DeleteRuleNoCtx(id string) error
+	DeleteRuleNoCtx(id string, workspace string) error
 
 	GetJourneyNoCtx(id string) (interface{}, error)
 	ListJourneysNoCtx(workspace string, offset, limit int) ([]interface{}, error)
@@ -761,7 +761,7 @@ func (s *Server) GetChannel(ctx context.Context, req *v1.GetChannelRequest) (*v1
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	ch, err := s.store.GetChannelNoCtx(req.Id)
+	ch, err := s.store.GetChannelNoCtx(req.Id, "")
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "channel not found: %s", req.Id)
 	}
@@ -793,7 +793,7 @@ func (s *Server) UpdateChannel(ctx context.Context, req *v1.UpdateChannelRequest
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	existing, err := s.store.GetChannelNoCtx(req.Id)
+	existing, err := s.store.GetChannelNoCtx(req.Id, "")
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "channel not found: %s", req.Id)
 	}
@@ -824,7 +824,7 @@ func (s *Server) UpdateChannel(ctx context.Context, req *v1.UpdateChannelRequest
 func (s *Server) DeleteChannel(ctx context.Context, req *v1.DeleteChannelRequest) (*emptypb.Empty, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.store.DeleteChannelNoCtx(req.Id); err != nil {
+	if err := s.store.DeleteChannelNoCtx(req.Id, ""); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete channel: %v", err)
 	}
 	return &emptypb.Empty{}, nil
@@ -863,7 +863,7 @@ func (s *Server) GetRule(ctx context.Context, req *v1.GetRuleRequest) (*v1.Rule,
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	r, err := s.store.GetRuleNoCtx(req.Id)
+	r, err := s.store.GetRuleNoCtx(req.Id, "")
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "rule not found: %s", req.Id)
 	}
@@ -895,7 +895,7 @@ func (s *Server) UpdateRule(ctx context.Context, req *v1.UpdateRuleRequest) (*v1
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	existing, err := s.store.GetRuleNoCtx(req.Id)
+	existing, err := s.store.GetRuleNoCtx(req.Id, "")
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "rule not found: %s", req.Id)
 	}
@@ -926,7 +926,7 @@ func (s *Server) UpdateRule(ctx context.Context, req *v1.UpdateRuleRequest) (*v1
 func (s *Server) DeleteRule(ctx context.Context, req *v1.DeleteRuleRequest) (*emptypb.Empty, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.store.DeleteRuleNoCtx(req.Id); err != nil {
+	if err := s.store.DeleteRuleNoCtx(req.Id, ""); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete rule: %v", err)
 	}
 	return &emptypb.Empty{}, nil

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import type { WidgetConfig } from '../../api/client'
-import { TrendingUp, TrendingDown } from 'lucide-react'
 
 interface StatWidgetProps {
   widget: WidgetConfig

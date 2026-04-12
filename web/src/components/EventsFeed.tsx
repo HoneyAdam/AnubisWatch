@@ -110,6 +110,7 @@ export function EventsFeed({ maxEvents = 10 }: EventsFeedProps) {
             onClick={() => dismissEvent(event.id)}
             className="opacity-0 group-hover:opacity-100 p-1 text-gray-500 hover:text-gray-300
                        transition-opacity"
+            aria-label="Dismiss event"
           >
             <X className="w-3 h-3" />
           </button>
