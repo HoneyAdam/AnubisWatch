@@ -8,7 +8,7 @@ interface SoulStore {
   loading: boolean
   error: string | null
   fetchSouls: () => Promise<void>
-  createSoul: (soul: Omit<Soul, 'id' | 'created_at' | 'updated_at' | 'updated_at'>) => Promise<Soul | null>
+  createSoul: (soul: Omit<Soul, 'id' | 'created_at' | 'updated_at'>) => Promise<Soul | null>
   updateSoul: (id: string, soul: Partial<Soul>) => Promise<Soul | null>
   deleteSoul: (id: string) => Promise<void>
 }
