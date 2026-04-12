@@ -249,10 +249,12 @@ AnubisWatch scores **7.5/10 overall health** with **~100% backend feature comple
 - **Impact:** Machine-readable API documentation, interactive API testing via Swagger UI
 
 ### 8.2 CLI Refactoring (8h)
-- [ ] Split `cmd/anubis/main.go` into sub-packages
-- [ ] Remove dead code (handleLogin, handleLogout, handleListSouls) — **Skipped: these are active routes**
+- [x] Split `cmd/anubis/main.go` into logical sub-files (backup.go, cluster.go, judge.go, soul.go, system.go, util.go)
+- [x] Preserved all active routes and server helpers (moved adapters/server helpers to `server.go`)
+- [x] `main.go` reduced from 2,867 lines to 279 lines
+- [x] All tests pass, zero functional changes
 - **Impact:** Maintainability
-- **Note:** Deferred — current CLI is functional, refactoring risk > benefit
+- **Note:** Completed 2026-04-12 — same-package split chosen to avoid import-cycle risk
 
 ### 8.3 Final Polish (4h)
 - [x] Update ROADMAP.md with completion status

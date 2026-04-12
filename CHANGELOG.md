@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Server, storage, auth, and logging config validation
 
 ### Changed
+- Refactored `cmd/anubis/main.go` into smaller command-group files (`backup.go`, `cluster.go`, `judge.go`, `soul.go`, `system.go`, `util.go`)
+- Moved server-specific adapters and helpers from `main.go` into `server.go`
 - Enhanced `validate()` to automatically call `setDefaults()` before validation
 
 ### Fixed

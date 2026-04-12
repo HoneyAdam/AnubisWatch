@@ -2,15 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/AnubisWatch/anubiswatch/internal/acme"
 	"github.com/AnubisWatch/anubiswatch/internal/alert"
 	"github.com/AnubisWatch/anubiswatch/internal/api"
 	"github.com/AnubisWatch/anubiswatch/internal/auth"
@@ -203,7 +207,9 @@ type grpcStorageAdapter struct {
 	inner *restStorageAdapter
 }
 
-func (a *grpcStorageAdapter) GetSoulNoCtx(id string) (interface{}, error)     { return a.inner.GetSoulNoCtx(id) }
+func (a *grpcStorageAdapter) GetSoulNoCtx(id string) (interface{}, error) {
+	return a.inner.GetSoulNoCtx(id)
+}
 func (a *grpcStorageAdapter) ListSoulsNoCtx(ws string, o, l int) ([]interface{}, error) {
 	souls, err := a.inner.ListSoulsNoCtx(ws, o, l)
 	if err != nil {
@@ -222,7 +228,7 @@ func (a *grpcStorageAdapter) SaveSoulNoCtx(s interface{}) error {
 	}
 	return a.inner.SaveSoul(context.Background(), soul)
 }
-func (a *grpcStorageAdapter) DeleteSoulNoCtx(id string) error      { return a.inner.DeleteSoulNoCtx(id) }
+func (a *grpcStorageAdapter) DeleteSoulNoCtx(id string) error { return a.inner.DeleteSoulNoCtx(id) }
 func (a *grpcStorageAdapter) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]interface{}, error) {
 	judgments, err := a.inner.ListJudgmentsNoCtx(soulID, start, end, limit)
 	if err != nil {
@@ -234,7 +240,9 @@ func (a *grpcStorageAdapter) ListJudgmentsNoCtx(soulID string, start, end time.T
 	}
 	return result, nil
 }
-func (a *grpcStorageAdapter) GetChannelNoCtx(id string, ws string) (interface{}, error) { return a.inner.GetChannelNoCtx(id, ws) }
+func (a *grpcStorageAdapter) GetChannelNoCtx(id string, ws string) (interface{}, error) {
+	return a.inner.GetChannelNoCtx(id, ws)
+}
 func (a *grpcStorageAdapter) ListChannelsNoCtx(ws string) ([]interface{}, error) {
 	channels, err := a.inner.ListChannelsNoCtx(ws)
 	if err != nil {
@@ -253,8 +261,12 @@ func (a *grpcStorageAdapter) SaveChannelNoCtx(ch interface{}) error {
 	}
 	return a.inner.SaveChannelNoCtx(channel)
 }
-func (a *grpcStorageAdapter) DeleteChannelNoCtx(id string, ws string) error { return a.inner.DeleteChannelNoCtx(id, ws) }
-func (a *grpcStorageAdapter) GetRuleNoCtx(id string, ws string) (interface{}, error) { return a.inner.GetRuleNoCtx(id, ws) }
+func (a *grpcStorageAdapter) DeleteChannelNoCtx(id string, ws string) error {
+	return a.inner.DeleteChannelNoCtx(id, ws)
+}
+func (a *grpcStorageAdapter) GetRuleNoCtx(id string, ws string) (interface{}, error) {
+	return a.inner.GetRuleNoCtx(id, ws)
+}
 func (a *grpcStorageAdapter) ListRulesNoCtx(ws string) ([]interface{}, error) {
 	rules, err := a.inner.ListRulesNoCtx(ws)
 	if err != nil {
@@ -273,8 +285,12 @@ func (a *grpcStorageAdapter) SaveRuleNoCtx(rule interface{}) error {
 	}
 	return a.inner.SaveRuleNoCtx(r)
 }
-func (a *grpcStorageAdapter) DeleteRuleNoCtx(id string, ws string) error { return a.inner.DeleteRuleNoCtx(id, ws) }
-func (a *grpcStorageAdapter) GetJourneyNoCtx(id string) (interface{}, error) { return a.inner.GetJourneyNoCtx(id) }
+func (a *grpcStorageAdapter) DeleteRuleNoCtx(id string, ws string) error {
+	return a.inner.DeleteRuleNoCtx(id, ws)
+}
+func (a *grpcStorageAdapter) GetJourneyNoCtx(id string) (interface{}, error) {
+	return a.inner.GetJourneyNoCtx(id)
+}
 func (a *grpcStorageAdapter) ListJourneysNoCtx(ws string, o, l int) ([]interface{}, error) {
 	journeys, err := a.inner.ListJourneysNoCtx(ws, o, l)
 	if err != nil {
@@ -293,7 +309,9 @@ func (a *grpcStorageAdapter) SaveJourneyNoCtx(j interface{}) error {
 	}
 	return a.inner.SaveJourneyNoCtx(journey)
 }
-func (a *grpcStorageAdapter) DeleteJourneyNoCtx(id string) error   { return a.inner.DeleteJourneyNoCtx(id) }
+func (a *grpcStorageAdapter) DeleteJourneyNoCtx(id string) error {
+	return a.inner.DeleteJourneyNoCtx(id)
+}
 func (a *grpcStorageAdapter) ListEvents(soulID string, limit int) ([]interface{}, error) {
 	events, err := a.inner.store.ListAlertEvents(soulID, limit)
 	if err != nil {
@@ -319,6 +337,7 @@ func (a *grpcStorageAdapter) ListJourneyRunsNoCtx(journeyID string, limit int) (
 func (a *grpcStorageAdapter) GetJourneyRunNoCtx(journeyID, runID string) (interface{}, error) {
 	return a.inner.store.GetJourneyRun(context.Background(), "default", journeyID, runID)
 }
+
 // BuildServerDependencies builds all server dependencies
 func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 	logger := opts.Logger
@@ -465,4 +484,451 @@ func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 		StatusPageHandler: statusPageHandler,
 		MCPServer:         mcpServer,
 	}, nil
+}
+
+func handleLogin(a *auth.LocalAuthenticator) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		user, token, err := a.Login(req.Email, req.Password)
+		if err != nil {
+			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"user":  user,
+			"token": token,
+		})
+	}
+}
+
+func handleLogout(a *auth.LocalAuthenticator) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		a.Logout(token)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"message": "logged out"})
+	}
+}
+
+// probeStorageAdapter adapts storage.CobaltDB to probe.Storage interface
+type probeStorageAdapter struct {
+	store *storage.CobaltDB
+}
+
+func (a *probeStorageAdapter) SaveJudgment(ctx context.Context, j *core.Judgment) error {
+	return a.store.SaveJudgment(ctx, j)
+}
+
+func (a *probeStorageAdapter) GetSoul(ctx context.Context, workspaceID, soulID string) (*core.Soul, error) {
+	return a.store.GetSoul(ctx, workspaceID, soulID)
+}
+
+func (a *probeStorageAdapter) ListSouls(ctx context.Context, workspaceID string) ([]*core.Soul, error) {
+	return a.store.ListSouls(ctx, workspaceID, 0, 1000)
+}
+
+// restStorageAdapter adapts storage.CobaltDB to api.Storage interface
+type restStorageAdapter struct {
+	store *storage.CobaltDB
+}
+
+func (a *restStorageAdapter) GetSoulNoCtx(id string) (*core.Soul, error) {
+	return a.store.GetSoulNoCtx(id)
+}
+
+func (a *restStorageAdapter) ListSoulsNoCtx(workspace string, offset, limit int) ([]*core.Soul, error) {
+	return a.store.ListSoulsNoCtx(workspace, offset, limit)
+}
+
+func (a *restStorageAdapter) SaveSoul(ctx context.Context, soul *core.Soul) error {
+	return a.store.SaveSoul(ctx, soul)
+}
+
+func (a *restStorageAdapter) DeleteSoul(ctx context.Context, id string) error {
+	return a.store.DeleteSoul(ctx, "default", id)
+}
+
+func (a *restStorageAdapter) DeleteSoulNoCtx(id string) error {
+	return a.store.DeleteSoul(context.Background(), "default", id)
+}
+
+func (a *restStorageAdapter) GetJudgmentNoCtx(id string) (*core.Judgment, error) {
+	return a.store.GetJudgmentNoCtx(id)
+}
+
+func (a *restStorageAdapter) ListJudgmentsNoCtx(soulID string, start, end time.Time, limit int) ([]*core.Judgment, error) {
+	return a.store.ListJudgmentsNoCtx(soulID, start, end, limit)
+}
+
+func (a *restStorageAdapter) GetChannelNoCtx(id string, workspace string) (*core.AlertChannel, error) {
+	return a.store.GetChannelNoCtx(id, workspace)
+}
+
+func (a *restStorageAdapter) ListChannelsNoCtx(workspace string) ([]*core.AlertChannel, error) {
+	return a.store.ListChannelsNoCtx(workspace)
+}
+
+func (a *restStorageAdapter) SaveChannelNoCtx(ch *core.AlertChannel) error {
+	return a.store.SaveChannelNoCtx(ch)
+}
+
+func (a *restStorageAdapter) DeleteChannelNoCtx(id string, workspace string) error {
+	return a.store.DeleteChannelNoCtx(id, workspace)
+}
+
+func (a *restStorageAdapter) GetRuleNoCtx(id string, workspace string) (*core.AlertRule, error) {
+	return a.store.GetRuleNoCtx(id, workspace)
+}
+
+func (a *restStorageAdapter) ListRulesNoCtx(workspace string) ([]*core.AlertRule, error) {
+	return a.store.ListRulesNoCtx(workspace)
+}
+
+func (a *restStorageAdapter) SaveRuleNoCtx(rule *core.AlertRule) error {
+	return a.store.SaveRuleNoCtx(rule)
+}
+
+func (a *restStorageAdapter) DeleteRuleNoCtx(id string, workspace string) error {
+	return a.store.DeleteRuleNoCtx(id, workspace)
+}
+
+func (a *restStorageAdapter) GetWorkspaceNoCtx(id string) (*core.Workspace, error) {
+	return a.store.GetWorkspaceNoCtx(id)
+}
+
+func (a *restStorageAdapter) ListWorkspacesNoCtx() ([]*core.Workspace, error) {
+	return a.store.ListWorkspacesNoCtx()
+}
+
+func (a *restStorageAdapter) SaveWorkspaceNoCtx(ws *core.Workspace) error {
+	return a.store.SaveWorkspaceNoCtx(ws)
+}
+
+func (a *restStorageAdapter) DeleteWorkspaceNoCtx(id string) error {
+	return a.store.DeleteWorkspaceNoCtx(id)
+}
+
+func (a *restStorageAdapter) GetStatsNoCtx(workspace string, start, end time.Time) (*core.Stats, error) {
+	return a.store.GetStatsNoCtx(workspace, start, end)
+}
+
+// StatusPage methods
+
+func (a *restStorageAdapter) GetStatusPageNoCtx(id string) (*core.StatusPage, error) {
+	return a.store.GetStatusPageNoCtx(id)
+}
+
+func (a *restStorageAdapter) ListStatusPagesNoCtx() ([]*core.StatusPage, error) {
+	return a.store.ListStatusPagesNoCtx()
+}
+
+func (a *restStorageAdapter) SaveStatusPageNoCtx(page *core.StatusPage) error {
+	return a.store.SaveStatusPageNoCtx(page)
+}
+
+func (a *restStorageAdapter) DeleteStatusPageNoCtx(id string) error {
+	return a.store.DeleteStatusPageNoCtx(id)
+}
+
+// Journey methods
+func (a *restStorageAdapter) GetJourneyNoCtx(id string) (*core.JourneyConfig, error) {
+	return a.store.GetJourneyNoCtx(id)
+}
+
+func (a *restStorageAdapter) ListJourneysNoCtx(workspace string, offset, limit int) ([]*core.JourneyConfig, error) {
+	return a.store.ListJourneysNoCtx(workspace, offset, limit)
+}
+
+func (a *restStorageAdapter) SaveJourneyNoCtx(journey *core.JourneyConfig) error {
+	return a.store.SaveJourneyNoCtx(journey)
+}
+
+func (a *restStorageAdapter) DeleteJourneyNoCtx(id string) error {
+	return a.store.DeleteJourneyNoCtx(id)
+}
+
+func (a *restStorageAdapter) GetDashboardNoCtx(id string) (*core.CustomDashboard, error) {
+	return a.store.GetDashboardNoCtx(id)
+}
+
+func (a *restStorageAdapter) ListDashboardsNoCtx() ([]*core.CustomDashboard, error) {
+	return a.store.ListDashboardsNoCtx()
+}
+
+func (a *restStorageAdapter) SaveDashboardNoCtx(dashboard *core.CustomDashboard) error {
+	return a.store.SaveDashboardNoCtx(dashboard)
+}
+
+func (a *restStorageAdapter) DeleteDashboardNoCtx(id string) error {
+	return a.store.DeleteDashboardNoCtx(id)
+}
+
+// MaintenanceWindow methods
+func (a *restStorageAdapter) GetMaintenanceWindow(id string) (*core.MaintenanceWindow, error) {
+	return a.store.GetMaintenanceWindow(id)
+}
+
+func (a *restStorageAdapter) ListMaintenanceWindows() ([]*core.MaintenanceWindow, error) {
+	return a.store.ListMaintenanceWindows()
+}
+
+func (a *restStorageAdapter) SaveMaintenanceWindow(w *core.MaintenanceWindow) error {
+	return a.store.SaveMaintenanceWindow(w)
+}
+
+func (a *restStorageAdapter) DeleteMaintenanceWindow(id string) error {
+	return a.store.DeleteMaintenanceWindow(id)
+}
+
+// clusterAdapter adapts cluster.Manager to api.ClusterManager interface
+type clusterAdapter struct {
+	mgr *cluster.Manager
+}
+
+func (a *clusterAdapter) IsLeader() bool {
+	return a.mgr.IsLeader()
+}
+
+func (a *clusterAdapter) Leader() string {
+	return a.mgr.Leader()
+}
+
+func (a *clusterAdapter) IsClustered() bool {
+	return a.mgr.IsClustered()
+}
+
+func (a *clusterAdapter) GetStatus() *api.ClusterStatus {
+	cs := a.mgr.GetStatus()
+	if cs == nil {
+		return &api.ClusterStatus{IsClustered: false, NodeID: "standalone", State: "standalone"}
+	}
+	return &api.ClusterStatus{
+		IsClustered: cs.IsClustered,
+		NodeID:      cs.NodeID,
+		State:       cs.State,
+		Leader:      cs.Leader,
+		Term:        cs.Term,
+		PeerCount:   cs.PeerCount,
+	}
+}
+
+// alertStorageAdapter adapts storage.CobaltDB to alert.AlertStorage interface
+type alertStorageAdapter struct {
+	store *storage.CobaltDB
+}
+
+func (a *alertStorageAdapter) SaveChannel(ch *core.AlertChannel) error {
+	return a.store.SaveAlertChannel(ch)
+}
+
+func (a *alertStorageAdapter) GetChannel(id string, workspace string) (*core.AlertChannel, error) {
+	return a.store.GetAlertChannel(id, workspace)
+}
+
+func (a *alertStorageAdapter) ListChannels(workspace string) ([]*core.AlertChannel, error) {
+	return a.store.ListAlertChannels(workspace)
+}
+
+func (a *alertStorageAdapter) DeleteChannel(id string, workspace string) error {
+	return a.store.DeleteAlertChannel(id, workspace)
+}
+
+func (a *alertStorageAdapter) SaveRule(rule *core.AlertRule) error {
+	return a.store.SaveAlertRule(rule)
+}
+
+func (a *alertStorageAdapter) GetRule(id string, workspace string) (*core.AlertRule, error) {
+	return a.store.GetAlertRule(id, workspace)
+}
+
+func (a *alertStorageAdapter) ListRules(workspace string) ([]*core.AlertRule, error) {
+	return a.store.ListAlertRules(workspace)
+}
+
+func (a *alertStorageAdapter) DeleteRule(id string, workspace string) error {
+	return a.store.DeleteAlertRule(id, workspace)
+}
+
+func (a *alertStorageAdapter) SaveEvent(event *core.AlertEvent) error {
+	return a.store.SaveAlertEvent(event)
+}
+
+func (a *alertStorageAdapter) ListEvents(soulID string, limit int) ([]*core.AlertEvent, error) {
+	return a.store.ListAlertEvents(soulID, limit)
+}
+
+func (a *alertStorageAdapter) SaveIncident(incident *core.Incident) error {
+	return a.store.SaveIncident(incident)
+}
+
+func (a *alertStorageAdapter) GetIncident(id string) (*core.Incident, error) {
+	return a.store.GetIncident(id)
+}
+
+func (a *alertStorageAdapter) ListActiveIncidents() ([]*core.Incident, error) {
+	return a.store.ListActiveIncidents()
+}
+
+// statusPageRepository implements statuspage.Repository
+type statusPageRepository struct {
+	store *storage.CobaltDB
+}
+
+func (r *statusPageRepository) GetStatusPageByDomain(domain string) (*core.StatusPage, error) {
+	return r.store.GetStatusPageByDomain(domain)
+}
+
+func (r *statusPageRepository) GetStatusPageBySlug(slug string) (*core.StatusPage, error) {
+	return r.store.GetStatusPageBySlug(slug)
+}
+
+func (r *statusPageRepository) GetSoul(id string) (*core.Soul, error) {
+	return r.store.GetSoulNoCtx(id)
+}
+
+func (r *statusPageRepository) GetSoulJudgments(soulID string, limit int) ([]core.Judgment, error) {
+	return r.store.GetSoulJudgments(soulID, limit)
+}
+
+func (r *statusPageRepository) GetIncidentsByPage(pageID string) ([]core.Incident, error) {
+	// Get the status page to find associated souls
+	page, err := r.store.GetStatusPageBySlug(pageID)
+	if err != nil {
+		// Try by ID if slug lookup fails
+		page, err = r.store.GetStatusPageNoCtx(pageID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Create a set of soul IDs for this page
+	soulSet := make(map[string]bool)
+	for _, soulID := range page.Souls {
+		soulSet[soulID] = true
+	}
+
+	// Get all active incidents and filter by page's souls
+	active, err := r.store.ListActiveIncidents()
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert []*core.Incident to []core.Incident, filtering by page's souls
+	result := make([]core.Incident, 0, len(active))
+	for _, inc := range active {
+		if inc != nil && soulSet[inc.SoulID] {
+			result = append(result, *inc)
+		}
+	}
+	return result, nil
+}
+
+func (r *statusPageRepository) GetUptimeHistory(soulID string, days int) ([]core.UptimeDay, error) {
+	return r.store.GetUptimeHistory(soulID, days)
+}
+
+func (r *statusPageRepository) SaveSubscription(sub *core.StatusPageSubscription) error {
+	return r.store.SaveStatusPageSubscription(sub)
+}
+
+func (r *statusPageRepository) GetSubscriptionsByPage(pageID string) ([]*core.StatusPageSubscription, error) {
+	return r.store.GetSubscriptionsByPage(pageID)
+}
+
+func (r *statusPageRepository) DeleteSubscription(subscriptionID string) error {
+	return r.store.DeleteStatusPageSubscription(subscriptionID)
+}
+
+// storageGetLatestJudgment retrieves the most recent judgment for a soul
+func storageGetLatestJudgment(store *storage.CobaltDB, ctx context.Context, workspaceID, soulID string) (*core.Judgment, error) {
+	if workspaceID == "" {
+		workspaceID = "default"
+	}
+
+	// Scan with prefix to find latest
+	prefix := fmt.Sprintf("%s/judgments/%s/", workspaceID, soulID)
+	results, err := store.PrefixScan(prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(results) == 0 {
+		return nil, &core.NotFoundError{Entity: "judgment", ID: soulID}
+	}
+
+	// Find latest (keys are sorted, so last one is latest)
+	var latest *core.Judgment
+	var latestKey string
+	for key, data := range results {
+		if data == nil {
+			continue
+		}
+		var j core.Judgment
+		if err := json.Unmarshal(data, &j); err != nil {
+			continue
+		}
+		if key > latestKey {
+			latest = &j
+			latestKey = key
+		}
+	}
+
+	if latest == nil {
+		return nil, &core.NotFoundError{Entity: "judgment", ID: soulID}
+	}
+
+	return latest, nil
+}
+
+// initACMEManager initializes the ACME manager for Let's Encrypt
+func initACMEManager(cfg *core.Config, store *storage.CobaltDB, logger *slog.Logger) *acme.Manager {
+	if !cfg.Server.TLS.Enabled || !cfg.Server.TLS.AutoCert {
+		return nil
+	}
+
+	acmeCfg := acme.Config{
+		Enabled:   true,
+		Provider:  acme.ProviderLetsEncrypt,
+		Email:     cfg.Server.TLS.ACMEEmail,
+		AcceptTOS: true,
+		CertPath:  path.Join(cfg.Storage.Path, "acme"),
+	}
+
+	mgr, err := acme.NewManager(store, acmeCfg)
+	if err != nil {
+		logger.Warn("failed to initialize ACME manager", "err", err)
+		return nil
+	}
+
+	logger.Info("ACME manager initialized", "provider", acmeCfg.Provider, "email", acmeCfg.Email)
+	return mgr
+}
+
+func handleListSouls(store *storage.CobaltDB, engine *probe.Engine) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.Background()
+		souls, err := store.ListSouls(ctx, "", 0, 100)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(souls)
+	}
 }

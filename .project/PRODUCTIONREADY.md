@@ -334,7 +334,7 @@ This assessment revisits the codebase after the previous v3.1.0 audit claimed a 
 
 ### Remaining Deferred Items (Non-blocking)
 
-1. **CLI Refactoring** — `cmd/anubis/main.go` (2,851 lines) could be split into sub-packages. Deferred — current CLI is functional, risk > benefit.
+1. **CLI Refactoring** — `cmd/anubis/main.go` split into logical sub-files (backup.go, cluster.go, judge.go, soul.go, system.go, util.go). Completed 2026-04-12.
 2. **E2E Tests** — Playwright smoke test implemented and passing. Complete.
 3. **Fuzz Tests** — No fuzz testing. Deferred — low priority.
 
@@ -383,7 +383,7 @@ This assessment revisits the codebase after the previous v3.1.0 audit claimed a 
 
 ### Phase 8: Release Preparation (COMPLETED)
 25. OpenAPI 3.0 spec with Swagger UI endpoint (`/api/docs`) — 4h ✓
-26. CLI Refactoring — Deferred (non-blocking)
+26. CLI Refactoring — Split into logical sub-files, zero functional changes — 8h ✓
 27. Final Polish — ROADMAP.md + PRODUCTIONREADY.md updated ✓
 
 ### Total Effort: ~148h across 8 phases
