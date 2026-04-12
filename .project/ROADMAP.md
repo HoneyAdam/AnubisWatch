@@ -259,7 +259,8 @@ AnubisWatch scores **7.5/10 overall health** with **~100% backend feature comple
 ### 8.3 Final Polish (4h)
 - [x] Update ROADMAP.md with completion status
 - [x] Update PRODUCTIONREADY.md with final score (92/100, PRODUCTION READY)
-- [ ] Tag v0.1.0 release — deferred for manual review before git tag
+- [x] Tag v0.1.0 release — completed 2026-04-11
+- [x] Tag v0.1.1 release — completed 2026-04-12 (auth *bool fix, CLI refactor)
 
 ---
 
