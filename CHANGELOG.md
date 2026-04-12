@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Enhanced `validate()` to automatically call `setDefaults()` before validation
 
+### Fixed
+- Auth config `setDefaults` no longer overrides an explicit `enabled: false` in config files (`AuthConfig.Enabled` changed to `*bool`)
+
 ## [0.1.0] - 2026-04-06
 
 ### Added
