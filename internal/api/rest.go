@@ -1085,7 +1085,7 @@ func (s *RESTServer) handleGetConfig(ctx *Context) error {
 		"theme":          "dark",
 		"retention_days": 30,
 		"storage_path":   "/var/lib/anubis",
-		"auth_enabled":   s.authConfig.Enabled,
+		"auth_enabled":   s.authConfig.IsEnabled(),
 		"mcp_enabled":    s.mcp != nil,
 		"websocket_enabled": true,
 		"host":           s.config.Host,
@@ -1231,7 +1231,7 @@ func (s *RESTServer) handleSSE(ctx *Context) error {
 func (s *RESTServer) requireAuth(handler Handler) Handler {
 	return func(ctx *Context) error {
 		// Skip auth if disabled
-		if !s.authConfig.Enabled {
+		if !s.authConfig.IsEnabled() {
 			ctx.User = &User{
 				ID:        "anonymous",
 				Email:     "anonymous@anubis.watch",

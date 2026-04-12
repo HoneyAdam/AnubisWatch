@@ -715,7 +715,7 @@ func TestRequireAuth_MissingToken(t *testing.T) {
 
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
-		authConfig: core.AuthConfig{Enabled: true},
+		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
 		store:      storage,
 		router:     router,
 		auth:       auth,
@@ -1594,7 +1594,7 @@ func TestHandleMe(t *testing.T) {
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
-		authConfig: core.AuthConfig{Enabled: true},
+		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
 		store:      storage,
 		router:     router,
 		auth:       &mockAuthenticator{},
@@ -3209,7 +3209,7 @@ func TestNewRESTServer(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
 
 	if server == nil {
 		t.Fatal("Expected REST server to be created")
@@ -3237,7 +3237,7 @@ func TestRESTServer_StartStop(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
 
 	// Start server in background
 	go func() {
@@ -3269,7 +3269,7 @@ func TestRESTServer_StopWithoutStart(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
 
 	// Stop without start should return nil
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -3290,7 +3290,7 @@ func TestRESTServer_handleHealth(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
 
 	rec := httptest.NewRecorder()
 	ctx := &Context{
@@ -3317,7 +3317,7 @@ func TestRESTServer_handleReady(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
 
 	rec := httptest.NewRecorder()
 	ctx := &Context{
@@ -3344,7 +3344,7 @@ func TestRESTServer_handleMe(t *testing.T) {
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
 
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
 
 	rec := httptest.NewRecorder()
 	ctx := &Context{
@@ -3371,7 +3371,7 @@ func TestValidateJSONMiddleware(t *testing.T) {
 	auth := &mockAuthenticator{}
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
 
 	handler := server.validateJSONMiddleware(func(ctx *Context) error {
 		return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
@@ -3457,7 +3457,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 	auth := &mockAuthenticator{}
 	cluster := &mockClusterManager{}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, probe, alert, auth, cluster, nil, nil, nil, nil, logger)
 
 	handler := server.rateLimitMiddleware(func(ctx *Context) error {
 		return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
@@ -3510,7 +3510,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 // TestRateLimitMiddleware_RateExceeded tests rate limiting when limit is exceeded
 func TestRateLimitMiddleware_RateExceeded(t *testing.T) {
 	store := newMockStorage()
-	server := NewRESTServer(core.ServerConfig{Port: 8080}, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, newTestLogger())
+	server := NewRESTServer(core.ServerConfig{Port: 8080}, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, newTestLogger())
 
 	handler := server.rateLimitMiddleware(func(ctx *Context) error {
 		return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
@@ -3543,7 +3543,7 @@ func TestRateLimitMiddleware_RateExceeded(t *testing.T) {
 // TestHandleMCP_NotInitialized tests handleMCP when MCP server is nil
 func TestHandleMCP_NotInitialized(t *testing.T) {
 	store := newMockStorage()
-	server := NewRESTServer(core.ServerConfig{Port: 8080}, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, newTestLogger())
+	server := NewRESTServer(core.ServerConfig{Port: 8080}, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, newTestLogger())
 
 	req := httptest.NewRequest("GET", "/mcp", nil)
 	rec := httptest.NewRecorder()
@@ -3563,7 +3563,7 @@ func TestHandleMCP_NotInitialized(t *testing.T) {
 func TestHandleMCP_Unauthorized(t *testing.T) {
 	store := newMockStorage()
 	mcpServer := NewMCPServer(store, nil, nil, newTestLogger())
-	server := NewRESTServer(core.ServerConfig{Port: 8080}, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, newTestLogger())
+	server := NewRESTServer(core.ServerConfig{Port: 8080}, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, newTestLogger())
 	server.mcp = mcpServer
 
 	req := httptest.NewRequest("GET", "/mcp", nil)
@@ -3585,7 +3585,7 @@ func TestOnJudgmentCallback_WithoutWebSocket(t *testing.T) {
 	store := newMockStorage()
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	// Get callback without WebSocket
 	callback := server.OnJudgmentCallback()
@@ -3604,7 +3604,7 @@ func TestOnJudgmentCallback_WithWebSocket(t *testing.T) {
 	store := newMockStorage()
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	// Set WebSocket server manually
 	wsServer := NewWebSocketServer(logger)

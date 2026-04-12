@@ -215,11 +215,17 @@ type DashboardBranding struct {
 
 // AuthConfig defines authentication settings
 type AuthConfig struct {
-	Enabled bool      `json:"enabled" yaml:"enabled"` // auth enabled/disabled
+	Enabled *bool     `json:"enabled" yaml:"enabled"` // auth enabled/disabled (nil = not explicitly set)
 	Type    string    `json:"type" yaml:"type"`       // local, oidc, ldap
 	Local   LocalAuth `json:"local" yaml:"local"`
 	OIDC    OIDCAuth  `json:"oidc" yaml:"oidc"`
 	LDAP    LDAPAuth  `json:"ldap" yaml:"ldap"`
+}
+
+// IsEnabled returns the resolved auth enabled state. If Enabled is nil,
+// it returns false (disabled by default).
+func (c AuthConfig) IsEnabled() bool {
+	return c.Enabled != nil && *c.Enabled
 }
 
 // LocalAuth defines local authentication

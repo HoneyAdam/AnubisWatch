@@ -16,7 +16,7 @@ import (
 func TestHandleMetrics(t *testing.T) {
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	rec := httptest.NewRecorder()
 	ctx := &Context{
@@ -48,7 +48,7 @@ func TestHandleMetrics(t *testing.T) {
 func TestHandleMetrics_Content(t *testing.T) {
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	rec := httptest.NewRecorder()
 	ctx := &Context{
@@ -96,7 +96,7 @@ func TestBuildJudgmentMetrics_WithData(t *testing.T) {
 
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	metrics := server.buildJudgmentMetrics()
 	// Should contain metrics even without judgments
@@ -128,7 +128,7 @@ func TestBuildSoulMetrics_WithSouls(t *testing.T) {
 
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	metrics := server.buildSoulMetrics()
 	if metrics == "" {
@@ -155,7 +155,7 @@ func TestBuildJudgmentMetrics_WithJudgments(t *testing.T) {
 
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	metrics := server.buildJudgmentMetrics()
 	// Should not panic even without judgments
@@ -191,7 +191,7 @@ func TestBuildJudgmentMetrics_WithAllStatuses(t *testing.T) {
 
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	metrics := server.buildJudgmentMetrics()
 
@@ -210,7 +210,7 @@ func TestBuildJudgmentMetrics_StorageError(t *testing.T) {
 
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	metrics := server.buildJudgmentMetrics()
 	// Should return metric headers even on storage error
@@ -227,7 +227,7 @@ func TestBuildJudgmentMetrics_StorageError(t *testing.T) {
 func TestBuildSystemMetrics(t *testing.T) {
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	metrics := server.buildSystemMetrics()
 
@@ -257,7 +257,7 @@ func TestBuildClusterMetrics_WithLeader(t *testing.T) {
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
 	cluster := &mockClusterManager{isLeader: true}
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, cluster, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, cluster, nil, nil, nil, nil, logger)
 
 	metrics := server.buildClusterMetrics()
 
@@ -275,7 +275,7 @@ func TestBuildClusterMetrics_NotLeader(t *testing.T) {
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
 	cluster := &mockClusterManager{isLeader: false}
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, cluster, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, cluster, nil, nil, nil, nil, logger)
 
 	metrics := server.buildClusterMetrics()
 
@@ -288,7 +288,7 @@ func TestBuildClusterMetrics_NotLeader(t *testing.T) {
 func TestBuildClusterMetrics_NoCluster(t *testing.T) {
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, nil, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, nil, nil, nil, nil, nil, logger)
 
 	metrics := server.buildClusterMetrics()
 
@@ -302,7 +302,7 @@ func TestBuildSoulMetrics_EmptyStorage(t *testing.T) {
 	store := newMockStorage()
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	metrics := server.buildSoulMetrics()
 
@@ -317,7 +317,7 @@ func TestBuildSoulMetrics_StorageError(t *testing.T) {
 
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	metrics := server.buildSoulMetrics()
 	// Should return a fallback metric when storage fails
@@ -377,7 +377,7 @@ func TestBuildSoulMetrics_WithAllStatuses_Detailed(t *testing.T) {
 
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	metrics := server.buildSoulMetrics()
 
@@ -425,7 +425,7 @@ func TestBuildJudgmentMetrics_OutdatedJudgments(t *testing.T) {
 
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	metrics := server.buildJudgmentMetrics()
 
@@ -439,7 +439,7 @@ func TestBuildJudgmentMetrics_OutdatedJudgments(t *testing.T) {
 func TestBuildSystemMetrics_Content(t *testing.T) {
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	metrics := server.buildSystemMetrics()
 
@@ -484,7 +484,7 @@ func TestHandleMetrics_Integration(t *testing.T) {
 
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	server := NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 
 	rec := httptest.NewRecorder()
 	ctx := &Context{

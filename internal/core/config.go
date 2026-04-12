@@ -128,6 +128,11 @@ func parseInt(s string) (int, error) {
 	return result, nil
 }
 
+// BoolPtr returns a pointer to a bool value.
+func BoolPtr(v bool) *bool {
+	return &v
+}
+
 func (c *Config) setDefaults() {
 	// Server defaults
 	if c.Server.Host == "" {
@@ -249,17 +254,20 @@ func (c *Config) setDefaults() {
 	if c.Auth.Type == "" {
 		c.Auth.Type = "local"
 	}
-	// Auto-enable auth if credentials are configured
-	if !c.Auth.Enabled {
+	// Auto-enable auth only if the user did not explicitly set enabled=false
+	// and credentials are configured.
+	if c.Auth.Enabled == nil {
+		enabled := false
 		if c.Auth.Type == "local" && c.Auth.Local.AdminEmail != "" && c.Auth.Local.AdminPassword != "" {
-			c.Auth.Enabled = true
+			enabled = true
 		}
 		if c.Auth.Type == "oidc" && c.Auth.OIDC.Issuer != "" {
-			c.Auth.Enabled = true
+			enabled = true
 		}
 		if c.Auth.Type == "ldap" && c.Auth.LDAP.URL != "" {
-			c.Auth.Enabled = true
+			enabled = true
 		}
+		c.Auth.Enabled = &enabled
 	}
 }
 
@@ -417,7 +425,8 @@ func GenerateDefaultConfig() *Config {
 			Enabled: false,
 		},
 		Auth: AuthConfig{
-			Type: "local",
+			Type:    "local",
+			Enabled: new(bool),
 		},
 		Dashboard: DashboardConfig{
 			Enabled: true,

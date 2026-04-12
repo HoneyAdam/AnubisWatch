@@ -16,7 +16,7 @@ import (
 func newTestServerWithStorage(store Storage) *RESTServer {
 	config := core.ServerConfig{Port: 8080}
 	logger := newTestLogger()
-	return NewRESTServer(config, core.AuthConfig{Enabled: true}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+	return NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
 }
 
 // TestHandleListJourneys tests handleListJourneys
