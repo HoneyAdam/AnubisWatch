@@ -570,6 +570,7 @@ func (s *Server) UpdateSoul(ctx context.Context, req *v1.UpdateSoulRequest) (*v1
 		}
 	}
 
+	existing, _ = s.store.GetSoulNoCtx(req.Id)
 	if pb := soulToPB(existing); pb != nil {
 		return pb, nil
 	}
@@ -815,6 +816,7 @@ func (s *Server) UpdateChannel(ctx context.Context, req *v1.UpdateChannelRequest
 		}
 	}
 
+	existing, _ = s.store.GetChannelNoCtx(req.Id, "")
 	if pb := channelToPB(existing); pb != nil {
 		return pb, nil
 	}
@@ -917,6 +919,7 @@ func (s *Server) UpdateRule(ctx context.Context, req *v1.UpdateRuleRequest) (*v1
 		}
 	}
 
+	existing, _ = s.store.GetRuleNoCtx(req.Id, "")
 	if pb := ruleToPB(existing); pb != nil {
 		return pb, nil
 	}
@@ -1025,6 +1028,7 @@ func (s *Server) UpdateJourney(ctx context.Context, req *v1.UpdateJourneyRequest
 		}
 	}
 
+	existing, _ = s.store.GetJourneyNoCtx(req.Id)
 	if pb := journeyToPB(existing); pb != nil {
 		return pb, nil
 	}

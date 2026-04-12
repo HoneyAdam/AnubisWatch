@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
 	v1 "github.com/AnubisWatch/anubiswatch/internal/grpcapi/v1"
@@ -16,22 +17,24 @@ import (
 
 // mockGRPCStore implements Store with in-memory data
 type mockGRPCStore struct {
-	souls     map[string]interface{}
-	judgments []interface{}
-	channels  map[string]interface{}
-	rules     map[string]interface{}
-	journeys  map[string]interface{}
-	events    []interface{}
-	nextID    int
+	souls       map[string]interface{}
+	judgments   []interface{}
+	channels    map[string]interface{}
+	rules       map[string]interface{}
+	journeys    map[string]interface{}
+	journeyRuns []interface{}
+	events      []interface{}
+	nextID      int
 }
 
 func newMockGRPCStore() *mockGRPCStore {
 	return &mockGRPCStore{
-		souls:    make(map[string]interface{}),
-		channels: make(map[string]interface{}),
-		rules:    make(map[string]interface{}),
-		journeys: make(map[string]interface{}),
-		events:   []interface{}{},
+		souls:       make(map[string]interface{}),
+		channels:    make(map[string]interface{}),
+		rules:       make(map[string]interface{}),
+		journeys:    make(map[string]interface{}),
+		journeyRuns: []interface{}{},
+		events:      []interface{}{},
 	}
 }
 
@@ -58,6 +61,9 @@ func (m *mockGRPCStore) SaveSoulNoCtx(s interface{}) error {
 		}
 		if v, ok := mp["target"].(string); ok {
 			target = v
+		}
+		if v, ok := mp["id"].(string); ok && v != "" {
+			id = v
 		}
 	}
 	if name == "" {
@@ -92,6 +98,9 @@ func (m *mockGRPCStore) SaveChannelNoCtx(ch interface{}) error {
 		if v, ok := mp["type"].(string); ok {
 			chType = v
 		}
+		if v, ok := mp["id"].(string); ok && v != "" {
+			id = v
+		}
 	}
 	m.channels[id] = &mockChannel{id: id, name: name, chType: chType}
 	return nil
@@ -118,6 +127,9 @@ func (m *mockGRPCStore) SaveRuleNoCtx(rule interface{}) error {
 		if v, ok := mp["name"].(string); ok {
 			name = v
 		}
+		if v, ok := mp["id"].(string); ok && v != "" {
+			id = v
+		}
 	}
 	m.rules[id] = &mockRule{id: id, name: name}
 	return nil
@@ -139,16 +151,36 @@ func (m *mockGRPCStore) SaveJourneyNoCtx(j interface{}) error {
 		if v, ok := mp["name"].(string); ok {
 			name = v
 		}
+		if v, ok := mp["id"].(string); ok && v != "" {
+			id = v
+		}
 	}
 	m.journeys[id] = &mockJourney{id: id, name: name}
 	return nil
 }
 func (m *mockGRPCStore) DeleteJourneyNoCtx(id string) error { delete(m.journeys, id); return nil }
 func (m *mockGRPCStore) ListJourneyRunsNoCtx(journeyID string, limit int) ([]interface{}, error) {
-	return nil, nil
+	var result []interface{}
+	for _, r := range m.journeyRuns {
+		if jr, ok := r.(interface{ GetJourneyID() string }); ok && jr.GetJourneyID() == journeyID {
+			result = append(result, r)
+			if limit > 0 && len(result) >= limit {
+				break
+			}
+		}
+	}
+	return result, nil
 }
 func (m *mockGRPCStore) GetJourneyRunNoCtx(journeyID, runID string) (interface{}, error) {
-	return nil, nil
+	for _, r := range m.journeyRuns {
+		if jr, ok := r.(interface {
+			GetJourneyID() string
+			GetID() string
+		}); ok && jr.GetJourneyID() == journeyID && jr.GetID() == runID {
+			return r, nil
+		}
+	}
+	return nil, fmt.Errorf("not found")
 }
 func (m *mockGRPCStore) ListEvents(soulID string, limit int) ([]interface{}, error) {
 	return m.events, nil
@@ -157,7 +189,14 @@ func (m *mockGRPCStore) ListEvents(soulID string, limit int) ([]interface{}, err
 type mockGRPCProbe struct{}
 
 func (m *mockGRPCProbe) ForceCheck(soulID string) (interface{}, error) {
-	return nil, nil
+	return &mockJudgment{
+		id:        soulID + "-judge",
+		soulID:    soulID,
+		status:    "alive",
+		duration:  5 * time.Millisecond,
+		message:   "forced check",
+		timestamp: time.Now(),
+	}, nil
 }
 
 // mockSoul implements a minimal soul with getters for PB conversion
@@ -590,5 +629,310 @@ func TestServer_DeleteJourney(t *testing.T) {
 	_, err := srv.DeleteJourney(context.Background(), &v1.DeleteJourneyRequest{Id: "j_1"})
 	if err != nil {
 		t.Fatalf("DeleteJourney failed: %v", err)
+	}
+}
+
+// mockJourneyRun implements a minimal journey run with getters
+
+type mockJourneyRun struct {
+	id, journeyID, workspaceID, jackalID, region, status string
+	startedAt, completedAt, duration                     int64
+	steps                                                []interface{}
+	variables                                            map[string]string
+}
+
+func (m *mockJourneyRun) GetID() string                   { return m.id }
+func (m *mockJourneyRun) GetJourneyID() string            { return m.journeyID }
+func (m *mockJourneyRun) GetWorkspaceID() string          { return m.workspaceID }
+func (m *mockJourneyRun) GetJackalID() string             { return m.jackalID }
+func (m *mockJourneyRun) GetRegion() string               { return m.region }
+func (m *mockJourneyRun) GetStartedAt() int64             { return m.startedAt }
+func (m *mockJourneyRun) GetCompletedAt() int64           { return m.completedAt }
+func (m *mockJourneyRun) GetDuration() int64              { return m.duration }
+func (m *mockJourneyRun) GetStatus() string               { return m.status }
+func (m *mockJourneyRun) GetSteps() []interface{}         { return m.steps }
+func (m *mockJourneyRun) GetVariables() map[string]string { return m.variables }
+
+type baseServerStream struct{}
+
+func (baseServerStream) SetHeader(md metadata.MD) error  { return nil }
+func (baseServerStream) SendHeader(md metadata.MD) error { return nil }
+func (baseServerStream) SetTrailer(md metadata.MD)       {}
+func (baseServerStream) Context() context.Context        { return context.Background() }
+func (baseServerStream) SendMsg(m interface{}) error     { return nil }
+func (baseServerStream) RecvMsg(m interface{}) error     { return nil }
+
+type mockJudgmentsStream struct {
+	baseServerStream
+	ctx context.Context
+}
+
+func (m *mockJudgmentsStream) Context() context.Context  { return m.ctx }
+func (m *mockJudgmentsStream) Send(j *v1.Judgment) error { return nil }
+
+type mockVerdictsStream struct {
+	baseServerStream
+	ctx context.Context
+}
+
+func (m *mockVerdictsStream) Context() context.Context { return m.ctx }
+func (m *mockVerdictsStream) Send(v *v1.Verdict) error { return nil }
+
+func TestServer_GetSoul_Found(t *testing.T) {
+	store := newMockGRPCStore()
+	store.souls["soul_1"] = &mockSoul{id: "soul_1", name: "test"}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	resp, err := srv.GetSoul(context.Background(), &v1.GetSoulRequest{Id: "soul_1"})
+	if err != nil {
+		t.Fatalf("GetSoul failed: %v", err)
+	}
+	if resp.Id != "soul_1" {
+		t.Errorf("Expected soul_1, got %s", resp.Id)
+	}
+}
+
+func TestServer_UpdateSoul(t *testing.T) {
+	store := newMockGRPCStore()
+	store.souls["soul_1"] = map[string]interface{}{"id": "soul_1", "name": "old", "type": "http", "target": "old.com"}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	name := "updated"
+	_, err := srv.UpdateSoul(context.Background(), &v1.UpdateSoulRequest{
+		Id:   "soul_1",
+		Name: &name,
+	})
+	if err != nil {
+		t.Fatalf("UpdateSoul failed: %v", err)
+	}
+}
+
+// mockJudgment implements a minimal judgment with getters
+
+type mockJudgment struct {
+	id, soulID, soulName, status, message string
+	duration                              time.Duration
+	timestamp                             time.Time
+	jackalID, region                      string
+}
+
+func (m *mockJudgment) GetID() string              { return m.id }
+func (m *mockJudgment) GetSoulID() string          { return m.soulID }
+func (m *mockJudgment) GetSoulName() string        { return m.soulName }
+func (m *mockJudgment) GetStatus() string          { return m.status }
+func (m *mockJudgment) GetDuration() time.Duration { return m.duration }
+func (m *mockJudgment) GetMessage() string         { return m.message }
+func (m *mockJudgment) GetTimestamp() time.Time    { return m.timestamp }
+func (m *mockJudgment) GetJackalID() string        { return m.jackalID }
+func (m *mockJudgment) GetRegion() string          { return m.region }
+
+func TestServer_ListJudgments(t *testing.T) {
+	store := newMockGRPCStore()
+	store.judgments = []interface{}{
+		&mockJudgment{id: "j1", soulID: "s1", status: "alive", duration: 10 * time.Millisecond, message: "ok", timestamp: time.Now()},
+	}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	resp, err := srv.ListJudgments(context.Background(), &v1.ListJudgmentsRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListJudgments failed: %v", err)
+	}
+	if len(resp.Judgments) != 1 {
+		t.Errorf("Expected 1 judgment, got %d", len(resp.Judgments))
+	}
+}
+
+func TestServer_GetSoulJudgments(t *testing.T) {
+	store := newMockGRPCStore()
+	store.judgments = []interface{}{
+		&mockJudgment{id: "j1", soulID: "s1", status: "alive", duration: 10 * time.Millisecond, message: "ok", timestamp: time.Now()},
+	}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	resp, err := srv.GetSoulJudgments(context.Background(), &v1.GetSoulJudgmentsRequest{SoulId: "s1", Limit: 10})
+	if err != nil {
+		t.Fatalf("GetSoulJudgments failed: %v", err)
+	}
+	if len(resp.Judgments) != 1 {
+		t.Errorf("Expected 1 judgment, got %d", len(resp.Judgments))
+	}
+}
+
+func TestServer_JudgeSoul(t *testing.T) {
+	store := newMockGRPCStore()
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	_, err := srv.JudgeSoul(context.Background(), &v1.JudgeSoulRequest{SoulId: "s1"})
+	if err != nil {
+		t.Fatalf("JudgeSoul failed: %v", err)
+	}
+}
+
+func TestServer_GetChannel(t *testing.T) {
+	store := newMockGRPCStore()
+	store.channels["ch_1"] = &mockChannel{id: "ch_1", name: "test", chType: "slack"}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	resp, err := srv.GetChannel(context.Background(), &v1.GetChannelRequest{Id: "ch_1"})
+	if err != nil {
+		t.Fatalf("GetChannel failed: %v", err)
+	}
+	if resp.Id != "ch_1" {
+		t.Errorf("Expected ch_1, got %s", resp.Id)
+	}
+}
+
+func TestServer_UpdateChannel(t *testing.T) {
+	store := newMockGRPCStore()
+	store.channels["ch_1"] = map[string]interface{}{"id": "ch_1", "name": "old", "type": "slack"}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	name := "updated"
+	_, err := srv.UpdateChannel(context.Background(), &v1.UpdateChannelRequest{
+		Id:   "ch_1",
+		Name: &name,
+	})
+	if err != nil {
+		t.Fatalf("UpdateChannel failed: %v", err)
+	}
+}
+
+func TestServer_GetRule(t *testing.T) {
+	store := newMockGRPCStore()
+	store.rules["rule_1"] = &mockRule{id: "rule_1", name: "test"}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	resp, err := srv.GetRule(context.Background(), &v1.GetRuleRequest{Id: "rule_1"})
+	if err != nil {
+		t.Fatalf("GetRule failed: %v", err)
+	}
+	if resp.Id != "rule_1" {
+		t.Errorf("Expected rule_1, got %s", resp.Id)
+	}
+}
+
+func TestServer_UpdateRule(t *testing.T) {
+	store := newMockGRPCStore()
+	store.rules["rule_1"] = map[string]interface{}{"id": "rule_1", "name": "old"}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	name := "updated"
+	_, err := srv.UpdateRule(context.Background(), &v1.UpdateRuleRequest{
+		Id:   "rule_1",
+		Name: &name,
+	})
+	if err != nil {
+		t.Fatalf("UpdateRule failed: %v", err)
+	}
+}
+
+func TestServer_GetJourney(t *testing.T) {
+	store := newMockGRPCStore()
+	store.journeys["j_1"] = &mockJourney{id: "j_1", name: "test"}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	resp, err := srv.GetJourney(context.Background(), &v1.GetJourneyRequest{Id: "j_1"})
+	if err != nil {
+		t.Fatalf("GetJourney failed: %v", err)
+	}
+	if resp.Id != "j_1" {
+		t.Errorf("Expected j_1, got %s", resp.Id)
+	}
+}
+
+func TestServer_UpdateJourney(t *testing.T) {
+	store := newMockGRPCStore()
+	store.journeys["j_1"] = map[string]interface{}{"id": "j_1", "name": "old"}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	name := "updated"
+	_, err := srv.UpdateJourney(context.Background(), &v1.UpdateJourneyRequest{
+		Id:   "j_1",
+		Name: &name,
+	})
+	if err != nil {
+		t.Fatalf("UpdateJourney failed: %v", err)
+	}
+}
+
+func TestServer_RunJourney(t *testing.T) {
+	store := newMockGRPCStore()
+	store.journeys["j_1"] = &mockJourney{id: "j_1", name: "test"}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	resp, err := srv.RunJourney(context.Background(), &v1.RunJourneyRequest{Id: "j_1"})
+	if err != nil {
+		t.Fatalf("RunJourney failed: %v", err)
+	}
+	if resp.Status != "executing" {
+		t.Errorf("Expected executing, got %s", resp.Status)
+	}
+}
+
+func TestServer_ListJourneyRuns(t *testing.T) {
+	store := newMockGRPCStore()
+	store.journeyRuns = []interface{}{
+		&mockJourneyRun{id: "run_1", journeyID: "j_1", status: "success"},
+	}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	resp, err := srv.ListJourneyRuns(context.Background(), &v1.ListJourneyRunsRequest{JourneyId: "j_1", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListJourneyRuns failed: %v", err)
+	}
+	if len(resp.Runs) != 1 {
+		t.Errorf("Expected 1 run, got %d", len(resp.Runs))
+	}
+}
+
+func TestServer_GetJourneyRun(t *testing.T) {
+	store := newMockGRPCStore()
+	store.journeyRuns = []interface{}{
+		&mockJourneyRun{id: "run_1", journeyID: "j_1", status: "success"},
+	}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	resp, err := srv.GetJourneyRun(context.Background(), &v1.GetJourneyRunRequest{JourneyId: "j_1", RunId: "run_1"})
+	if err != nil {
+		t.Fatalf("GetJourneyRun failed: %v", err)
+	}
+	if resp.Id != "run_1" {
+		t.Errorf("Expected run_1, got %s", resp.Id)
+	}
+}
+
+func TestServer_StreamJudgments(t *testing.T) {
+	store := newMockGRPCStore()
+	store.judgments = []interface{}{
+		&mockJudgment{id: "j1", soulID: "s1", status: "alive", duration: 10 * time.Millisecond, message: "ok", timestamp: time.Now()},
+	}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	soulID := "s1"
+	stream := &mockJudgmentsStream{ctx: ctx}
+	err := srv.StreamJudgments(&v1.StreamRequest{SoulId: &soulID}, stream)
+	if err != nil {
+		t.Fatalf("StreamJudgments failed: %v", err)
+	}
+}
+
+func TestServer_StreamVerdicts(t *testing.T) {
+	store := newMockGRPCStore()
+	store.events = []interface{}{
+		&mockAlertEvent{id: "evt_1", soulID: "s1", status: "firing", severity: "critical", message: "alert", timestamp: time.Now()},
+	}
+	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	soulID := "s1"
+	stream := &mockVerdictsStream{ctx: ctx}
+	err := srv.StreamVerdicts(&v1.StreamRequest{SoulId: &soulID}, stream)
+	if err != nil {
+		t.Fatalf("StreamVerdicts failed: %v", err)
 	}
 }
