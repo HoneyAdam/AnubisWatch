@@ -1168,7 +1168,9 @@ func (h *Handler) Router() http.Handler {
 	mux.HandleFunc("/widget", h.WidgetHandler)
 
 	// ACME challenge handler for Let's Encrypt
-	mux.Handle("/.well-known/acme-challenge/", h.acmeManager.ChallengeHandler())
+	if h.acmeManager != nil {
+		mux.Handle("/.well-known/acme-challenge/", h.acmeManager.ChallengeHandler())
+	}
 
 	return mux
 }

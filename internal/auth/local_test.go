@@ -522,6 +522,17 @@ func TestLocalAuthenticator_CleanupDone(t *testing.T) {
 	auth.Shutdown()
 }
 
+// TestLocalAuthenticator_Shutdown_Idempotent tests shutdown can be called multiple times safely
+func TestLocalAuthenticator_Shutdown_Idempotent(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+
+	// First shutdown should succeed
+	auth.Shutdown()
+
+	// Second shutdown should not panic
+	auth.Shutdown()
+}
+
 // TestLocalAuthenticator_SaveSessions_WriteError tests saveSessions with unwritable path
 func TestLocalAuthenticator_SaveSessions_WriteError(t *testing.T) {
 	// Create a directory (not a file) as session path - will cause write error

@@ -1867,3 +1867,287 @@ type mockRepositoryIncidentsError struct {
 func (m *mockRepositoryIncidentsError) GetIncidentsByPage(pageID string) ([]core.Incident, error) {
 	return nil, fmt.Errorf("incidents error")
 }
+
+// WidgetHandler tests
+
+func TestHandler_WidgetHandler_MissingPageID(t *testing.T) {
+	repo := &mockRepository{}
+	handler := NewHandler(repo, nil)
+
+	req := httptest.NewRequest("GET", "/widget", nil)
+	w := httptest.NewRecorder()
+
+	handler.WidgetHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", w.Code)
+	}
+}
+
+func TestHandler_WidgetHandler_NotFound(t *testing.T) {
+	repo := &mockRepositoryNotFound{}
+	handler := NewHandler(repo, nil)
+
+	req := httptest.NewRequest("GET", "/widget?page=test", nil)
+	w := httptest.NewRecorder()
+
+	handler.WidgetHandler(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", w.Code)
+	}
+}
+
+func TestHandler_WidgetHandler_CompactStyle(t *testing.T) {
+	repo := &mockRepository{}
+	handler := NewHandler(repo, nil)
+
+	req := httptest.NewRequest("GET", "/widget?page=test", nil)
+	w := httptest.NewRecorder()
+
+	handler.WidgetHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if !strings.Contains(contentType, "text/html") {
+		t.Errorf("Expected Content-Type text/html, got %s", contentType)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "badge") {
+		t.Error("Expected compact badge HTML")
+	}
+}
+
+func TestHandler_WidgetHandler_DetailedStyle(t *testing.T) {
+	repo := &mockRepository{}
+	handler := NewHandler(repo, nil)
+
+	req := httptest.NewRequest("GET", "/widget?page=test\u0026style=detailed", nil)
+	w := httptest.NewRecorder()
+
+	handler.WidgetHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "widget") {
+		t.Error("Expected detailed widget HTML")
+	}
+	if !strings.Contains(body, "table") {
+		t.Error("Expected table in detailed widget HTML")
+	}
+}
+
+func TestHandler_WidgetHandler_SoulError(t *testing.T) {
+	repo := &mockRepositorySoulError{mockRepository: mockRepository{}}
+	handler := NewHandler(repo, nil)
+
+	req := httptest.NewRequest("GET", "/widget?page=test", nil)
+	w := httptest.NewRecorder()
+
+	handler.WidgetHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+}
+
+// Router route tests
+
+func TestHandler_Router_WidgetRoute(t *testing.T) {
+	repo := &mockRepository{}
+	handler := NewHandler(repo, nil)
+
+	router := handler.Router()
+
+	req := httptest.NewRequest("GET", "/widget?page=test", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200 for widget route, got %d", w.Code)
+	}
+}
+
+func TestHandler_Router_SubscribeRoute(t *testing.T) {
+	repo := &mockRepository{}
+	handler := NewHandler(repo, nil)
+
+	router := handler.Router()
+
+	req := httptest.NewRequest("POST", "/status/subscribe", strings.NewReader(`{"page_id":"test","type":"email","email":"user@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK && w.Code != http.StatusCreated {
+		t.Errorf("Expected status 200 or 201 for subscribe route, got %d", w.Code)
+	}
+}
+
+// Theme fallback tests
+
+func TestHandler_showPasswordForm_DefaultThemeFallback(t *testing.T) {
+	repo := &mockRepository{}
+	handler := NewHandler(repo, nil)
+
+	page := &core.StatusPage{
+		ID:          "test-page",
+		WorkspaceID: "workspace-1",
+		Name:        "Test Page",
+		Theme: core.StatusPageTheme{
+			PrimaryColor: "",
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/status/test", nil)
+
+	handler.showPasswordForm(w, req, page)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if len(body) == 0 {
+		t.Error("Expected HTML form content")
+	}
+}
+
+func TestHandler_serveHTML_DefaultThemeFallback(t *testing.T) {
+	repo := &mockRepository{}
+	handler := NewHandler(repo, nil)
+
+	page := &core.StatusPage{
+		ID:   "test-page",
+		Name: "Test Page",
+		Theme: core.StatusPageTheme{
+			PrimaryColor: "",
+		},
+	}
+
+	data := &core.StatusPageData{
+		Status: core.OverallStatus{Status: "operational"},
+		Souls:  []core.SoulStatusInfo{},
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/status/test", nil)
+
+	handler.serveHTML(w, req, page, data)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+}
+
+// SubscribeHandler error path
+
+func TestHandler_SubscribeHandler_RepositoryError(t *testing.T) {
+	repo := &mockRepositoryNotFound{}
+	handler := NewHandler(repo, nil)
+
+	jsonBody := `{"page_id": "test", "type": "webhook", "webhook_url": "https://example.com/hook"}`
+	req := httptest.NewRequest("POST", "/status/subscribe",
+		strings.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.SubscribeHandler(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500, got %d", w.Code)
+	}
+}
+
+// Router main status page handler route tests
+
+func TestHandler_Router_MainStatusPageRoute(t *testing.T) {
+	repo := &mockRepository{}
+	handler := NewHandler(repo, nil)
+
+	router := handler.Router()
+
+	req := httptest.NewRequest("GET", "/status/test", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200 for main status page route, got %d", w.Code)
+	}
+}
+
+func TestHandler_Router_RSSFeedRoute(t *testing.T) {
+	repo := &mockRepository{}
+	handler := NewHandler(repo, nil)
+
+	router := handler.Router()
+
+	req := httptest.NewRequest("GET", "/status/test/feed.xml", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200 for RSS feed route, got %d", w.Code)
+	}
+}
+
+// RSSFeedHandler with incidents and GetSoul error path
+
+func TestHandler_RSSFeedHandler_WithSoulLookupError(t *testing.T) {
+	repo := &mockRepositorySoulError{mockRepository: mockRepository{}}
+	handler := NewHandler(repo, nil)
+
+	req := httptest.NewRequest("GET", "/status/test/feed.xml", nil)
+	w := httptest.NewRecorder()
+
+	handler.RSSFeedHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "rss") {
+		t.Error("Expected RSS feed content")
+	}
+}
+
+// showPasswordForm with empty theme primary color
+
+func TestHandler_showPasswordForm_EmptyTheme(t *testing.T) {
+	repo := &mockRepository{}
+	handler := NewHandler(repo, nil)
+
+	page := &core.StatusPage{
+		ID:          "test-page",
+		WorkspaceID: "workspace-1",
+		Name:        "Test Page",
+		Theme:       core.StatusPageTheme{},
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/status/test", nil)
+
+	handler.showPasswordForm(w, req, page)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "password protected") {
+		t.Error("Expected password protected message")
+	}
+}

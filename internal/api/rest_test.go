@@ -24,22 +24,26 @@ func newTestLogger() *slog.Logger {
 
 // mockStorage implements Storage interface for testing
 type mockStorage struct {
-	souls      map[string]*core.Soul
-	judgments  map[string]*core.Judgment
-	channels   map[string]*core.AlertChannel
-	rules      map[string]*core.AlertRule
-	workspaces map[string]*core.Workspace
-	journeys   map[string]*core.JourneyConfig
+	souls       map[string]*core.Soul
+	judgments   map[string]*core.Judgment
+	channels    map[string]*core.AlertChannel
+	rules       map[string]*core.AlertRule
+	workspaces  map[string]*core.Workspace
+	journeys    map[string]*core.JourneyConfig
+	dashboards  map[string]*core.CustomDashboard
+	windows     map[string]*core.MaintenanceWindow
 }
 
 func newMockStorage() *mockStorage {
 	return &mockStorage{
-		souls:      make(map[string]*core.Soul),
-		judgments:  make(map[string]*core.Judgment),
-		channels:   make(map[string]*core.AlertChannel),
-		rules:      make(map[string]*core.AlertRule),
-		workspaces: make(map[string]*core.Workspace),
-		journeys:   make(map[string]*core.JourneyConfig),
+		souls:       make(map[string]*core.Soul),
+		judgments:   make(map[string]*core.Judgment),
+		channels:    make(map[string]*core.AlertChannel),
+		rules:       make(map[string]*core.AlertRule),
+		workspaces:  make(map[string]*core.Workspace),
+		journeys:    make(map[string]*core.JourneyConfig),
+		dashboards:  make(map[string]*core.CustomDashboard),
+		windows:     make(map[string]*core.MaintenanceWindow),
 	}
 }
 
@@ -334,25 +338,52 @@ func (m *mockStorage) ListJourneysNoCtx(ws string, offset, limit int) ([]*core.J
 func (m *mockStorage) SaveJourneyNoCtx(j *core.JourneyConfig) error { m.journeys[j.ID] = j; return nil }
 func (m *mockStorage) DeleteJourneyNoCtx(id string) error           { return nil }
 func (m *mockStorage) GetDashboardNoCtx(id string) (*core.CustomDashboard, error) {
+	if d, ok := m.dashboards[id]; ok {
+		return d, nil
+	}
 	return nil, fmt.Errorf("dashboard not found")
 }
 func (m *mockStorage) ListDashboardsNoCtx() ([]*core.CustomDashboard, error) {
-	return []*core.CustomDashboard{}, nil
+	result := make([]*core.CustomDashboard, 0, len(m.dashboards))
+	for _, d := range m.dashboards {
+		result = append(result, d)
+	}
+	return result, nil
 }
 func (m *mockStorage) SaveDashboardNoCtx(dashboard *core.CustomDashboard) error {
+	m.dashboards[dashboard.ID] = dashboard
 	return nil
 }
-func (m *mockStorage) DeleteDashboardNoCtx(id string) error { return nil }
+func (m *mockStorage) DeleteDashboardNoCtx(id string) error {
+	delete(m.dashboards, id)
+	return nil
+}
 
 // MaintenanceWindow methods
 func (m *mockStorage) GetMaintenanceWindow(id string) (*core.MaintenanceWindow, error) {
+	if w, ok := m.windows[id]; ok {
+		return w, nil
+	}
 	return nil, fmt.Errorf("maintenance window not found")
 }
 func (m *mockStorage) ListMaintenanceWindows() ([]*core.MaintenanceWindow, error) {
-	return []*core.MaintenanceWindow{}, nil
+	windows := make([]*core.MaintenanceWindow, 0, len(m.windows))
+	for _, w := range m.windows {
+		windows = append(windows, w)
+	}
+	return windows, nil
 }
-func (m *mockStorage) SaveMaintenanceWindow(w *core.MaintenanceWindow) error { return nil }
-func (m *mockStorage) DeleteMaintenanceWindow(id string) error               { return nil }
+func (m *mockStorage) SaveMaintenanceWindow(w *core.MaintenanceWindow) error {
+	m.windows[w.ID] = w
+	return nil
+}
+func (m *mockStorage) DeleteMaintenanceWindow(id string) error {
+	if _, ok := m.windows[id]; !ok {
+		return fmt.Errorf("maintenance window not found")
+	}
+	delete(m.windows, id)
+	return nil
+}
 
 // mockProbeEngine implements ProbeEngine interface
 type mockProbeEngine struct {
@@ -4121,6 +4152,72 @@ func TestHandleAcknowledgeIncident_FailingStore(t *testing.T) {
 	}
 }
 
+func TestHandleWebSocket_NotInitialized(t *testing.T) {
+	server := &RESTServer{
+		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		ws:     nil,
+		logger: newTestLogger(),
+	}
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/ws", nil),
+		Response: rec,
+	}
+
+	err := server.handleWebSocket(ctx)
+	if err != nil {
+		t.Fatalf("Unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
+	}
+}
+
+func TestHandleSSE(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithStorage(store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest("GET", "/sse", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	testCtx := &Context{
+		Request:  req,
+		Response: rec,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		server.handleSSE(testCtx)
+		close(done)
+	}()
+
+	// Wait a short moment for the initial message to be sent
+	time.Sleep(50 * time.Millisecond)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `"type":"connected"`) {
+		t.Errorf("Expected connected message in SSE response, got: %s", body)
+	}
+
+	contentType := rec.Header().Get("Content-Type")
+	if contentType != "text/event-stream" {
+		t.Errorf("Expected text/event-stream content type, got %s", contentType)
+	}
+
+	// Cancel context to stop the handler
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for SSE handler to exit")
+	}
+}
+
 func TestHandleResolveIncident_FailingStore(t *testing.T) {
 	alert := &failingAlertManager{}
 	router := &Router{routes: make(map[string]map[string]Handler)}
@@ -4143,5 +4240,370 @@ func TestHandleResolveIncident_FailingStore(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// Config handlers
+
+func TestHandleGetConfig(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithStorage(store)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/api/v1/config", nil),
+		Response: rec,
+	}
+
+	err := server.handleGetConfig(ctx)
+	if err != nil {
+		t.Fatalf("handleGetConfig failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+	if _, ok := result["instance_name"]; !ok {
+		t.Error("Expected instance_name in config response")
+	}
+}
+
+func TestHandleUpdateConfig(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithStorage(store)
+
+	body, _ := json.Marshal(map[string]interface{}{"theme": "light"})
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("PUT", "/api/v1/config", bytes.NewReader(body)),
+		Response: rec,
+	}
+
+	err := server.handleUpdateConfig(ctx)
+	if err != nil {
+		t.Fatalf("handleUpdateConfig failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleUpdateConfig_InvalidJSON(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithStorage(store)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("PUT", "/api/v1/config", bytes.NewReader([]byte("invalid"))),
+		Response: rec,
+	}
+
+	err := server.handleUpdateConfig(ctx)
+	if err != nil {
+		t.Fatalf("Unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// Maintenance Window handlers
+
+func TestHandleListMaintenanceWindows(t *testing.T) {
+	store := newMockStorage()
+	store.SaveMaintenanceWindow(&core.MaintenanceWindow{ID: "mw-1", Name: "Window 1"})
+	server := newTestServerWithStorage(store)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/api/v1/maintenance", nil),
+		Response: rec,
+	}
+
+	err := server.handleListMaintenanceWindows(ctx)
+	if err != nil {
+		t.Fatalf("handleListMaintenanceWindows failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var result []*core.MaintenanceWindow
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+	if len(result) != 1 {
+		t.Errorf("Expected 1 window, got %d", len(result))
+	}
+}
+
+func TestHandleCreateMaintenanceWindow(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithStorage(store)
+
+	w := core.MaintenanceWindow{Name: "New Window", Enabled: true}
+	body, _ := json.Marshal(w)
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("POST", "/api/v1/maintenance", bytes.NewReader(body)),
+		Response: rec,
+	}
+
+	err := server.handleCreateMaintenanceWindow(ctx)
+	if err != nil {
+		t.Fatalf("handleCreateMaintenanceWindow failed: %v", err)
+	}
+
+	if rec.Code != http.StatusCreated {
+		t.Errorf("Expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
+func TestHandleCreateMaintenanceWindow_InvalidJSON(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithStorage(store)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("POST", "/api/v1/maintenance", bytes.NewReader([]byte("invalid"))),
+		Response: rec,
+	}
+
+	err := server.handleCreateMaintenanceWindow(ctx)
+	if err != nil {
+		t.Fatalf("Unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+func TestHandleGetMaintenanceWindow(t *testing.T) {
+	store := newMockStorage()
+	store.SaveMaintenanceWindow(&core.MaintenanceWindow{ID: "mw-1", Name: "Window 1"})
+	server := newTestServerWithStorage(store)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/api/v1/maintenance/mw-1", nil),
+		Response: rec,
+		Params:   map[string]string{"id": "mw-1"},
+	}
+
+	err := server.handleGetMaintenanceWindow(ctx)
+	if err != nil {
+		t.Fatalf("handleGetMaintenanceWindow failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleGetMaintenanceWindow_NotFound(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithStorage(store)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/api/v1/maintenance/mw-1", nil),
+		Response: rec,
+		Params:   map[string]string{"id": "mw-1"},
+	}
+
+	err := server.handleGetMaintenanceWindow(ctx)
+	if err != nil {
+		t.Fatalf("Unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
+	}
+}
+
+func TestHandleUpdateMaintenanceWindow(t *testing.T) {
+	store := newMockStorage()
+	store.SaveMaintenanceWindow(&core.MaintenanceWindow{ID: "mw-1", Name: "Window 1"})
+	server := newTestServerWithStorage(store)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"name":        "Updated Window",
+		"description": "Updated desc",
+		"soul_ids":    []string{"soul-1", "soul-2"},
+		"tags":        []string{"tag1"},
+		"start_time":  "2026-01-01T00:00:00Z",
+		"end_time":    "2026-01-02T00:00:00Z",
+		"recurring":   "daily",
+		"enabled":     false,
+	})
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("PUT", "/api/v1/maintenance/mw-1", bytes.NewReader(body)),
+		Response: rec,
+		Params:   map[string]string{"id": "mw-1"},
+	}
+
+	err := server.handleUpdateMaintenanceWindow(ctx)
+	if err != nil {
+		t.Fatalf("handleUpdateMaintenanceWindow failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var result core.MaintenanceWindow
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+	if result.Name != "Updated Window" {
+		t.Errorf("Expected name 'Updated Window', got %s", result.Name)
+	}
+	if result.Description != "Updated desc" {
+		t.Errorf("Expected description 'Updated desc', got %s", result.Description)
+	}
+	if len(result.SoulIDs) != 2 {
+		t.Errorf("Expected 2 soul IDs, got %d", len(result.SoulIDs))
+	}
+	if len(result.Tags) != 1 {
+		t.Errorf("Expected 1 tag, got %d", len(result.Tags))
+	}
+	if result.Recurring != "daily" {
+		t.Errorf("Expected recurring 'daily', got %s", result.Recurring)
+	}
+	if result.Enabled != false {
+		t.Error("Expected enabled false")
+	}
+}
+
+func TestHandleUpdateMaintenanceWindow_InvalidJSON(t *testing.T) {
+	store := newMockStorage()
+	store.SaveMaintenanceWindow(&core.MaintenanceWindow{ID: "mw-1", Name: "Window 1"})
+	server := newTestServerWithStorage(store)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("PUT", "/api/v1/maintenance/mw-1", bytes.NewReader([]byte("invalid"))),
+		Response: rec,
+		Params:   map[string]string{"id": "mw-1"},
+	}
+
+	err := server.handleUpdateMaintenanceWindow(ctx)
+	if err != nil {
+		t.Fatalf("Unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+func TestHandleUpdateMaintenanceWindow_NotFound(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithStorage(store)
+
+	body, _ := json.Marshal(map[string]interface{}{"name": "Updated"})
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("PUT", "/api/v1/maintenance/mw-1", bytes.NewReader(body)),
+		Response: rec,
+		Params:   map[string]string{"id": "mw-1"},
+	}
+
+	err := server.handleUpdateMaintenanceWindow(ctx)
+	if err != nil {
+		t.Fatalf("Unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
+	}
+}
+
+func TestHandleUpdateMaintenanceWindow_InvalidTypes(t *testing.T) {
+	store := newMockStorage()
+	store.SaveMaintenanceWindow(&core.MaintenanceWindow{ID: "mw-1", Name: "Window 1"})
+	server := newTestServerWithStorage(store)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"name":        123,
+		"soul_ids":    "not-an-array",
+		"tags":        456,
+		"start_time":  true,
+		"enabled":     "not-a-bool",
+	})
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("PUT", "/api/v1/maintenance/mw-1", bytes.NewReader(body)),
+		Response: rec,
+		Params:   map[string]string{"id": "mw-1"},
+	}
+
+	err := server.handleUpdateMaintenanceWindow(ctx)
+	if err != nil {
+		t.Fatalf("handleUpdateMaintenanceWindow failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	// Should not panic and original values should be preserved where types were wrong
+	var result core.MaintenanceWindow
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+	if result.Name != "Window 1" {
+		t.Errorf("Expected original name to be preserved, got %s", result.Name)
+	}
+}
+
+func TestHandleDeleteMaintenanceWindow(t *testing.T) {
+	store := newMockStorage()
+	store.SaveMaintenanceWindow(&core.MaintenanceWindow{ID: "mw-1", Name: "Window 1"})
+	server := newTestServerWithStorage(store)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("DELETE", "/api/v1/maintenance/mw-1", nil),
+		Response: rec,
+		Params:   map[string]string{"id": "mw-1"},
+	}
+
+	err := server.handleDeleteMaintenanceWindow(ctx)
+	if err != nil {
+		t.Fatalf("handleDeleteMaintenanceWindow failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	if len(store.windows) != 0 {
+		t.Errorf("Expected window to be deleted")
+	}
+}
+
+func TestHandleDeleteMaintenanceWindow_NotFound(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithStorage(store)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("DELETE", "/api/v1/maintenance/mw-1", nil),
+		Response: rec,
+		Params:   map[string]string{"id": "mw-1"},
+	}
+
+	err := server.handleDeleteMaintenanceWindow(ctx)
+	if err != nil {
+		t.Fatalf("Unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
 	}
 }

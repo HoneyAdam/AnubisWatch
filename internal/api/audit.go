@@ -263,6 +263,9 @@ func WithUser(ctx context.Context, user *User) context.Context {
 
 // UserFromContext retrieves a user from the context
 func UserFromContext(ctx context.Context) (*User, bool) {
+	if ctx == nil {
+		return nil, false
+	}
 	user, ok := ctx.Value(userContextKey).(*User)
 	return user, ok
 }

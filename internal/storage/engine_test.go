@@ -7151,7 +7151,7 @@ func TestCobaltDB_ListJudgments_CorruptData(t *testing.T) {
 	}
 
 	now := time.Now()
-	results, err := db.ListJudgments(ctx, "soul-1", now.Add(-1*time.Hour), now, 100)
+	results, err := db.ListJudgments(ctx, "soul-1", now.Add(-1*time.Hour), now.Add(time.Second), 100)
 	if err != nil {
 		t.Fatalf("ListJudgments failed: %v", err)
 	}

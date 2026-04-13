@@ -1005,3 +1005,320 @@ func TestOIDCAuthenticator_ParseIDToken_AudienceList_Missing(t *testing.T) {
 		t.Error("Expected error when audience list doesn't contain client ID")
 	}
 }
+
+func TestOIDCAuthenticator_Authenticate_ExpiredToken(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:       "https://example.com",
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		RedirectURL:  "http://localhost:8080/callback",
+	}
+
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	defer auth.Shutdown()
+
+	user := auth.AddUser("user@example.com", "Test User", "viewer")
+
+	// Manually inject an expired session
+	token := "expired-oidc-token"
+	auth.mu.Lock()
+	auth.tokens[token] = &session{
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(-1 * time.Hour),
+	}
+	auth.mu.Unlock()
+
+	_, err := auth.Authenticate(token)
+	if err == nil {
+		t.Error("Expected error for expired token")
+	}
+}
+
+func TestOIDCAuthenticator_Authenticate_MissingUser(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:       "https://example.com",
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		RedirectURL:  "http://localhost:8080/callback",
+	}
+
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	defer auth.Shutdown()
+
+	// Manually inject a session pointing to a non-existent user
+	token := "orphan-oidc-token"
+	auth.mu.Lock()
+	auth.tokens[token] = &session{
+		UserID:    "nonexistent-user-id",
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+	auth.mu.Unlock()
+
+	_, err := auth.Authenticate(token)
+	if err == nil {
+		t.Error("Expected error for missing user")
+	}
+}
+
+func TestOIDCAuthenticator_OIDCCallback_Success(t *testing.T) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
+	jwks := createTestJWK(priv)
+	jwkServer := newJWKServer(t, jwks)
+	defer jwkServer.Close()
+
+	var idToken string
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			json.NewEncoder(w).Encode(oidcConfig{
+				Issuer:      server.URL,
+				AuthURL:     server.URL + "/auth",
+				TokenURL:    server.URL + "/token",
+				UserInfoURL: server.URL + "/userinfo",
+				JWKSURI:     jwkServer.URL + "/jwks",
+			})
+		case "/token":
+			json.NewEncoder(w).Encode(tokenResponse{
+				AccessToken: "access_token_123",
+				IDToken:     idToken,
+				TokenType:   "Bearer",
+			})
+		case "/userinfo":
+			json.NewEncoder(w).Encode(userInfoResponse{
+				Email: "oidcuser@example.com",
+				Name:  "OIDC User",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	now := time.Now()
+	claims := map[string]interface{}{
+		"iss":   server.URL,
+		"aud":   "client-id",
+		"sub":   "user-123",
+		"email": "oidcuser@example.com",
+		"name":  "OIDC User",
+		"exp":   now.Add(time.Hour).Unix(),
+	}
+	idToken = createTestJWT(t, priv, claims)
+
+	auth := NewOIDCAuthenticator(core.OIDCAuth{
+		Issuer:       server.URL,
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		RedirectURL:  "http://localhost:8080/callback",
+	}, "", "admin@test.com", "admin123")
+	defer auth.Shutdown()
+
+	// Inject a valid state
+	state := "valid-state-abc"
+	auth.mu.Lock()
+	auth.state[state] = &oidcState{
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+	}
+	auth.mu.Unlock()
+
+	user, token, err := auth.OIDCCallback("test-code", state)
+	if err != nil {
+		t.Fatalf("OIDCCallback failed: %v", err)
+	}
+	if user.Email != "oidcuser@example.com" {
+		t.Errorf("Expected email oidcuser@example.com, got %s", user.Email)
+	}
+	if token == "" {
+		t.Error("Expected non-empty token")
+	}
+
+	// Authenticate with the token
+	authUser, err := auth.Authenticate(token)
+	if err != nil {
+		t.Fatalf("Authenticate failed: %v", err)
+	}
+	if authUser.Email != "oidcuser@example.com" {
+		t.Errorf("Expected authenticated email oidcuser@example.com, got %s", authUser.Email)
+	}
+}
+
+func TestOIDCAuthenticator_OIDCCallback_EmptyEmail(t *testing.T) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
+	jwks := createTestJWK(priv)
+	jwkServer := newJWKServer(t, jwks)
+	defer jwkServer.Close()
+
+	var idToken string
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			json.NewEncoder(w).Encode(oidcConfig{
+				Issuer:   server.URL,
+				AuthURL:  server.URL + "/auth",
+				TokenURL: server.URL + "/token",
+				JWKSURI:  jwkServer.URL + "/jwks",
+			})
+		case "/token":
+			json.NewEncoder(w).Encode(tokenResponse{
+				AccessToken: "access_token_123",
+				IDToken:     idToken,
+				TokenType:   "Bearer",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	now := time.Now()
+	claims := map[string]interface{}{
+		"iss": server.URL,
+		"aud": "client-id",
+		"sub": "user-123",
+		"exp": now.Add(time.Hour).Unix(),
+	}
+	idToken = createTestJWT(t, priv, claims)
+
+	auth := NewOIDCAuthenticator(core.OIDCAuth{
+		Issuer:       server.URL,
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		RedirectURL:  "http://localhost:8080/callback",
+	}, "", "admin@test.com", "admin123")
+	defer auth.Shutdown()
+
+	state := "empty-email-state"
+	auth.mu.Lock()
+	auth.state[state] = &oidcState{
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+	}
+	auth.mu.Unlock()
+
+	_, _, err = auth.OIDCCallback("test-code", state)
+	if err == nil {
+		t.Error("Expected error for empty email in OIDC response")
+	}
+}
+
+func TestOIDCAuthenticator_OIDCCallback_GetUserInfoError(t *testing.T) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
+	jwks := createTestJWK(priv)
+	jwkServer := newJWKServer(t, jwks)
+	defer jwkServer.Close()
+
+	var idToken string
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			json.NewEncoder(w).Encode(oidcConfig{
+				Issuer:      server.URL,
+				AuthURL:     server.URL + "/auth",
+				TokenURL:    server.URL + "/token",
+				UserInfoURL: server.URL + "/userinfo",
+				JWKSURI:     jwkServer.URL + "/jwks",
+			})
+		case "/token":
+			json.NewEncoder(w).Encode(tokenResponse{
+				AccessToken: "access_token_123",
+				IDToken:     idToken,
+				TokenType:   "Bearer",
+			})
+		case "/userinfo":
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error":"server error"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	now := time.Now()
+	claims := map[string]interface{}{
+		"iss":   server.URL,
+		"aud":   "client-id",
+		"sub":   "user-123",
+		"email": "oidcuser@example.com",
+		"name":  "OIDC User",
+		"exp":   now.Add(time.Hour).Unix(),
+	}
+	idToken = createTestJWT(t, priv, claims)
+
+	auth := NewOIDCAuthenticator(core.OIDCAuth{
+		Issuer:       server.URL,
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		RedirectURL:  "http://localhost:8080/callback",
+	}, "", "admin@test.com", "admin123")
+	defer auth.Shutdown()
+
+	state := "userinfo-error-state"
+	auth.mu.Lock()
+	auth.state[state] = &oidcState{
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+	}
+	auth.mu.Unlock()
+
+	// Callback should still succeed because ID token has email
+	user, token, err := auth.OIDCCallback("test-code", state)
+	if err != nil {
+		t.Fatalf("OIDCCallback failed: %v", err)
+	}
+	if user.Email != "oidcuser@example.com" {
+		t.Errorf("Expected email oidcuser@example.com, got %s", user.Email)
+	}
+	if token == "" {
+		t.Error("Expected non-empty token")
+	}
+}
+
+func TestJWK_toPublicKey_UnsupportedKeyType(t *testing.T) {
+	jwk := &jwk{Kty: "OCT", Alg: "HS256", Kid: "bad-key"}
+	_, err := jwk.toPublicKey()
+	if err == nil {
+		t.Error("Expected error for unsupported key type")
+	}
+}
+
+func TestOIDCAuthenticator_FindKeyForJWT_NoUsableKeys(t *testing.T) {
+	auth := &OIDCAuthenticator{
+		config:      core.OIDCAuth{Issuer: "https://test.example.com", ClientID: "client-id"},
+		jwks:        &jwkSet{Keys: []jwk{}},
+		jwksFetched: time.Now(),
+		jwksTTL:     time.Hour,
+	}
+
+	headers := map[string]interface{}{"alg": "RS256"}
+	_, err := auth.findKeyForJWT(headers)
+	if err == nil {
+		t.Error("Expected error when no keys available")
+	}
+}
+
+func TestOIDCAuthenticator_FindKeyForJWT_BadKeyNoKid(t *testing.T) {
+	auth := &OIDCAuthenticator{
+		config: core.OIDCAuth{Issuer: "https://test.example.com", ClientID: "client-id"},
+		jwks: &jwkSet{Keys: []jwk{
+			{Kty: "RSA", N: "!!!bad-base64!!!", E: "AQAB", Kid: "bad-key"},
+		}},
+		jwksFetched: time.Now(),
+		jwksTTL:     time.Hour,
+	}
+
+	headers := map[string]interface{}{"alg": "RS256"}
+	_, err := auth.findKeyForJWT(headers)
+	if err == nil {
+		t.Error("Expected error when no usable keys available")
+	}
+}

@@ -2,13 +2,22 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/AnubisWatch/anubiswatch/internal/auth"
 	"github.com/AnubisWatch/anubiswatch/internal/core"
+	"github.com/AnubisWatch/anubiswatch/internal/grpcapi"
+	"github.com/AnubisWatch/anubiswatch/internal/probe"
+	"github.com/AnubisWatch/anubiswatch/internal/storage"
 )
 
 func TestBuildServerDependencies_DefaultConfig(t *testing.T) {
@@ -366,4 +375,350 @@ func TestServer_Start_MultipleTimes(t *testing.T) {
 		server2.Stop(shutdownCtx2)
 		cancel2()
 	}
+}
+
+func TestBuildServerDependencies_EnvConfigPath(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	configContent := `{
+		"storage": {"path": "` + filepath.ToSlash(dataDir) + `"},
+		"server": {"host": "127.0.0.1", "port": 0}
+	}`
+	configPath := filepath.Join(tempDir, "env-config.json")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	t.Setenv("ANUBIS_CONFIG", configPath)
+
+	deps, err := BuildServerDependencies(ServerOptions{Logger: logger})
+	if err != nil {
+		t.Fatalf("BuildServerDependencies failed: %v", err)
+	}
+	if deps == nil {
+		t.Fatal("Expected non-nil dependencies")
+	}
+	if deps.Store != nil {
+		deps.Store.Close()
+	}
+}
+
+func TestBuildServerDependencies_OIDCAuth(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	configContent := `{
+		"storage": {"path": "` + filepath.ToSlash(dataDir) + `"},
+		"server": {"host": "127.0.0.1", "port": 0},
+		"auth": {"type": "oidc", "oidc": {"issuer": "http://localhost", "client_id": "test", "client_secret": "secret", "redirect_url": "http://localhost/callback"}}
+	}`
+	configPath := filepath.Join(tempDir, "oidc-config.json")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	deps, err := BuildServerDependencies(ServerOptions{ConfigPath: configPath, Logger: logger})
+	if err != nil {
+		t.Fatalf("BuildServerDependencies failed: %v", err)
+	}
+	if deps.Authenticator == nil {
+		t.Error("Expected authenticator to be initialized")
+	}
+	if deps.Store != nil {
+		deps.Store.Close()
+	}
+}
+
+func TestBuildServerDependencies_LDAPAuth(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	configContent := `{
+		"storage": {"path": "` + filepath.ToSlash(dataDir) + `"},
+		"server": {"host": "127.0.0.1", "port": 0},
+		"auth": {"type": "ldap", "ldap": {"url": "ldap://localhost", "base_dn": "dc=test,dc=com"}}
+	}`
+	configPath := filepath.Join(tempDir, "ldap-config.json")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	deps, err := BuildServerDependencies(ServerOptions{ConfigPath: configPath, Logger: logger})
+	if err != nil {
+		t.Fatalf("BuildServerDependencies failed: %v", err)
+	}
+	if deps.Authenticator == nil {
+		t.Error("Expected authenticator to be initialized")
+	}
+	if deps.Store != nil {
+		deps.Store.Close()
+	}
+}
+
+func TestBuildServerDependencies_DashboardDisabled(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	configContent := `{
+		"storage": {"path": "` + filepath.ToSlash(dataDir) + `"},
+		"server": {"host": "127.0.0.1", "port": 0},
+		"dashboard": {"enabled": false}
+	}`
+	configPath := filepath.Join(tempDir, "no-dash-config.json")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	deps, err := BuildServerDependencies(ServerOptions{ConfigPath: configPath, Logger: logger})
+	if err != nil {
+		t.Fatalf("BuildServerDependencies failed: %v", err)
+	}
+	if deps.DashboardHandler != nil {
+		t.Error("Expected dashboard handler to be nil when disabled")
+	}
+	if deps.Store != nil {
+		deps.Store.Close()
+	}
+}
+
+func TestBuildServerDependencies_NoGRPC(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	configContent := `{
+		"storage": {"path": "` + filepath.ToSlash(dataDir) + `"},
+		"server": {"host": "127.0.0.1", "port": 0, "grpc_port": 0}
+	}`
+	configPath := filepath.Join(tempDir, "no-grpc-config.json")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	deps, err := BuildServerDependencies(ServerOptions{ConfigPath: configPath, Logger: logger})
+	if err != nil {
+		t.Fatalf("BuildServerDependencies failed: %v", err)
+	}
+	if deps.GRPCServer != nil {
+		t.Error("Expected gRPC server to be nil when port is 0")
+	}
+	if deps.Store != nil {
+		deps.Store.Close()
+	}
+}
+
+func TestInitACMEManager_Server_Disabled(t *testing.T) {
+	cfg := core.GenerateDefaultConfig()
+	cfg.Server.TLS.Enabled = false
+	mgr := initACMEManager(cfg, nil, slog.New(slog.NewTextHandler(os.Stdout, nil)))
+	if mgr != nil {
+		t.Error("Expected nil manager when TLS disabled")
+	}
+}
+
+func TestInitACMEManager_Server_Enabled(t *testing.T) {
+	tempDir := t.TempDir()
+	cfg := core.GenerateDefaultConfig()
+	cfg.Storage.Path = tempDir
+	cfg.Server.TLS.Enabled = true
+	cfg.Server.TLS.AutoCert = true
+	cfg.Server.TLS.ACMEEmail = "test@example.com"
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	store, err := storage.NewEngine(cfg.Storage, logger)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	mgr := initACMEManager(cfg, store, logger)
+	if mgr == nil {
+		t.Error("Expected non-nil manager when TLS auto-cert enabled")
+	}
+}
+
+func TestHandleLogin_InvalidCredentials(t *testing.T) {
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	handler := handleLogin(authenticator)
+
+	req := httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"email":"wrong@example.com","password":"wrong"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+	}
+}
+
+func TestHandleListSouls_StorageError(t *testing.T) {
+	store := setupTestStore(t)
+	store.Close() // close to force error
+
+	engine := probe.NewEngine(probe.EngineOptions{
+		Registry: probe.NewCheckerRegistry(),
+		Logger:   slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	})
+
+	handler := handleListSouls(store, engine)
+	req := httptest.NewRequest("GET", "/api/souls", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+}
+
+func TestStatusPageRepository_GetIncidentsByPage_PageNotFound(t *testing.T) {
+	store := setupTestStore(t)
+	repo := &statusPageRepository{store: store}
+
+	_, err := repo.GetIncidentsByPage("nonexistent-page")
+	if err == nil {
+		t.Error("Expected error when page not found")
+	}
+}
+
+func TestGrpcProbeAdapter_ForceCheck(t *testing.T) {
+	store := setupTestStore(t)
+	engine := probe.NewEngine(probe.EngineOptions{
+		Registry: probe.NewCheckerRegistry(),
+		Store:    &probeStorageAdapter{store: store},
+		Logger:   slog.New(slog.NewTextHandler(os.Stdout, nil)),
+	})
+
+	adapter := &grpcProbeAdapter{engine: engine}
+	_, err := adapter.ForceCheck("nonexistent-soul")
+	if err == nil {
+		t.Error("Expected error for nonexistent soul")
+	}
+}
+
+func TestServer_Start_JourneyAlreadyRunning(t *testing.T) {
+	tempDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	dataDir := filepath.Join(tempDir, "data")
+
+	configContent := `{
+		"storage": {"path": "` + filepath.ToSlash(dataDir) + `"},
+		"server": {"host": "127.0.0.1", "port": 0},
+		"journeys": [{"id": "j1", "name": "Test Journey", "enabled": true, "weight": "1s", "steps": [{"name": "step1", "type": "http", "target": "http://localhost"}]}]
+	}`
+	configPath := filepath.Join(tempDir, "test-config.json")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	deps, err := BuildServerDependencies(ServerOptions{ConfigPath: configPath, Logger: logger})
+	if err != nil {
+		t.Fatalf("BuildServerDependencies failed: %v", err)
+	}
+
+	// Avoid REST server port conflicts with other tests
+	deps.RESTServer = nil
+
+	// Pre-start the journey to trigger "already running" warning
+	journey := &core.JourneyConfig{ID: "j1", Name: "Test Journey", Weight: core.Duration{Duration: time.Hour}}
+	_ = deps.JourneyExecutor.Start(context.Background(), journey)
+
+	server := NewServer(deps)
+	ctx := context.Background()
+	if err := server.Start(ctx); err != nil {
+		t.Fatalf("Server.Start failed: %v", err)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	server.Stop(shutdownCtx)
+}
+
+func TestWaitForShutdown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal sending not supported on Windows")
+	}
+
+	server := NewServer(
+		&ServerDependencies{
+			Config: core.GenerateDefaultConfig(),
+			Logger: slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		})
+
+	done := make(chan struct{})
+	go func() {
+		server.WaitForShutdown()
+		close(done)
+	}()
+
+	// Give time for signal handler to register
+	time.Sleep(100 * time.Millisecond)
+
+	p, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("failed to find process: %v", err)
+	}
+	if err := p.Signal(os.Interrupt); err != nil {
+		t.Fatalf("failed to send signal: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for WaitForShutdown")
+	}
+}
+
+func TestBuildServerDependencies_NilLogger(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	configContent := `{
+		"storage": {"path": "` + filepath.ToSlash(dataDir) + `"},
+		"server": {"host": "127.0.0.1", "port": 0}
+	}`
+	configPath := filepath.Join(tempDir, "test-config.json")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	deps, err := BuildServerDependencies(ServerOptions{ConfigPath: configPath})
+	if err != nil {
+		t.Fatalf("BuildServerDependencies failed: %v", err)
+	}
+	if deps.Logger == nil {
+		t.Error("Expected logger to be initialized")
+	}
+	if deps.Store != nil {
+		deps.Store.Close()
+	}
+}
+
+func TestServer_Start_GRPCServerError(t *testing.T) {
+	tempDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	dataDir := filepath.Join(tempDir, "data")
+
+	configContent := `{
+		"storage": {"path": "` + filepath.ToSlash(dataDir) + `"},
+		"server": {"host": "127.0.0.1", "port": 0, "grpc_port": 0}
+	}`
+	configPath := filepath.Join(tempDir, "test-config.json")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	deps, err := BuildServerDependencies(ServerOptions{ConfigPath: configPath, Logger: logger})
+	if err != nil {
+		t.Fatalf("BuildServerDependencies failed: %v", err)
+	}
+
+	// Override gRPC server with invalid address to force start error
+	grpcStore := &grpcStorageAdapter{inner: &restStorageAdapter{store: deps.Store}}
+	deps.GRPCServer = grpcapi.NewServer("invalid://:abc", grpcStore, &mockGRPCProbe{}, logger)
+	// Avoid REST server port conflicts with other tests
+	deps.RESTServer = nil
+
+	server := NewServer(deps)
+	ctx := context.Background()
+	if err := server.Start(ctx); err != nil {
+		t.Fatalf("Server.Start failed: %v", err)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	server.Stop(shutdownCtx)
+}
+
+type mockGRPCProbe struct{}
+
+func (m *mockGRPCProbe) ForceCheck(soulID string) (interface{}, error) {
+	return nil, fmt.Errorf("mock error")
 }

@@ -1722,38 +1722,56 @@ func (s *RESTServer) handleUpdateMaintenanceWindow(ctx *Context) error {
 	if err := json.NewDecoder(ctx.Request.Body).Decode(&input); err != nil {
 		return ctx.Error(http.StatusBadRequest, "invalid JSON")
 	}
-	// Apply updates
+	// Apply updates with safe type assertions
 	if v, ok := input["name"]; ok {
-		w.Name = v.(string)
+		if str, ok := v.(string); ok {
+			w.Name = str
+		}
 	}
 	if v, ok := input["description"]; ok {
-		w.Description = v.(string)
+		if str, ok := v.(string); ok {
+			w.Description = str
+		}
 	}
 	if v, ok := input["soul_ids"]; ok {
-		ids := v.([]interface{})
-		w.SoulIDs = make([]string, len(ids))
-		for i, id := range ids {
-			w.SoulIDs[i] = id.(string)
+		if ids, ok := v.([]interface{}); ok {
+			w.SoulIDs = make([]string, 0, len(ids))
+			for _, id := range ids {
+				if str, ok := id.(string); ok {
+					w.SoulIDs = append(w.SoulIDs, str)
+				}
+			}
 		}
 	}
 	if v, ok := input["tags"]; ok {
-		tags := v.([]interface{})
-		w.Tags = make([]string, len(tags))
-		for i, t := range tags {
-			w.Tags[i] = t.(string)
+		if tags, ok := v.([]interface{}); ok {
+			w.Tags = make([]string, 0, len(tags))
+			for _, t := range tags {
+				if str, ok := t.(string); ok {
+					w.Tags = append(w.Tags, str)
+				}
+			}
 		}
 	}
 	if v, ok := input["start_time"]; ok {
-		w.StartTime, _ = time.Parse(time.RFC3339, v.(string))
+		if str, ok := v.(string); ok {
+			w.StartTime, _ = time.Parse(time.RFC3339, str)
+		}
 	}
 	if v, ok := input["end_time"]; ok {
-		w.EndTime, _ = time.Parse(time.RFC3339, v.(string))
+		if str, ok := v.(string); ok {
+			w.EndTime, _ = time.Parse(time.RFC3339, str)
+		}
 	}
 	if v, ok := input["recurring"]; ok {
-		w.Recurring = v.(string)
+		if str, ok := v.(string); ok {
+			w.Recurring = str
+		}
 	}
 	if v, ok := input["enabled"]; ok {
-		w.Enabled = v.(bool)
+		if b, ok := v.(bool); ok {
+			w.Enabled = b
+		}
 	}
 	w.UpdatedAt = time.Now().UTC()
 	if err := s.store.SaveMaintenanceWindow(w); err != nil {

@@ -2,12 +2,14 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
@@ -1894,5 +1896,731 @@ func TestHandleDeleteJourney_StorageError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+}
+
+// mockJourneyExecutor implements JourneyExecutor for testing
+type mockJourneyExecutor struct {
+	runs       []*core.JourneyRun
+	getRunErr  error
+	listRunErr error
+}
+
+func (m *mockJourneyExecutor) ListRuns(ctx context.Context, workspaceID, journeyID string, limit int) ([]*core.JourneyRun, error) {
+	if m.listRunErr != nil {
+		return nil, m.listRunErr
+	}
+	return m.runs, nil
+}
+
+func (m *mockJourneyExecutor) GetRun(ctx context.Context, workspaceID, journeyID, runID string) (*core.JourneyRun, error) {
+	if m.getRunErr != nil {
+		return nil, m.getRunErr
+	}
+	for _, r := range m.runs {
+		if r.ID == runID {
+			return r, nil
+		}
+	}
+	return nil, fmt.Errorf("run not found")
+}
+
+func newTestServerWithJourney(store Storage, journey JourneyExecutor) *RESTServer {
+	config := core.ServerConfig{Port: 8080}
+	logger := newTestLogger()
+	return NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, journey, nil, nil, nil, logger)
+}
+
+// Journey run handler tests
+
+func TestHandleListJourneyRuns(t *testing.T) {
+	store := newMockStorage()
+	journey := &mockJourneyExecutor{
+		runs: []*core.JourneyRun{
+			{ID: "run-1", JourneyID: "journey-1", Status: core.SoulAlive},
+			{ID: "run-2", JourneyID: "journey-1", Status: core.SoulDead},
+		},
+	}
+	server := newTestServerWithJourney(store, journey)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("GET", "/api/v1/journeys/journey-1/runs", nil),
+		Response:  rec,
+		Params:    map[string]string{"id": "journey-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleListJourneyRuns(ctx)
+	if err != nil {
+		t.Fatalf("handleListJourneyRuns failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleListJourneyRuns_NoExecutor(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("GET", "/api/v1/journeys/journey-1/runs", nil),
+		Response:  rec,
+		Params:    map[string]string{"id": "journey-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleListJourneyRuns(ctx)
+	if err == nil && rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected service unavailable, got status %d", rec.Code)
+	}
+}
+
+func TestHandleListJourneyRuns_StorageError(t *testing.T) {
+	store := newMockStorage()
+	journey := &mockJourneyExecutor{listRunErr: fmt.Errorf("db error")}
+	server := newTestServerWithJourney(store, journey)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("GET", "/api/v1/journeys/journey-1/runs", nil),
+		Response:  rec,
+		Params:    map[string]string{"id": "journey-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleListJourneyRuns(ctx)
+	if err == nil && rec.Code != http.StatusInternalServerError {
+		t.Errorf("Expected internal server error, got status %d", rec.Code)
+	}
+}
+
+func TestHandleGetJourneyRun(t *testing.T) {
+	store := newMockStorage()
+	journey := &mockJourneyExecutor{
+		runs: []*core.JourneyRun{
+			{ID: "run-1", JourneyID: "journey-1", Status: core.SoulAlive},
+		},
+	}
+	server := newTestServerWithJourney(store, journey)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("GET", "/api/v1/journeys/journey-1/runs/run-1", nil),
+		Response:  rec,
+		Params:    map[string]string{"id": "journey-1", "runId": "run-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleGetJourneyRun(ctx)
+	if err != nil {
+		t.Fatalf("handleGetJourneyRun failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleGetJourneyRun_NoExecutor(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("GET", "/api/v1/journeys/journey-1/runs/run-1", nil),
+		Response:  rec,
+		Params:    map[string]string{"id": "journey-1", "runId": "run-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleGetJourneyRun(ctx)
+	if err == nil && rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected service unavailable, got status %d", rec.Code)
+	}
+}
+
+func TestHandleGetJourneyRun_NotFound(t *testing.T) {
+	store := newMockStorage()
+	journey := &mockJourneyExecutor{runs: []*core.JourneyRun{}}
+	server := newTestServerWithJourney(store, journey)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("GET", "/api/v1/journeys/journey-1/runs/missing", nil),
+		Response:  rec,
+		Params:    map[string]string{"id": "journey-1", "runId": "missing"},
+		Workspace: "default",
+	}
+
+	err := server.handleGetJourneyRun(ctx)
+	if err == nil && rec.Code != http.StatusNotFound {
+		t.Errorf("Expected not found, got status %d", rec.Code)
+	}
+}
+
+// Dashboard handler tests
+
+func TestHandleListDashboards(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/api/v1/dashboards", nil),
+		Response: rec,
+	}
+
+	err := server.handleListDashboards(ctx)
+	if err != nil {
+		t.Fatalf("handleListDashboards failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleCreateDashboard(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	dashboard := core.CustomDashboard{Name: "Test Dashboard"}
+	body, _ := json.Marshal(dashboard)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("POST", "/api/v1/dashboards", bytes.NewReader(body)),
+		Response:  rec,
+		Workspace: "default",
+	}
+
+	err := server.handleCreateDashboard(ctx)
+	if err != nil {
+		t.Fatalf("handleCreateDashboard failed: %v", err)
+	}
+
+	if rec.Code != http.StatusCreated {
+		t.Errorf("Expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+}
+
+func TestHandleCreateDashboard_InvalidData(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("POST", "/api/v1/dashboards", bytes.NewReader([]byte("invalid"))),
+		Response:  rec,
+		Workspace: "default",
+	}
+
+	err := server.handleCreateDashboard(ctx)
+	if err == nil && rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected bad request, got status %d", rec.Code)
+	}
+}
+
+func TestHandleGetDashboard(t *testing.T) {
+	store := newMockStorage()
+	store.SaveDashboardNoCtx(&core.CustomDashboard{ID: "dash-1", Name: "Test Dashboard"})
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/api/v1/dashboards/dash-1", nil),
+		Response: rec,
+		Params:   map[string]string{"id": "dash-1"},
+	}
+
+	err := server.handleGetDashboard(ctx)
+	if err != nil {
+		t.Fatalf("handleGetDashboard failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleGetDashboard_NotFound(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/api/v1/dashboards/missing", nil),
+		Response: rec,
+		Params:   map[string]string{"id": "missing"},
+	}
+
+	err := server.handleGetDashboard(ctx)
+	if err == nil && rec.Code != http.StatusNotFound {
+		t.Errorf("Expected not found, got status %d", rec.Code)
+	}
+}
+
+func TestHandleUpdateDashboard(t *testing.T) {
+	store := newMockStorage()
+	store.SaveDashboardNoCtx(&core.CustomDashboard{ID: "dash-1", Name: "Test Dashboard"})
+	server := newTestServerWithJourney(store, nil)
+
+	dashboard := core.CustomDashboard{Name: "Updated Dashboard"}
+	body, _ := json.Marshal(dashboard)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("PUT", "/api/v1/dashboards/dash-1", bytes.NewReader(body)),
+		Response:  rec,
+		Params:    map[string]string{"id": "dash-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleUpdateDashboard(ctx)
+	if err != nil {
+		t.Fatalf("handleUpdateDashboard failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleUpdateDashboard_InvalidData(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("PUT", "/api/v1/dashboards/dash-1", bytes.NewReader([]byte("invalid"))),
+		Response:  rec,
+		Params:    map[string]string{"id": "dash-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleUpdateDashboard(ctx)
+	if err == nil && rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected bad request, got status %d", rec.Code)
+	}
+}
+
+func TestHandleDeleteDashboard(t *testing.T) {
+	store := newMockStorage()
+	store.SaveDashboardNoCtx(&core.CustomDashboard{ID: "dash-1", Name: "Test Dashboard"})
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("DELETE", "/api/v1/dashboards/dash-1", nil),
+		Response: rec,
+		Params:   map[string]string{"id": "dash-1"},
+	}
+
+	_ = server.handleDeleteDashboard(ctx)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("Expected status %d, got %d", http.StatusNoContent, rec.Code)
+	}
+}
+
+func TestHandleDashboardQuery(t *testing.T) {
+	store := newMockStorage()
+	store.SaveSoul(nil, &core.Soul{ID: "soul-1", Name: "Test Soul"})
+	server := newTestServerWithJourney(store, nil)
+
+	query := core.WidgetQuery{Source: "souls", Metric: "count"}
+	body, _ := json.Marshal(query)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("POST", "/api/v1/dashboards/dash-1/query", bytes.NewReader(body)),
+		Response: rec,
+		Params:   map[string]string{"id": "dash-1"},
+	}
+
+	err := server.handleDashboardQuery(ctx)
+	if err != nil {
+		t.Fatalf("handleDashboardQuery failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleDashboardQuery_InvalidData(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("POST", "/api/v1/dashboards/dash-1/query", bytes.NewReader([]byte("invalid"))),
+		Response: rec,
+		Params:   map[string]string{"id": "dash-1"},
+	}
+
+	err := server.handleDashboardQuery(ctx)
+	if err == nil && rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected bad request, got status %d", rec.Code)
+	}
+}
+
+func TestHandleDashboardQuery_Judgments(t *testing.T) {
+	store := newMockStorage()
+	store.SaveSoul(nil, &core.Soul{ID: "soul-1", Name: "Test Soul"})
+	server := newTestServerWithJourney(store, nil)
+
+	query := core.WidgetQuery{Source: "judgments", Metric: "latency", TimeRange: "24h", Filters: map[string]string{"soul_id": "soul-1"}}
+	body, _ := json.Marshal(query)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("POST", "/api/v1/dashboards/dash-1/query", bytes.NewReader(body)),
+		Response: rec,
+		Params:   map[string]string{"id": "dash-1"},
+	}
+
+	err := server.handleDashboardQuery(ctx)
+	if err != nil {
+		t.Fatalf("handleDashboardQuery failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleDashboardQuery_Stats(t *testing.T) {
+	store := newMockStorage()
+	store.SaveSoul(nil, &core.Soul{ID: "soul-1", Name: "Test Soul"})
+	server := newTestServerWithJourney(store, nil)
+
+	query := core.WidgetQuery{Source: "stats", Metric: "uptime"}
+	body, _ := json.Marshal(query)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("POST", "/api/v1/dashboards/dash-1/query", bytes.NewReader(body)),
+		Response: rec,
+		Params:   map[string]string{"id": "dash-1"},
+	}
+
+	err := server.handleDashboardQuery(ctx)
+	if err != nil {
+		t.Fatalf("handleDashboardQuery failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleDashboardQuery_Alerts(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	query := core.WidgetQuery{Source: "alerts", Metric: "count"}
+	body, _ := json.Marshal(query)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("POST", "/api/v1/dashboards/dash-1/query", bytes.NewReader(body)),
+		Response: rec,
+		Params:   map[string]string{"id": "dash-1"},
+	}
+
+	err := server.handleDashboardQuery(ctx)
+	if err != nil {
+		t.Fatalf("handleDashboardQuery failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleDashboardQuery_UnknownSource(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	query := core.WidgetQuery{Source: "unknown", Metric: "count"}
+	body, _ := json.Marshal(query)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("POST", "/api/v1/dashboards/dash-1/query", bytes.NewReader(body)),
+		Response: rec,
+		Params:   map[string]string{"id": "dash-1"},
+	}
+
+	err := server.handleDashboardQuery(ctx)
+	if err == nil && rec.Code != http.StatusBadRequest {
+		t.Errorf("Expected bad request, got status %d", rec.Code)
+	}
+}
+
+func TestHandleDashboardTemplates(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/api/v1/dashboards/templates", nil),
+		Response: rec,
+	}
+
+	err := server.handleDashboardTemplates(ctx)
+	if err != nil {
+		t.Fatalf("handleDashboardTemplates failed: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var result []map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if len(result) == 0 {
+		t.Error("Expected at least one template")
+	}
+}
+
+// parseTimeRange tests
+
+func TestParseTimeRange(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected time.Duration
+	}{
+		{"24h", 24 * time.Hour},
+		{"7d", 7 * 24 * time.Hour},
+		{"1w", 7 * 24 * time.Hour},
+		{"2w", 14 * 24 * time.Hour},
+		{"", 24 * time.Hour},
+		{"x", 24 * time.Hour},
+		{"100", 24 * time.Hour},
+		{"h", 24 * time.Hour},
+	}
+
+	for _, tt := range tests {
+		result := parseTimeRange(tt.input)
+		if result != tt.expected {
+			t.Errorf("parseTimeRange(%q) = %v, expected %v", tt.input, result, tt.expected)
+		}
+	}
+}
+
+// Direct query function tests
+
+func TestQuerySouls(t *testing.T) {
+	store := newMockStorage()
+	store.SaveSoul(nil, &core.Soul{ID: "soul-1", Name: "Test Soul"})
+	server := newTestServerWithJourney(store, nil)
+
+	result, err := server.querySouls(core.WidgetQuery{Metric: "count"})
+	if err != nil {
+		t.Fatalf("querySouls failed: %v", err)
+	}
+
+	m, ok := result.(map[string]int)
+	if !ok {
+		t.Fatalf("expected map[string]int, got %T", result)
+	}
+	if m["count"] != 1 {
+		t.Errorf("Expected count 1, got %d", m["count"])
+	}
+}
+
+func TestQuerySouls_List(t *testing.T) {
+	store := newMockStorage()
+	store.SaveSoul(nil, &core.Soul{ID: "soul-1", Name: "Test Soul"})
+	server := newTestServerWithJourney(store, nil)
+
+	result, err := server.querySouls(core.WidgetQuery{Metric: "list"})
+	if err != nil {
+		t.Fatalf("querySouls failed: %v", err)
+	}
+
+	souls, ok := result.([]*core.Soul)
+	if !ok {
+		t.Fatalf("expected []*core.Soul, got %T", result)
+	}
+	if len(souls) != 1 {
+		t.Errorf("Expected 1 soul, got %d", len(souls))
+	}
+}
+
+func TestQueryJudgments(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	result, err := server.queryJudgments(core.WidgetQuery{TimeRange: "24h"})
+	if err != nil {
+		t.Fatalf("queryJudgments failed: %v", err)
+	}
+
+	_ = result
+}
+
+func TestQueryStats(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	result, err := server.queryStats(core.WidgetQuery{})
+	if err != nil {
+		t.Fatalf("queryStats failed: %v", err)
+	}
+
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+	if _, exists := m["total"]; !exists {
+		t.Error("Expected 'total' key in stats result")
+	}
+}
+
+func TestQueryAlerts(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	result, err := server.queryAlerts(core.WidgetQuery{})
+	if err != nil {
+		t.Fatalf("queryAlerts failed: %v", err)
+	}
+
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+	if _, exists := m["channels"]; !exists {
+		t.Error("Expected 'channels' key in alerts result")
+	}
+}
+
+func TestQueryJudgments_WithSoulID(t *testing.T) {
+	store := newMockStorage()
+	now := time.Now()
+	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j1", SoulID: "soul-1", Status: core.SoulAlive, Duration: 100 * time.Millisecond, Timestamp: now.Add(-5 * time.Minute)})
+	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j2", SoulID: "soul-1", Status: core.SoulDead, Duration: 200 * time.Millisecond, Timestamp: now.Add(-3 * time.Minute)})
+	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j3", SoulID: "soul-1", Status: core.SoulAlive, Duration: 300 * time.Millisecond, Timestamp: now.Add(-1 * time.Minute)})
+	server := newTestServerWithJourney(store, nil)
+
+	result, err := server.queryJudgments(core.WidgetQuery{TimeRange: "24h", Filters: map[string]string{"soul_id": "soul-1"}})
+	if err != nil {
+		t.Fatalf("queryJudgments failed: %v", err)
+	}
+
+	data, _ := json.Marshal(result)
+	var buckets []map[string]interface{}
+	if err := json.Unmarshal(data, &buckets); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+	if len(buckets) != 1 {
+		t.Errorf("Expected 1 time bucket, got %d", len(buckets))
+	}
+	totalCount := 0
+	totalPassed := 0
+	totalFailed := 0
+	for _, b := range buckets {
+		totalCount += int(b["count"].(float64))
+		totalPassed += int(b["passed"].(float64))
+		totalFailed += int(b["failed"].(float64))
+	}
+	if totalCount != 3 {
+		t.Errorf("Expected total count 3, got %d", totalCount)
+	}
+	if totalPassed != 2 {
+		t.Errorf("Expected total passed 2, got %d", totalPassed)
+	}
+	if totalFailed != 1 {
+		t.Errorf("Expected total failed 1, got %d", totalFailed)
+	}
+}
+
+func TestQueryJudgments_WithoutSoulID(t *testing.T) {
+	store := newMockStorage()
+	store.SaveSoul(context.Background(), &core.Soul{ID: "soul-1", Name: "Test Soul 1"})
+	store.SaveSoul(context.Background(), &core.Soul{ID: "soul-2", Name: "Test Soul 2"})
+	now := time.Now()
+	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j1", SoulID: "soul-1", Status: core.SoulAlive, Duration: 100 * time.Millisecond, Timestamp: now.Add(-5 * time.Minute)})
+	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j2", SoulID: "soul-2", Status: core.SoulDead, Duration: 200 * time.Millisecond, Timestamp: now.Add(-3 * time.Minute)})
+	server := newTestServerWithJourney(store, nil)
+
+	result, err := server.queryJudgments(core.WidgetQuery{TimeRange: "24h"})
+	if err != nil {
+		t.Fatalf("queryJudgments failed: %v", err)
+	}
+
+	data, _ := json.Marshal(result)
+	var buckets []map[string]interface{}
+	if err := json.Unmarshal(data, &buckets); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+	totalCount := 0
+	for _, b := range buckets {
+		totalCount += int(b["count"].(float64))
+	}
+	if totalCount != 2 {
+		t.Errorf("Expected total count 2, got %d", totalCount)
+	}
+}
+
+func TestQueryJudgments_ListSoulsError(t *testing.T) {
+	server := newTestServerWithJourney(&failingMockStorage{}, nil)
+
+	_, err := server.queryJudgments(core.WidgetQuery{TimeRange: "24h"})
+	if err == nil {
+		t.Fatal("Expected error from failing storage")
+	}
+}
+
+func TestQueryJudgments_ListJudgmentsError(t *testing.T) {
+	server := newTestServerWithJourney(&failingMockStorage{}, nil)
+
+	_, err := server.queryJudgments(core.WidgetQuery{TimeRange: "24h", Filters: map[string]string{"soul_id": "soul-1"}})
+	if err == nil {
+		t.Fatal("Expected error from failing storage")
+	}
+}
+
+func TestQueryStats_WithJudgments(t *testing.T) {
+	store := newMockStorage()
+	now := time.Now()
+	store.SaveSoul(context.Background(), &core.Soul{ID: "soul-1", Name: "Test Soul"})
+	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j1", SoulID: "soul-1", Status: core.SoulAlive, Timestamp: now.Add(-1 * time.Hour)})
+	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j2", SoulID: "soul-1", Status: core.SoulDead, Timestamp: now.Add(-2 * time.Hour)})
+	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j3", SoulID: "soul-1", Status: core.SoulDegraded, Timestamp: now.Add(-3 * time.Hour)})
+	server := newTestServerWithJourney(store, nil)
+
+	result, err := server.queryStats(core.WidgetQuery{})
+	if err != nil {
+		t.Fatalf("queryStats failed: %v", err)
+	}
+
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+	if m["total"] != 1 {
+		t.Errorf("Expected total 1, got %v", m["total"])
+	}
+	if m["alive"] != 1 {
+		t.Errorf("Expected alive 1, got %v", m["alive"])
+	}
+	if m["dead"] != 1 {
+		t.Errorf("Expected dead 1, got %v", m["dead"])
+	}
+	if m["degraded"] != 1 {
+		t.Errorf("Expected degraded 1, got %v", m["degraded"])
+	}
+	if m["uptime"] != 33.33333333333333 {
+		t.Errorf("Expected uptime 33.33, got %v", m["uptime"])
 	}
 }

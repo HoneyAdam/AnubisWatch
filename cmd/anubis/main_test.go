@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -305,9 +306,35 @@ func TestQuickWatch_NoTarget(t *testing.T) {
 }
 
 func TestShowJudgments(t *testing.T) {
-	t.Skip("Skipping - showJudgments may hang waiting for user input")
+	tmpDir := t.TempDir()
+	os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+	defer os.Unsetenv("ANUBIS_DATA_DIR")
+
+	store, err := openLocalStorage()
+	if err != nil {
+		t.Fatalf("Failed to open storage: %v", err)
+	}
+	ctx := context.Background()
+	ws := &core.Workspace{ID: "default", Name: "Default"}
+	store.SaveWorkspace(ctx, ws)
+	store.Close()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
 	showJudgments()
-	t.Log("showJudgments function executed without crashing")
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "The Judgment Never Sleeps") && !strings.Contains(output, "No souls configured") {
+		t.Errorf("Expected showJudgments output, got: %s", output)
+	}
 }
 
 func TestSummonNode_NoArg(t *testing.T) {
@@ -321,9 +348,22 @@ func TestBanishNode_NoArg(t *testing.T) {
 }
 
 func TestShowCluster(t *testing.T) {
-	t.Skip("Skipping - showCluster may hang waiting for API")
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
 	showCluster()
-	t.Log("showCluster function executed without crashing")
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Necropolis") {
+		t.Errorf("Expected necropolis output, got: %s", output)
+	}
 }
 
 func TestSelfHealth(t *testing.T) {
@@ -1156,8 +1196,6 @@ func TestSelfHealth_Details(t *testing.T) {
 
 // Test showCluster details
 func TestShowCluster_Details(t *testing.T) {
-	t.Skip("Skipping - showCluster may hang waiting for API")
-
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -1179,7 +1217,18 @@ func TestShowCluster_Details(t *testing.T) {
 
 // Test showJudgments details
 func TestShowJudgments_Details(t *testing.T) {
-	t.Skip("Skipping - showJudgments hangs waiting for user input")
+	tmpDir := t.TempDir()
+	os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+	defer os.Unsetenv("ANUBIS_DATA_DIR")
+
+	store, err := openLocalStorage()
+	if err != nil {
+		t.Fatalf("Failed to open storage: %v", err)
+	}
+	ctx := context.Background()
+	ws := &core.Workspace{ID: "default", Name: "Default"}
+	store.SaveWorkspace(ctx, ws)
+	store.Close()
 
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -1854,7 +1903,19 @@ func TestHandleLogout_MalformedAuth(t *testing.T) {
 
 // Test main with 'judge' command
 func TestMainCLI_JudgeCommand(t *testing.T) {
-	t.Skip("Skipping - judge command calls main() which may hang")
+	tmpDir := t.TempDir()
+	os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+	defer os.Unsetenv("ANUBIS_DATA_DIR")
+
+	store, err := openLocalStorage()
+	if err != nil {
+		t.Fatalf("Failed to open storage: %v", err)
+	}
+	ctx := context.Background()
+	ws := &core.Workspace{ID: "default", Name: "Default"}
+	store.SaveWorkspace(ctx, ws)
+	store.Close()
+
 	oldArgs := os.Args
 	os.Args = []string{"anubis", "judge"}
 	defer func() { os.Args = oldArgs }()
@@ -1879,7 +1940,6 @@ func TestMainCLI_JudgeCommand(t *testing.T) {
 
 // Test main with 'necropolis' command
 func TestMainCLI_NecropolisCommand(t *testing.T) {
-	t.Skip("Skipping - necropolis command calls main() which may hang")
 	oldArgs := os.Args
 	os.Args = []string{"anubis", "necropolis"}
 	defer func() { os.Args = oldArgs }()
@@ -4043,5 +4103,657 @@ func TestQuickWatch_TargetTypes(t *testing.T) {
 
 	if os.Args[1] != "watch" || os.Args[2] != "tcp://example.com:443" {
 		t.Error("Expected watch command with tcp target")
+	}
+}
+
+func TestMain_UnknownCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Args = []string{"anubis", "unknowncmd"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain_UnknownCommand")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "Unknown command") {
+		t.Errorf("Expected unknown command error, got: %s", string(output))
+	}
+}
+
+func TestMain_Health(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Setenv("ANUBIS_DATA_DIR", t.TempDir())
+		os.Args = []string{"anubis", "health"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain_Health")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "healthy") {
+		t.Errorf("Expected healthy output, got: %s", string(output))
+	}
+}
+
+func TestMain_Version(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Args = []string{"anubis", "version"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain_Version")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "AnubisWatch") {
+		t.Errorf("Expected version output, got: %s", string(output))
+	}
+}
+
+func TestMain_ExportNoArgs(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Setenv("ANUBIS_DATA_DIR", t.TempDir())
+		os.Args = []string{"anubis", "export"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain_ExportNoArgs")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "Export Configuration") {
+		t.Errorf("Expected export header, got: %s", string(output))
+	}
+}
+
+func TestMainCLI_StatusCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Setenv("ANUBIS_DATA_DIR", t.TempDir())
+		os.Args = []string{"anubis", "status"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainCLI_StatusCommand")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "System Status") {
+		t.Errorf("Expected status output, got: %s", string(output))
+	}
+}
+
+func TestMainCLI_LogsCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Setenv("ANUBIS_DATA_DIR", t.TempDir())
+		os.Args = []string{"anubis", "logs"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainCLI_LogsCommand")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "Log file not found") {
+		t.Errorf("Expected logs output, got: %s", string(output))
+	}
+}
+
+func TestMainCLI_ConfigCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "anubis.json")
+		cfg := map[string]interface{}{"server": map[string]interface{}{"port": 8080}}
+		data, _ := json.Marshal(cfg)
+		os.WriteFile(configPath, data, 0644)
+		os.Setenv("ANUBIS_CONFIG", configPath)
+		os.Args = []string{"anubis", "config", "show"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainCLI_ConfigCommand")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "Current Configuration") {
+		t.Errorf("Expected config output, got: %s", string(output))
+	}
+}
+
+func TestMainCLI_SummonCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Setenv("ANUBIS_DATA_DIR", t.TempDir())
+		store, _ := openLocalStorage()
+		store.Close()
+		os.Args = []string{"anubis", "summon", "10.0.0.2:7946"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainCLI_SummonCommand")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "Summoning") {
+		t.Errorf("Expected summon output, got: %s", string(output))
+	}
+}
+
+func TestMainCLI_BanishCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		tmpDir := t.TempDir()
+		os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+		store, _ := openLocalStorage()
+		ctx := context.Background()
+		store.SaveJackal(ctx, "jackal-01", "10.0.0.2:7946", "default")
+		store.Close()
+		os.Args = []string{"anubis", "banish", "jackal-01"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainCLI_BanishCommand")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "Banishing") {
+		t.Errorf("Expected banish output, got: %s", string(output))
+	}
+}
+
+func TestMainCLI_BackupCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Setenv("ANUBIS_DATA_DIR", t.TempDir())
+		store, _ := openLocalStorage()
+		ctx := context.Background()
+		ws := &core.Workspace{ID: "default", Name: "Default"}
+		store.SaveWorkspace(ctx, ws)
+		store.Close()
+		os.Args = []string{"anubis", "backup", "create"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainCLI_BackupCommand")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "Backup created successfully") {
+		t.Errorf("Expected backup output, got: %s", string(output))
+	}
+}
+
+func TestMainCLI_RestoreCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		tmpDir := t.TempDir()
+		os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+		store, _ := openLocalStorage()
+		ctx := context.Background()
+		ws := &core.Workspace{ID: "default", Name: "Default"}
+		store.SaveWorkspace(ctx, ws)
+		store.Close()
+		os.Args = []string{"anubis", "backup", "create", "--output", filepath.Join(tmpDir, "backup.tar.gz")}
+		captureStdoutBackup(backupCreate)
+		os.Args = []string{"anubis", "restore", filepath.Join(tmpDir, "backup.tar.gz"), "--force"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainCLI_RestoreCommand")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "Restore completed successfully") {
+		t.Errorf("Expected restore output, got: %s", string(output))
+	}
+}
+
+func TestMainCLI_ExportCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		tmpDir := t.TempDir()
+		os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+		store, _ := openLocalStorage()
+		ctx := context.Background()
+		ws := &core.Workspace{ID: "default", Name: "Default"}
+		store.SaveWorkspace(ctx, ws)
+		store.Close()
+		os.Args = []string{"anubis", "export", "souls"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainCLI_ExportCommand")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "[") {
+		t.Errorf("Expected export output, got: %s", string(output))
+	}
+}
+
+func TestMainCLI_SoulsCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		tmpDir := t.TempDir()
+		os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+		store, _ := openLocalStorage()
+		ctx := context.Background()
+		ws := &core.Workspace{ID: "default", Name: "Default"}
+		store.SaveWorkspace(ctx, ws)
+		store.Close()
+		os.Args = []string{"anubis", "souls", "export"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainCLI_SoulsCommand")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "[") {
+		t.Errorf("Expected souls output, got: %s", string(output))
+	}
+}
+
+func TestMainCLI_VerdictCommand(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Setenv("ANUBIS_DATA_DIR", t.TempDir())
+		os.Args = []string{"anubis", "verdict"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainCLI_VerdictCommand")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "Verdict Management") {
+		t.Errorf("Expected verdict output, got: %s", string(output))
+	}
+}
+
+
+func TestInitInteractiveWithPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "anubis.json")
+
+	// Provide all default answers: empty lines for defaults
+	inputs := []string{
+		"", // HTTP Server Port
+		"", // Bind Host
+		"", // Enable TLS/HTTPS (false)
+		"", // Admin Email
+		"", // Admin Password (auto-generate)
+		"", // Data Directory
+		"", // Data Retention (days)
+		"", // Enable Encryption (false)
+		"", // Enable Cluster Mode (false)
+		"", // Enable Dashboard (true)
+		"", // Theme (dark)
+		"", // Log Level (info)
+		"", // Log Format (json)
+	}
+
+	oldStdin := os.Stdin
+	r, w, _ := os.Pipe()
+	os.Stdin = r
+	go func() {
+		w.Write([]byte(strings.Join(inputs, "\n") + "\n"))
+		w.Close()
+	}()
+	defer func() { os.Stdin = oldStdin }()
+
+	oldStdout := os.Stdout
+	or, ow, _ := os.Pipe()
+	os.Stdout = ow
+
+	initInteractiveWithPath(configPath)
+
+	ow.Close()
+	os.Stdout = oldStdout
+	io.Copy(io.Discard, or)
+
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		t.Errorf("Expected config file at %s", configPath)
+	}
+}
+
+func TestMain_HealthDirect(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "health"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "healthy") {
+		t.Errorf("Expected health output, got: %s", output)
+	}
+}
+
+func TestMain_BackupDirect(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "backup"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Backup Management") {
+		t.Errorf("Expected backup header, got: %s", output)
+	}
+}
+
+func TestMain_SoulsDirect(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "souls"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Souls Management") {
+		t.Errorf("Expected souls header, got: %s", output)
+	}
+}
+
+func TestMain_VerdictDirect(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "verdict"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Verdict Management") {
+		t.Errorf("Expected verdict header, got: %s", output)
+	}
+}
+
+func TestMain_ExportDirect(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "export"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Export Configuration") {
+		t.Errorf("Expected export header, got: %s", output)
+	}
+}
+
+func TestMain_LogsDirect(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "logs"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "AnubisWatch Logs") {
+		t.Errorf("Expected logs header, got: %s", output)
+	}
+}
+
+func TestMain_ConfigDirect(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "config"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Configuration Management") {
+		t.Errorf("Expected config header, got: %s", output)
+	}
+}
+
+func TestMain_StatusDirect(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+	defer os.Unsetenv("ANUBIS_DATA_DIR")
+
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "status"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "System Status") && !strings.Contains(output, "AnubisWatch System Status") {
+		t.Errorf("Expected status output, got: %s", output)
+	}
+}
+
+func TestMain_NecropolisDirect(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "necropolis"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Necropolis") {
+		t.Errorf("Expected necropolis output, got: %s", output)
+	}
+}
+
+func TestMain_JudgeDirect(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+	defer os.Unsetenv("ANUBIS_DATA_DIR")
+
+	store, err := openLocalStorage()
+	if err != nil {
+		t.Fatalf("Failed to open storage: %v", err)
+	}
+	ctx := context.Background()
+	ws := &core.Workspace{ID: "default", Name: "Default"}
+	store.SaveWorkspace(ctx, ws)
+	store.Close()
+
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "judge"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "The Judgment Never Sleeps") && !strings.Contains(output, "No souls configured") {
+		t.Errorf("Expected judge output, got: %s", output)
+	}
+}
+
+func TestMain_InitHelpDirect(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "init", "--help"}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Usage: anubis init") {
+		t.Errorf("Expected init help, got: %s", output)
+	}
+}
+
+func TestMain_InitUserLocationDirect(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "anubis.json")
+
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "init", "--location", "user", "--output", configPath}
+	defer func() { os.Args = oldArgs }()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	main()
+
+	w.Close()
+	os.Stdout = oldStdout
+	io.Copy(io.Discard, r)
+
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		t.Errorf("Expected config file at %s", configPath)
+	}
+}
+
+func TestMain_ServeInvalidConfig(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "bad.json")
+		os.WriteFile(configPath, []byte("not valid json"), 0644)
+		os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+		os.Args = []string{"anubis", "serve", "--config", configPath}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain_ServeInvalidConfig")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	combined := string(output)
+	if !strings.Contains(combined, "failed to load config") && !strings.Contains(combined, "failed to build server dependencies") && !strings.Contains(combined, "failed to start") {
+		t.Errorf("Expected server error, got: %s", combined)
+	}
+}
+
+func TestMain_InitExistingConfig(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "anubis.json")
+		os.WriteFile(configPath, []byte("{}"), 0644)
+		os.Args = []string{"anubis", "init", "--output", configPath}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain_InitExistingConfig")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "already exists") {
+		t.Errorf("Expected already exists error, got: %s", string(output))
 	}
 }

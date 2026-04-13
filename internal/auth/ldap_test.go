@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"time"
 	"testing"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
@@ -190,5 +191,55 @@ func TestLDAPAuthenticator_GetUsers(t *testing.T) {
 	users := auth.GetUsers()
 	if len(users) < 3 {
 		t.Errorf("Expected at least 3 users, got %d", len(users))
+	}
+}
+
+func TestLDAPAuthenticator_Authenticate_ExpiredToken(t *testing.T) {
+	cfg := core.LDAPAuth{
+		URL:    "ldap://example.com",
+		BaseDN: "dc=example,dc=com",
+	}
+
+	auth := NewLDAPAuthenticator(cfg, "", "admin@test.com", "admin123")
+	defer auth.Shutdown()
+
+	user := auth.AddUser("user@example.com", "Test User", "viewer")
+
+	// Manually inject an expired session
+	token := "expired-token-123"
+	auth.mu.Lock()
+	auth.tokens[token] = &session{
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(-1 * time.Hour),
+	}
+	auth.mu.Unlock()
+
+	_, err := auth.Authenticate(token)
+	if err == nil {
+		t.Error("Expected error for expired token")
+	}
+}
+
+func TestLDAPAuthenticator_Authenticate_MissingUser(t *testing.T) {
+	cfg := core.LDAPAuth{
+		URL:    "ldap://example.com",
+		BaseDN: "dc=example,dc=com",
+	}
+
+	auth := NewLDAPAuthenticator(cfg, "", "admin@test.com", "admin123")
+	defer auth.Shutdown()
+
+	// Manually inject a session pointing to a non-existent user
+	token := "orphan-token-123"
+	auth.mu.Lock()
+	auth.tokens[token] = &session{
+		UserID:    "nonexistent-user-id",
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+	auth.mu.Unlock()
+
+	_, err := auth.Authenticate(token)
+	if err == nil {
+		t.Error("Expected error for missing user")
 	}
 }

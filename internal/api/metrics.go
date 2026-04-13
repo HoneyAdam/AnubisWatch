@@ -218,7 +218,7 @@ func (s *RESTServer) buildClusterMetrics() string {
 			out += fmt.Sprintf("anubis_raft_commit_index %d\n", status.CommitIndex)
 
 			out += "# HELP anubis_cluster_is_clustered Whether this node is in cluster mode\n"
-			out += "# TYPE anubis_cluster_is_clusterd gauge\n"
+			out += "# TYPE anubis_cluster_is_clustered gauge\n"
 			clustered := 0
 			if status.IsClustered {
 				clustered = 1

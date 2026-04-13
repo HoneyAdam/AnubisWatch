@@ -702,18 +702,30 @@ type clusterAdapter struct {
 }
 
 func (a *clusterAdapter) IsLeader() bool {
+	if a.mgr == nil {
+		return false
+	}
 	return a.mgr.IsLeader()
 }
 
 func (a *clusterAdapter) Leader() string {
+	if a.mgr == nil {
+		return ""
+	}
 	return a.mgr.Leader()
 }
 
 func (a *clusterAdapter) IsClustered() bool {
+	if a.mgr == nil {
+		return false
+	}
 	return a.mgr.IsClustered()
 }
 
 func (a *clusterAdapter) GetStatus() *api.ClusterStatus {
+	if a.mgr == nil {
+		return &api.ClusterStatus{IsClustered: false, NodeID: "standalone", State: "standalone"}
+	}
 	cs := a.mgr.GetStatus()
 	if cs == nil {
 		return &api.ClusterStatus{IsClustered: false, NodeID: "standalone", State: "standalone"}

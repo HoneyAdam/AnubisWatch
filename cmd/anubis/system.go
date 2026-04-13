@@ -194,7 +194,7 @@ func exportCommand() {
 	case "config":
 		// Try to find and export config
 		configPath := findConfig()
-		if configPath == "" {
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "No configuration file found\n")
 			os.Exit(1)
 		}
@@ -315,7 +315,7 @@ func configCommand() {
 	switch subcmd {
 	case "validate":
 		configPath := findConfig()
-		if configPath == "" {
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
 			fmt.Println("✗ No configuration file found")
 			fmt.Println()
 			fmt.Println("Create one with: anubis init")
@@ -348,7 +348,7 @@ func configCommand() {
 
 	case "show":
 		configPath := findConfig()
-		if configPath == "" {
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
 			fmt.Println("No configuration file found")
 			fmt.Println()
 			fmt.Println("Create one with: anubis init")

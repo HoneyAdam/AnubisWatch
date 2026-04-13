@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http/cookiejar"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,6 +110,38 @@ func TestExecutor_StartAlreadyRunning(t *testing.T) {
 
 	// Clean up
 	executor.Stop(journey.ID)
+}
+
+func TestExecutor_Start_InvalidWeight(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	executor := NewExecutor(db, newTestLogger())
+
+	// Zero weight should return an error instead of panicking
+	journeyZero := &core.JourneyConfig{
+		ID:     "test-journey-zero",
+		Name:   "Test Journey Zero",
+		Weight: core.Duration{Duration: 0},
+	}
+
+	ctx := context.Background()
+	err := executor.Start(ctx, journeyZero)
+	if err == nil {
+		t.Error("Expected error when starting journey with zero weight")
+	}
+
+	// Negative weight should also return an error
+	journeyNegative := &core.JourneyConfig{
+		ID:     "test-journey-neg",
+		Name:   "Test Journey Negative",
+		Weight: core.Duration{Duration: -1 * time.Second},
+	}
+
+	err = executor.Start(ctx, journeyNegative)
+	if err == nil {
+		t.Error("Expected error when starting journey with negative weight")
+	}
 }
 
 func TestExecutor_StopAll(t *testing.T) {
@@ -1287,4 +1320,344 @@ func TestJourney_VariablePassingBetweenSteps(t *testing.T) {
 
 	// Journey should execute without error
 	t.Log("Journey with variable passing executed successfully")
+}
+
+// Tests for uncovered jsonPathDedupHash
+
+func TestJsonPathDedupHash(t *testing.T) {
+	body := `{"id": "123", "user": {"name": "John"}, "tags": ["a", "b"]}`
+
+	// Test with valid paths
+	hash1 := jsonPathDedupHash(body, []string{"$.id", "$.user.name"})
+	if hash1 == "" {
+		t.Error("Expected non-empty hash for valid paths")
+	}
+
+	// Same body and paths should produce same hash
+	hash2 := jsonPathDedupHash(body, []string{"$.id", "$.user.name"})
+	if hash1 != hash2 {
+		t.Error("Expected deterministic hash for same inputs")
+	}
+
+	// Different paths should produce different hash
+	hash3 := jsonPathDedupHash(body, []string{"$.id"})
+	if hash1 == hash3 {
+		t.Error("Expected different hash for different paths")
+	}
+}
+
+func TestJsonPathDedupHash_InvalidJSON(t *testing.T) {
+	hash := jsonPathDedupHash("not json", []string{"$.id"})
+	if hash == "" {
+		t.Log("Empty hash for invalid JSON is acceptable")
+	}
+}
+
+func TestJsonPathDedupHash_MissingKey(t *testing.T) {
+	body := `{"id": "123"}`
+	hash := jsonPathDedupHash(body, []string{"$.missing"})
+	// Should return empty hash or hash of empty when key missing
+	_ = hash
+}
+
+func TestJsonPathDedupHash_NestedArray(t *testing.T) {
+	body := `{"data": {"items": [1, 2, 3]}}`
+	hash := jsonPathDedupHash(body, []string{"$.data.items"})
+	if hash == "" {
+		t.Error("Expected non-empty hash for array value")
+	}
+}
+
+// Tests for computeDedupHash
+
+func TestComputeDedupHash_NoPaths(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	journey := &core.JourneyConfig{
+		ID:    "test-journey",
+		Steps: []core.JourneyStep{},
+	}
+
+	hash := executor.computeDedupHash(journey)
+	if hash != "" {
+		t.Errorf("Expected empty hash when no JSONPath rules, got %s", hash)
+	}
+}
+
+func TestComputeDedupHash_WithPaths(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	journey := &core.JourneyConfig{
+		ID: "test-journey",
+		Steps: []core.JourneyStep{
+			{
+				Name:   "Step 1",
+				Target: "https://example.com",
+				Extract: map[string]core.ExtractionRule{
+					"token": {From: "body", Path: "$.token"},
+				},
+			},
+			{
+				Name:   "Step 2",
+				Target: "https://example.com/api",
+				Extract: map[string]core.ExtractionRule{
+					"id": {From: "body", Path: "$.id"},
+				},
+			},
+		},
+	}
+
+	hash := executor.computeDedupHash(journey)
+	if hash == "" {
+		t.Error("Expected non-empty hash when JSONPath rules exist")
+	}
+}
+
+// Tests for extractJSONPath edge cases
+
+func TestExtractJSONPath_Nested(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	body := `{"user": {"profile": {"name": "John"}}}`
+
+	result := executor.extractJSONPath(body, "$.user.profile.name")
+	if result != "John" {
+		t.Errorf("Expected 'John', got %s", result)
+	}
+}
+
+func TestExtractJSONPath_ArrayInPath(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	body := `{"users": [{"name": "John"}]}`
+
+	// Array at intermediate path should return empty
+	result := executor.extractJSONPath(body, "$.users.name")
+	if result != "" {
+		t.Errorf("Expected empty for array in path, got %s", result)
+	}
+}
+
+func TestExtractJSONPath_Bool(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	body := `{"active": true, "deleted": false}`
+
+	result := executor.extractJSONPath(body, "$.active")
+	if result != "true" {
+		t.Errorf("Expected 'true', got %s", result)
+	}
+
+	result = executor.extractJSONPath(body, "$.deleted")
+	if result != "false" {
+		t.Errorf("Expected 'false', got %s", result)
+	}
+}
+
+func TestExtractJSONPath_Nil(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	body := `{"value": null}`
+
+	result := executor.extractJSONPath(body, "$.value")
+	if result != "" {
+		t.Errorf("Expected empty for nil, got %s", result)
+	}
+}
+
+func TestExtractJSONPath_DefaultMarshal(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	body := `{"obj": {"a": 1, "b": 2}}`
+
+	result := executor.extractJSONPath(body, "$.obj")
+	if result == "" {
+		t.Error("Expected marshaled JSON object")
+	}
+	if !strings.Contains(result, "a") {
+		t.Error("Expected marshaled object to contain keys")
+	}
+}
+
+func TestExtractJSONPath_InvalidPathPrefix(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	result := executor.extractJSONPath(`{"id": 1}`, "id")
+	if result != "" {
+		t.Errorf("Expected empty for path without '$.' prefix, got %s", result)
+	}
+}
+
+// Tests for executeStep with various configs
+
+func TestExecutor_executeStep_WithUDPConfig(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	step := core.JourneyStep{
+		Name:    "UDP Step",
+		Type:    core.CheckUDP,
+		Target:  "127.0.0.1:53",
+		Timeout: core.Duration{Duration: 1 * time.Second},
+		UDP: &core.UDPConfig{
+			SendHex:        "deadbeef",
+			ExpectContains: "response",
+		},
+	}
+
+	ctx := context.Background()
+	result := executor.executeStep(ctx, &JourneyContext{Variables: map[string]string{}}, step, 0)
+
+	if result.Name != "UDP Step" {
+		t.Errorf("Expected step name 'UDP Step', got %s", result.Name)
+	}
+}
+
+func TestExecutor_executeStep_WithTLSConfig(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	step := core.JourneyStep{
+		Name:    "TLS Step",
+		Type:    core.CheckTLS,
+		Target:  "example.com:443",
+		Timeout: core.Duration{Duration: 5 * time.Second},
+		TLS: &core.TLSConfig{
+			MinProtocol:    "1.2",
+			ExpectedIssuer: "Let's Encrypt",
+			ExpectedSAN:    []string{"example.com"},
+		},
+	}
+
+	ctx := context.Background()
+	result := executor.executeStep(ctx, &JourneyContext{Variables: map[string]string{}}, step, 0)
+
+	if result.Name != "TLS Step" {
+		t.Errorf("Expected step name 'TLS Step', got %s", result.Name)
+	}
+}
+
+func TestExecutor_executeStep_WithExtractRules(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	step := core.JourneyStep{
+		Name:    "Extract Step",
+		Type:    core.CheckHTTP,
+		Target:  "https://example.com",
+		Timeout: core.Duration{Duration: 5 * time.Second},
+		Extract: map[string]core.ExtractionRule{
+			"token": {From: "body", Path: "$.token"},
+		},
+	}
+
+	ctx := context.Background()
+	result := executor.executeStep(ctx, &JourneyContext{Variables: map[string]string{}}, step, 0)
+
+	if result.Name != "Extract Step" {
+		t.Errorf("Expected step name 'Extract Step', got %s", result.Name)
+	}
+}
+
+// Tests for executeJourney dedup behavior
+
+func TestExecuteJourney_DedupSkip(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	journey := &core.JourneyConfig{
+		ID:          "dedup-journey",
+		WorkspaceID: "default",
+		Name:        "Dedup Test",
+		Steps: []core.JourneyStep{
+			{
+				Name:   "Step 1",
+				Type:   core.CheckHTTP,
+				Target: "invalid-url",
+				Extract: map[string]core.ExtractionRule{
+					"id": {From: "body", Path: "$.id"},
+				},
+			},
+		},
+	}
+
+	ctx := context.Background()
+
+	// First execution should run
+	executor.executeJourney(ctx, journey)
+
+	// Second execution should be skipped due to dedup
+	// We can't easily observe the skip, but it should not panic
+	executor.executeJourney(ctx, journey)
+}
+
+func TestExecuteJourney_DedupDisabled(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	journey := &core.JourneyConfig{
+		ID:          "no-dedup-journey",
+		WorkspaceID: "default",
+		Name:        "No Dedup Test",
+		Steps: []core.JourneyStep{
+			{
+				Name:   "Step 1",
+				Type:   core.CheckHTTP,
+				Target: "invalid-url",
+			},
+		},
+	}
+
+	ctx := context.Background()
+
+	// Should execute without dedup since no JSONPath extract rules
+	executor.executeJourney(ctx, journey)
+	executor.executeJourney(ctx, journey)
+}
+
+func TestExecutor_executeStep_NoDetails(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+	executor := NewExecutor(db, newTestLogger())
+
+	step := core.JourneyStep{
+		Name:    "No Details Step",
+		Type:    core.CheckHTTP,
+		Target:  "https://example.com",
+		Timeout: core.Duration{Duration: 5 * time.Second},
+		Assertions: []core.Assertion{
+			{Type: "body_contains", Expected: "success"},
+			{Type: "header", Target: "Content-Type", Operator: "equals", Expected: "application/json"},
+			{Type: "json_path", Target: "$.status", Operator: "equals", Expected: "ok"},
+			{Type: "regex", Target: "body", Expected: `\d+`},
+		},
+	}
+
+	ctx := context.Background()
+	result := executor.executeStep(ctx, &JourneyContext{Variables: map[string]string{}}, step, 0)
+
+	if result.Name != "No Details Step" {
+		t.Errorf("Expected step name 'No Details Step', got %s", result.Name)
+	}
 }

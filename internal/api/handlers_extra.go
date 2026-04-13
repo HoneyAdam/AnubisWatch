@@ -362,8 +362,13 @@ func (s *RESTServer) queryJudgments(q core.WidgetQuery) (interface{}, error) {
 func (s *RESTServer) queryStats(q core.WidgetQuery) (interface{}, error) {
 	souls, _ := s.store.ListSoulsNoCtx("", 0, 1000)
 
-	// Get recent judgments to determine status distribution
-	judgments, _ := s.store.ListJudgmentsNoCtx("", time.Now().Add(-24*time.Hour), time.Now(), 1000)
+	// Get recent judgments for all souls to determine status distribution
+	var judgments []*core.Judgment
+	for _, soul := range souls {
+		js, _ := s.store.ListJudgmentsNoCtx(soul.ID, time.Now().Add(-24*time.Hour), time.Now(), 100)
+		judgments = append(judgments, js...)
+	}
+
 	alive := 0
 	dead := 0
 	degraded := 0

@@ -176,7 +176,13 @@ func (a *LocalAuthenticator) cleanupExpiredSessions() {
 
 // Shutdown gracefully stops the authenticator
 func (a *LocalAuthenticator) Shutdown() {
-	close(a.stopCleanup)
+	select {
+	case <-a.stopCleanup:
+		// Already shutting down
+		return
+	default:
+		close(a.stopCleanup)
+	}
 	<-a.cleanupDone
 }
 

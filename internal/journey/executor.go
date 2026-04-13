@@ -64,6 +64,11 @@ func (e *Executor) Start(ctx context.Context, journey *core.JourneyConfig) error
 		return fmt.Errorf("journey %s is already running", journey.ID)
 	}
 
+	// Validate interval
+	if journey.Weight.Duration <= 0 {
+		return fmt.Errorf("journey %s has invalid weight interval: %v", journey.ID, journey.Weight.Duration)
+	}
+
 	// Create context for this journey
 	journeyCtx, cancel := context.WithCancel(ctx)
 	e.running[journey.ID] = cancel

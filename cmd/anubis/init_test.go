@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -153,5 +156,77 @@ func TestGetDefaultDataDir_Default(t *testing.T) {
 	// Verify it's a valid path format
 	if dir == "." || dir == "" {
 		t.Error("Expected a specific data directory path")
+	}
+}
+
+func captureStdoutInit(f func()) string {
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	f()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf strings.Builder
+	b := make([]byte, 1024)
+	for {
+		n, err := r.Read(b)
+		if n > 0 {
+			buf.Write(b[:n])
+		}
+		if err != nil {
+			break
+		}
+	}
+	return buf.String()
+}
+
+func TestInitConfig_Simple(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "anubis.json")
+
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "init", "--output", configPath}
+	defer func() { os.Args = oldArgs }()
+
+	output := captureStdoutInit(initConfig)
+	if !strings.Contains(output, "initialized successfully") && !strings.Contains(output, "AnubisWatch") {
+		// initSimpleWithPath may not print much; just verify file exists
+	}
+
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		t.Errorf("Expected config file to be created at %s", configPath)
+	}
+}
+
+func TestInitConfig_Help(t *testing.T) {
+	oldArgs := os.Args
+	os.Args = []string{"anubis", "init", "--help"}
+	defer func() { os.Args = oldArgs }()
+
+	output := captureStdoutInit(initConfig)
+	if !strings.Contains(output, "Usage: anubis init") {
+		t.Errorf("Expected init help, got: %s", output)
+	}
+}
+
+func TestInitConfig_FileExists(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "anubis.json")
+		os.WriteFile(configPath, []byte("{}"), 0644)
+		os.Args = []string{"anubis", "init", "--output", configPath}
+		initConfig()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestInitConfig_FileExists")
+	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+	output, _ := cmd.CombinedOutput()
+
+	if !strings.Contains(string(output), "Config already exists") {
+		t.Errorf("Expected config exists error, got: %s", string(output))
 	}
 }

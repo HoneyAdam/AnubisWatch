@@ -513,3 +513,162 @@ func TestHandleMetrics_Integration(t *testing.T) {
 		t.Error("Expected anubis_cluster_leader in output")
 	}
 }
+
+// TestStatusNumeric tests statusNumeric mapping
+func TestStatusNumeric(t *testing.T) {
+	tests := []struct {
+		status core.SoulStatus
+		want   int
+	}{
+		{core.SoulAlive, 1},
+		{core.SoulDead, 0},
+		{core.SoulDegraded, 2},
+		{core.SoulEmbalmed, 4},
+		{core.SoulStatus("unknown"), 3},
+		{core.SoulStatus(""), 3},
+	}
+	for _, tt := range tests {
+		got := statusNumeric(tt.status)
+		if got != tt.want {
+			t.Errorf("statusNumeric(%q) = %d, want %d", tt.status, got, tt.want)
+		}
+	}
+}
+
+// TestComputeUptimeRatio tests computeUptimeRatio
+func TestComputeUptimeRatio(t *testing.T) {
+	tests := []struct {
+		name       string
+		judgments  []*core.Judgment
+		want       float64
+	}{
+		{
+			name:      "empty",
+			judgments: []*core.Judgment{},
+			want:      -1,
+		},
+		{
+			name: "all healthy",
+			judgments: []*core.Judgment{
+				{Status: core.SoulAlive},
+				{Status: core.SoulAlive},
+				{Status: core.SoulDegraded},
+			},
+			want: 1.0,
+		},
+		{
+			name: "all dead",
+			judgments: []*core.Judgment{
+				{Status: core.SoulDead},
+				{Status: core.SoulDead},
+			},
+			want: 0.0,
+		},
+		{
+			name: "mixed",
+			judgments: []*core.Judgment{
+				{Status: core.SoulAlive},
+				{Status: core.SoulDead},
+				{Status: core.SoulDegraded},
+				{Status: core.SoulDead},
+			},
+			want: 0.5,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := computeUptimeRatio(tt.judgments)
+			if got != tt.want {
+				t.Errorf("computeUptimeRatio() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPercentile tests percentile calculation
+func TestPercentile(t *testing.T) {
+	tests := []struct {
+		name     string
+		values   []float64
+		p        float64
+		expected float64
+	}{
+		{"empty", []float64{}, 50, 0},
+		{"single", []float64{5}, 50, 5},
+		{"two values p50", []float64{1, 3}, 50, 2},
+		{"three values p50", []float64{1, 2, 3}, 50, 2},
+		{"p0 min", []float64{1, 2, 3, 4, 5}, 0, 1},
+		{"p100 max", []float64{1, 2, 3, 4, 5}, 100, 5},
+		{"p25", []float64{1, 2, 3, 4}, 25, 1.75},
+		{"p75", []float64{1, 2, 3, 4}, 75, 3.25},
+		{"p99", []float64{1, 2, 3, 4, 100}, 99, 96.16},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := percentile(tt.values, tt.p)
+			if got != tt.expected {
+				t.Errorf("percentile(%v, %v) = %v, want %v", tt.values, tt.p, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestAverage tests average calculation
+func TestAverage(t *testing.T) {
+	tests := []struct {
+		name     string
+		values   []float64
+		expected float64
+	}{
+		{"empty", []float64{}, 0},
+		{"single", []float64{5}, 5},
+		{"two values", []float64{1, 3}, 2},
+		{"negative", []float64{-1, 1}, 0},
+		{"decimals", []float64{1.5, 2.5, 3.0}, 2.3333333333333335},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := average(tt.values)
+			if got != tt.expected {
+				t.Errorf("average(%v) = %v, want %v", tt.values, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestBuildLatencyMetrics tests buildLatencyMetrics with actual data
+func TestBuildLatencyMetrics(t *testing.T) {
+	store := newMockStorage()
+	now := time.Now()
+	store.SaveSoul(context.Background(), &core.Soul{ID: "soul-1", Name: "Test Soul"})
+	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j1", SoulID: "soul-1", Duration: 100 * time.Millisecond, Timestamp: now.Add(-1 * time.Hour)})
+	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j2", SoulID: "soul-1", Duration: 200 * time.Millisecond, Timestamp: now.Add(-2 * time.Hour)})
+	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j3", SoulID: "soul-1", Duration: 300 * time.Millisecond, Timestamp: now.Add(-3 * time.Hour)})
+
+	config := core.ServerConfig{Port: 8080}
+	logger := newTestLogger()
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, store, &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+
+	result := server.buildLatencyMetrics()
+	if result == "" {
+		t.Fatal("Expected non-empty latency metrics")
+	}
+	if !strings.Contains(result, "anubis_latency_p50_seconds") {
+		t.Error("Expected anubis_latency_p50_seconds in output")
+	}
+	if !strings.Contains(result, "anubis_latency_avg_seconds") {
+		t.Error("Expected anubis_latency_avg_seconds in output")
+	}
+}
+
+// TestBuildLatencyMetrics_Empty tests buildLatencyMetrics with no souls
+func TestBuildLatencyMetrics_Empty(t *testing.T) {
+	config := core.ServerConfig{Port: 8080}
+	logger := newTestLogger()
+	server := NewRESTServer(config, core.AuthConfig{Enabled: core.BoolPtr(true)}, newMockStorage(), &mockProbeEngine{}, &mockAlertManager{}, &mockAuthenticator{}, &mockClusterManager{}, nil, nil, nil, nil, logger)
+
+	result := server.buildLatencyMetrics()
+	if result != "" {
+		t.Errorf("Expected empty result for no souls, got: %s", result)
+	}
+}

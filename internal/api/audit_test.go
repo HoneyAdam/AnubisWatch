@@ -222,8 +222,13 @@ func TestUserFromContext_NoUser(t *testing.T) {
 }
 
 func TestUserFromContext_NilContext(t *testing.T) {
-	// Skip nil context test - it causes panic
-	t.Skip("Skipping nil context test - function doesn't handle nil")
+	user, ok := UserFromContext(nil)
+	if user != nil {
+		t.Error("Expected nil user from nil context")
+	}
+	if ok {
+		t.Error("Expected ok to be false for nil context")
+	}
 }
 
 func TestConstantTimeCompare(t *testing.T) {
