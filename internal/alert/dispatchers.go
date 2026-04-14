@@ -130,8 +130,14 @@ func (d *SlackDispatcher) Send(ctx context.Context, event *core.AlertEvent, chan
 
 // Validate validates Slack configuration
 func (d *SlackDispatcher) Validate(config map[string]any) error {
-	if _, ok := config["webhook_url"]; !ok {
+	webhookURL, ok := config["webhook_url"]
+	if !ok {
 		return fmt.Errorf("webhook_url is required")
+	}
+	if s, ok := webhookURL.(string); ok {
+		if err := probe.ValidateTarget(s); err != nil {
+			return fmt.Errorf("webhook_url SSRF validation failed: %w", err)
+		}
 	}
 	return nil
 }
@@ -266,8 +272,14 @@ func (d *DiscordDispatcher) Send(ctx context.Context, event *core.AlertEvent, ch
 
 // Validate validates Discord configuration
 func (d *DiscordDispatcher) Validate(config map[string]any) error {
-	if _, ok := config["webhook_url"]; !ok {
+	webhookURL, ok := config["webhook_url"]
+	if !ok {
 		return fmt.Errorf("webhook_url is required")
+	}
+	if s, ok := webhookURL.(string); ok {
+		if err := probe.ValidateTarget(s); err != nil {
+			return fmt.Errorf("webhook_url SSRF validation failed: %w", err)
+		}
 	}
 	return nil
 }
@@ -706,6 +718,14 @@ func (d *NtfyDispatcher) Send(ctx context.Context, event *core.AlertEvent, chann
 
 // Validate validates Ntfy configuration
 func (d *NtfyDispatcher) Validate(config map[string]any) error {
+	server, ok := config["server"]
+	if ok {
+		if s, ok := server.(string); ok && s != "" {
+			if err := probe.ValidateTarget(s); err != nil {
+				return fmt.Errorf("server SSRF validation failed: %w", err)
+			}
+		}
+	}
 	if _, ok := config["topic"]; !ok {
 		return fmt.Errorf("topic is required")
 	}
