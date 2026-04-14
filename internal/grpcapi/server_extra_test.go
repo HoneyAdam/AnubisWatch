@@ -10,6 +10,8 @@ import (
 	v1 "github.com/AnubisWatch/anubiswatch/internal/grpcapi/v1"
 )
 
+// testUserContext is imported from server_test.go - but since it's in the same package, we can use it directly.
+
 // failingMockGRPCStore wraps mockGRPCStore and can return errors
 type failingMockGRPCStore struct {
 	*mockGRPCStore
@@ -140,7 +142,7 @@ func TestServer_GetJourneyRun_NotFound(t *testing.T) {
 	store := newMockGRPCStore()
 	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
-	_, err := srv.GetJourneyRun(context.Background(), &v1.GetJourneyRunRequest{
+	_, err := srv.GetJourneyRun(testUserContext(), &v1.GetJourneyRunRequest{
 		JourneyId: "missing",
 		RunId:     "missing",
 	})
@@ -153,7 +155,7 @@ func TestServer_GetJourneyRun_StorageError(t *testing.T) {
 	store := &failingMockGRPCStore{mockGRPCStore: newMockGRPCStore(), getJourneyRunErr: true}
 	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
-	_, err := srv.GetJourneyRun(context.Background(), &v1.GetJourneyRunRequest{
+	_, err := srv.GetJourneyRun(testUserContext(), &v1.GetJourneyRunRequest{
 		JourneyId: "j1",
 		RunId:     "r1",
 	})
@@ -166,7 +168,7 @@ func TestServer_ListSouls_StoreError(t *testing.T) {
 	store := &failingMockGRPCStore{mockGRPCStore: newMockGRPCStore(), listSoulsErr: true}
 	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
-	_, err := srv.ListSouls(context.Background(), &v1.ListSoulsRequest{})
+	_, err := srv.ListSouls(testUserContext(), &v1.ListSoulsRequest{})
 	if err == nil {
 		t.Error("Expected error for storage failure")
 	}
@@ -179,7 +181,7 @@ func TestServer_ListSouls_PaginationHasMore(t *testing.T) {
 	}
 	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
-	resp, err := srv.ListSouls(context.Background(), &v1.ListSoulsRequest{Limit: 3})
+	resp, err := srv.ListSouls(testUserContext(), &v1.ListSoulsRequest{Limit: 3})
 	if err != nil {
 		t.Fatalf("ListSouls failed: %v", err)
 	}

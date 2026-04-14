@@ -19,6 +19,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/AnubisWatch/anubiswatch/internal/api"
+	"github.com/AnubisWatch/anubiswatch/internal/core"
 	v1 "github.com/AnubisWatch/anubiswatch/internal/grpcapi/v1"
 )
 
@@ -474,9 +475,14 @@ func (s *Server) ListSouls(ctx context.Context, req *v1.ListSoulsRequest) (*v1.L
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	workspace := "default"
-	if req.Workspace != nil {
-		workspace = *req.Workspace
+	// Use authenticated user's workspace, not client-supplied
+	user, ok := GetUserFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+	workspace := user.Workspace
+	if workspace == "" {
+		workspace = "default"
 	}
 
 	limit := int(req.Limit)
@@ -519,9 +525,18 @@ func (s *Server) GetSoul(ctx context.Context, req *v1.GetSoulRequest) (*v1.Soul,
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	// Verify authenticated user has access to this soul's workspace
+	user, ok := GetUserFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
 	soul, err := s.store.GetSoulNoCtx(req.Id)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "soul not found: %s", req.Id)
+	}
+	if s, ok := soul.(*core.Soul); ok && s.WorkspaceID != "" && s.WorkspaceID != user.Workspace {
+		return nil, status.Error(codes.PermissionDenied, "access denied: soul belongs to another workspace")
 	}
 	if pb := soulToPB(soul); pb != nil {
 		return pb, nil
@@ -533,15 +548,23 @@ func (s *Server) CreateSoul(ctx context.Context, req *v1.CreateSoulRequest) (*v1
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Store expects a core.Soul; we pass the request as-is and let the adapter handle conversion
-	// For now, use a simple approach: store the raw config map
+	// Use authenticated user's workspace
+	user, ok := GetUserFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
 	soulData := pbToSoulConfig(req)
+	soulData["workspace_id"] = user.Workspace
+	if soulData["workspace_id"] == "" {
+		soulData["workspace_id"] = "default"
+	}
 	if err := s.store.SaveSoulNoCtx(soulData); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create soul: %v", err)
 	}
 
 	// Return the created soul
-	souls, _ := s.store.ListSoulsNoCtx("default", 0, 1)
+	souls, _ := s.store.ListSoulsNoCtx(user.Workspace, 0, 1)
 	if len(souls) > 0 {
 		if pb := soulToPB(souls[0]); pb != nil {
 			return pb, nil
@@ -554,10 +577,19 @@ func (s *Server) UpdateSoul(ctx context.Context, req *v1.UpdateSoulRequest) (*v1
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Verify authenticated user has access to this soul's workspace
+	user, ok := GetUserFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+
 	// Get existing soul first
 	existing, err := s.store.GetSoulNoCtx(req.Id)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "soul not found: %s", req.Id)
+	}
+	if s, ok := existing.(*core.Soul); ok && s.WorkspaceID != "" && s.WorkspaceID != user.Workspace {
+		return nil, status.Error(codes.PermissionDenied, "access denied: soul belongs to another workspace")
 	}
 
 	// Build updated config
@@ -604,6 +636,19 @@ func (s *Server) UpdateSoul(ctx context.Context, req *v1.UpdateSoulRequest) (*v1
 func (s *Server) DeleteSoul(ctx context.Context, req *v1.DeleteSoulRequest) (*emptypb.Empty, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Verify authenticated user has access to this soul's workspace
+	user, ok := GetUserFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+	existing, err := s.store.GetSoulNoCtx(req.Id)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "soul not found: %s", req.Id)
+	}
+	if s, ok := existing.(*core.Soul); ok && s.WorkspaceID != "" && s.WorkspaceID != user.Workspace {
+		return nil, status.Error(codes.PermissionDenied, "access denied: soul belongs to another workspace")
+	}
 	if err := s.store.DeleteSoulNoCtx(req.Id); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete soul: %v", err)
 	}
@@ -759,10 +804,11 @@ func (s *Server) ListChannels(ctx context.Context, req *v1.ListChannelsRequest) 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	workspace := ""
-	if req.Workspace != nil {
-		workspace = *req.Workspace
+	user, ok := GetUserFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
 	}
+	workspace := user.Workspace
 
 	channels, err := s.store.ListChannelsNoCtx(workspace)
 	if err != nil {
@@ -889,10 +935,11 @@ func (s *Server) ListRules(ctx context.Context, req *v1.ListRulesRequest) (*v1.L
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	workspace := ""
-	if req.Workspace != nil {
-		workspace = *req.Workspace
+	user, ok := GetUserFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
 	}
+	workspace := user.Workspace
 
 	rules, err := s.store.ListRulesNoCtx(workspace)
 	if err != nil {
@@ -992,10 +1039,11 @@ func (s *Server) ListJourneys(ctx context.Context, req *v1.ListJourneysRequest) 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	workspace := ""
-	if req.Workspace != nil {
-		workspace = *req.Workspace
+	user, ok := GetUserFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
 	}
+	workspace := user.Workspace
 
 	limit := int(req.Limit)
 	if limit == 0 {
