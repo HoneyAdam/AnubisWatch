@@ -1525,12 +1525,15 @@ func (s *RESTServer) corsMiddleware(handler Handler) Handler {
 
 // getAllowedOrigins returns the list of allowed CORS origins
 func (s *RESTServer) getAllowedOrigins() []string {
-	// TODO: Make this configurable via config file
-	// For now, check environment variable
+	// Priority 1: Config file settings (MED-18)
+	if len(s.config.AllowedOrigins) > 0 {
+		return s.config.AllowedOrigins
+	}
+	// Priority 2: Environment variable
 	if allowed := os.Getenv("ANUBIS_CORS_ORIGINS"); allowed != "" {
 		return strings.Split(allowed, ",")
 	}
-	// Default: allow localhost for development
+	// Priority 3: Default localhost for development
 	return []string{
 		"http://localhost:3000",
 		"http://localhost:8080",

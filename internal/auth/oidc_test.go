@@ -26,7 +26,7 @@ func TestOIDCAuthenticator_NewOIDCAuthenticator(t *testing.T) {
 		RedirectURL:  "http://localhost:8080/api/v1/auth/oidc/callback",
 	}
 
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	if auth == nil {
@@ -46,11 +46,11 @@ func TestOIDCAuthenticator_LocalFallback(t *testing.T) {
 		RedirectURL:  "http://localhost:8080/callback",
 	}
 
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	// Test local fallback login
-	user, token, err := auth.Login("admin@test.com", "admin123")
+	user, token, err := auth.Login("admin@test.com", "TestPass1234!")
 	if err != nil {
 		t.Fatalf("Local fallback Login failed: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestOIDCAuthenticator_AddUser(t *testing.T) {
 		RedirectURL:  "http://localhost:8080/callback",
 	}
 
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	user := auth.AddUser("user@example.com", "Test User", "editor")
@@ -117,7 +117,7 @@ func TestOIDCAuthenticator_OIDCCallback_InvalidState(t *testing.T) {
 		RedirectURL:  "http://localhost:8080/callback",
 	}
 
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	// Test callback with invalid state (no matching state was generated)
@@ -135,7 +135,7 @@ func TestOIDCAuthenticator_OIDCCallback_InvalidNonce(t *testing.T) {
 		RedirectURL:  "http://localhost:8080/callback",
 	}
 
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	// Create a valid state with a nonce
@@ -166,7 +166,7 @@ func TestOIDCAuthenticator_OIDCLoginURL_ConfigError(t *testing.T) {
 		RedirectURL:  "http://localhost:8080/callback",
 	}
 
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	// Should fail because the issuer domain doesn't exist
@@ -184,11 +184,11 @@ func TestOIDCAuthenticator_TokenExpiration(t *testing.T) {
 		RedirectURL:  "http://localhost:8080/callback",
 	}
 
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	// Login and get token
-	_, token, err := auth.Login("admin@test.com", "admin123")
+	_, token, err := auth.Login("admin@test.com", "TestPass1234!")
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
@@ -478,7 +478,7 @@ func TestOIDCAuthenticator_GetUsers(t *testing.T) {
 		RedirectURL:  "http://localhost:8080/callback",
 	}
 
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	// Add some users
@@ -500,7 +500,7 @@ func TestOIDCAuthenticator_OIDCCallback_StateExpiration(t *testing.T) {
 		RedirectURL:  "http://localhost:8080/callback",
 	}
 
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	// Manually add an expired state
@@ -535,7 +535,7 @@ func TestOIDCAuthenticator_OIDCCallback_OIDCError(t *testing.T) {
 
 	// Use the mock server as issuer (it won't work but tests the error path)
 	cfg.Issuer = server.URL
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	// Generate a valid state
@@ -1050,7 +1050,7 @@ func TestOIDCAuthenticator_Authenticate_ExpiredToken(t *testing.T) {
 		RedirectURL:  "http://localhost:8080/callback",
 	}
 
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	user := auth.AddUser("user@example.com", "Test User", "viewer")
@@ -1078,7 +1078,7 @@ func TestOIDCAuthenticator_Authenticate_MissingUser(t *testing.T) {
 		RedirectURL:  "http://localhost:8080/callback",
 	}
 
-	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	// Manually inject a session pointing to a non-existent user
@@ -1154,7 +1154,7 @@ func TestOIDCAuthenticator_OIDCCallback_Success(t *testing.T) {
 		ClientID:     "client-id",
 		ClientSecret: "client-secret",
 		RedirectURL:  "http://localhost:8080/callback",
-	}, "", "admin@test.com", "admin123")
+	}, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	// Inject a valid state
@@ -1232,7 +1232,7 @@ func TestOIDCAuthenticator_OIDCCallback_EmptyEmail(t *testing.T) {
 		ClientID:     "client-id",
 		ClientSecret: "client-secret",
 		RedirectURL:  "http://localhost:8080/callback",
-	}, "", "admin@test.com", "admin123")
+	}, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	state := "empty-email-state"
@@ -1306,7 +1306,7 @@ func TestOIDCAuthenticator_OIDCCallback_GetUserInfoError(t *testing.T) {
 		ClientID:     "client-id",
 		ClientSecret: "client-secret",
 		RedirectURL:  "http://localhost:8080/callback",
-	}, "", "admin@test.com", "admin123")
+	}, "", "admin@test.com", "TestPass1234!")
 	defer auth.Shutdown()
 
 	auth.mu.Lock()

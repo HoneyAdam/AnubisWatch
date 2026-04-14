@@ -534,7 +534,7 @@ func TestInitACMEManager_Server_Enabled(t *testing.T) {
 }
 
 func TestHandleLogin_InvalidCredentials(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogin(authenticator)
 
 	req := httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"email":"wrong@example.com","password":"wrong"}`))

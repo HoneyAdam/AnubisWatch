@@ -186,12 +186,12 @@ func TestInitConfig_AlreadyExists(t *testing.T) {
 }
 
 func TestHandleLogin(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 
 	handler := handleLogin(authenticator)
 
 	// Test valid login
-	reqBody := `{"username":"admin","password":"password"}`
+	reqBody := `{"username":"admin","password":"TestPass1234!"}`
 	req := httptest.NewRequest("POST", "/login", strings.NewReader(reqBody))
 	w := httptest.NewRecorder()
 
@@ -204,7 +204,7 @@ func TestHandleLogin(t *testing.T) {
 }
 
 func TestHandleLogout(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogout(authenticator)
 
 	req := httptest.NewRequest("POST", "/logout", nil)
@@ -528,7 +528,7 @@ func TestInitConfig_AlreadyExists_CLI(t *testing.T) {
 
 // Test handleLogin with empty body
 func TestHandleLogin_EmptyBody(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogin(authenticator)
 
 	req := httptest.NewRequest("POST", "/login", strings.NewReader(""))
@@ -544,7 +544,7 @@ func TestHandleLogin_EmptyBody(t *testing.T) {
 
 // Test handleLogin with invalid JSON
 func TestHandleLogin_InvalidJSON(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogin(authenticator)
 
 	req := httptest.NewRequest("POST", "/login", strings.NewReader("{invalid json}"))
@@ -630,7 +630,7 @@ func TestHTTPPost_NilBody(t *testing.T) {
 
 // Test handleLogout with different methods
 func TestHandleLogout_Methods(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogout(authenticator)
 
 	methods := []string{"GET", "POST", "DELETE", "PUT"}
@@ -684,10 +684,10 @@ func TestStatusPageRepository(t *testing.T) {
 
 // Test handleLogin with different scenarios
 func TestHandleLogin_Success(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogin(authenticator)
 
-	reqBody := `{"email":"admin@example.com","password":"password"}`
+	reqBody := `{"email":"admin@example.com","password":"TestPass1234!"}`
 	req := httptest.NewRequest("POST", "/login", strings.NewReader(reqBody))
 	w := httptest.NewRecorder()
 
@@ -697,7 +697,7 @@ func TestHandleLogin_Success(t *testing.T) {
 }
 
 func TestHandleLogin_WrongMethod(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogin(authenticator)
 
 	req := httptest.NewRequest("GET", "/login", nil)
@@ -711,7 +711,7 @@ func TestHandleLogin_WrongMethod(t *testing.T) {
 }
 
 func TestHandleLogout_Success(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogout(authenticator)
 
 	req := httptest.NewRequest("POST", "/logout", nil)
@@ -1287,11 +1287,11 @@ func TestHTTPPost_ServerError(t *testing.T) {
 
 // Test handleLogin with missing fields
 func TestHandleLogin_MissingFields(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogin(authenticator)
 
 	// Test with empty username
-	reqBody := `{"username":"","password":"password"}`
+	reqBody := `{"username":"","password":"TestPass1234!"}`
 	req := httptest.NewRequest("POST", "/login", strings.NewReader(reqBody))
 	w := httptest.NewRecorder()
 
@@ -1850,7 +1850,7 @@ func TestHTTPPost_NoToken(t *testing.T) {
 
 // Test handleLogin with valid credentials format
 func TestHandleLogin_ValidFormat(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogin(authenticator)
 
 	// Test with email format (as used by authenticator)
@@ -1869,7 +1869,7 @@ func TestHandleLogin_ValidFormat(t *testing.T) {
 
 // Test handleLogout without authorization header
 func TestHandleLogout_NoAuthHeader(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogout(authenticator)
 
 	req := httptest.NewRequest("POST", "/logout", nil)
@@ -1886,7 +1886,7 @@ func TestHandleLogout_NoAuthHeader(t *testing.T) {
 
 // Test handleLogout with malformed authorization header
 func TestHandleLogout_MalformedAuth(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogout(authenticator)
 
 	req := httptest.NewRequest("POST", "/logout", nil)
@@ -2196,7 +2196,7 @@ func TestAdapterStructInitialization(t *testing.T) {
 
 // Test handleLogin with various content types
 func TestHandleLogin_ContentTypes(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogin(authenticator)
 
 	tests := []struct {
@@ -2243,7 +2243,7 @@ func TestHandleLogin_ContentTypes(t *testing.T) {
 
 // Test handleLogout with bearer token extraction
 func TestHandleLogout_BearerExtraction(t *testing.T) {
-	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "admin")
+	authenticator := auth.NewLocalAuthenticator("", "admin@anubis.watch", "TestPass1234!")
 	handler := handleLogout(authenticator)
 
 	tests := []struct {
@@ -3612,7 +3612,7 @@ func TestGenerateConfig_Basic(t *testing.T) {
 		Host:            "0.0.0.0",
 		HTTPPort:        8080,
 		AdminEmail:      "admin@anubis.watch",
-		AdminPassword:   "testpass",
+		AdminPassword:   "TestPass1234!",
 		DataDir:         "/tmp/anubis",
 		RetentionDays:   30,
 		EnableDashboard: true,
@@ -3646,7 +3646,7 @@ func TestGenerateConfig_TLSAuto(t *testing.T) {
 		TLSAuto:         true,
 		ACMEEmail:       "admin@example.com",
 		AdminEmail:      "admin@anubis.watch",
-		AdminPassword:   "testpass",
+		AdminPassword:   "TestPass1234!",
 		DataDir:         "/tmp/anubis",
 		RetentionDays:   30,
 		EnableDashboard: true,
@@ -3674,7 +3674,7 @@ func TestGenerateConfig_TLSManual(t *testing.T) {
 		TLSCert:         "/etc/ssl/cert.pem",
 		TLSKey:          "/etc/ssl/key.pem",
 		AdminEmail:      "admin@anubis.watch",
-		AdminPassword:   "testpass",
+		AdminPassword:   "TestPass1234!",
 		DataDir:         "/tmp/anubis",
 		RetentionDays:   30,
 		EnableDashboard: true,
@@ -3698,7 +3698,7 @@ func TestGenerateConfig_Cluster(t *testing.T) {
 		Host:            "0.0.0.0",
 		HTTPPort:        8080,
 		AdminEmail:      "admin@anubis.watch",
-		AdminPassword:   "testpass",
+		AdminPassword:   "TestPass1234!",
 		DataDir:         "/tmp/anubis",
 		RetentionDays:   30,
 		EnableCluster:   true,
@@ -3734,7 +3734,7 @@ func TestGenerateConfig_Encryption(t *testing.T) {
 		Host:             "0.0.0.0",
 		HTTPPort:         8080,
 		AdminEmail:       "admin@anubis.watch",
-		AdminPassword:    "testpass",
+		AdminPassword:    "TestPass1234!",
 		DataDir:          "/tmp/anubis",
 		RetentionDays:    30,
 		EnableEncryption: true,
@@ -3760,7 +3760,7 @@ func TestGenerateConfig_Full(t *testing.T) {
 		TLSAuto:          true,
 		ACMEEmail:        "admin@example.com",
 		AdminEmail:       "admin@anubis.watch",
-		AdminPassword:    "testpass",
+		AdminPassword:    "TestPass1234!",
 		DataDir:          "/tmp/anubis",
 		RetentionDays:    90,
 		EnableEncryption: true,

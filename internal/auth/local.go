@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,10 @@ func NewLocalAuthenticator(sessionPath, adminEmail, adminPassword string) *Local
 		if strings.HasPrefix(adminPassword, "$2a$") || strings.HasPrefix(adminPassword, "$2b$") || strings.HasPrefix(adminPassword, "$2y$") {
 			passwordHash = adminPassword
 		} else {
+			// MED-12: Enforce minimum password policy before hashing
+			if err := validatePassword(adminPassword); err != nil {
+				panic("admin password policy violation: " + err.Error())
+			}
 			// Hash the plaintext password
 			hash, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcryptCost)
 			if err != nil {
@@ -270,6 +275,10 @@ func (a *LocalAuthenticator) Login(email, password string) (*api.User, string, e
 	// Constant-time comparison for email
 	if subtle.ConstantTimeCompare([]byte(email), []byte(a.adminEmail)) != 1 {
 		a.recordFailedAttempt(email)
+		// MED-11: Run dummy bcrypt comparison to prevent timing-based user enumeration
+		// This ensures the response time is consistent whether the email exists or not
+		dummyHash, _ := bcrypt.GenerateFromPassword([]byte("dummy-password-for-timing"), bcrypt.DefaultCost)
+		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
 		return nil, "", errors.New("invalid credentials")
 	}
 
@@ -353,7 +362,45 @@ const (
 	maxLoginAttempts    = 5
 	lockoutDuration     = 15 * time.Minute
 	attemptResetWindow  = 30 * time.Minute
+	minPasswordLength   = 12
 )
+
+// validatePassword enforces minimum password policy (MED-12)
+func validatePassword(password string) error {
+	if len(password) < minPasswordLength {
+		return fmt.Errorf("password must be at least %d characters", minPasswordLength)
+	}
+	var hasUpper, hasLower, hasDigit, hasSpecial bool
+	for _, r := range password {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			hasUpper = true
+		case r >= 'a' && r <= 'z':
+			hasLower = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		default:
+			hasSpecial = true
+		}
+	}
+	classes := 0
+	if hasUpper {
+		classes++
+	}
+	if hasLower {
+		classes++
+	}
+	if hasDigit {
+		classes++
+	}
+	if hasSpecial {
+		classes++
+	}
+	if classes < 3 {
+		return fmt.Errorf("password must contain at least 3 of: uppercase, lowercase, digits, special characters")
+	}
+	return nil
+}
 
 // checkBruteForceProtection checks if the account is locked due to failed attempts
 func (a *LocalAuthenticator) checkBruteForceProtection(email string) error {

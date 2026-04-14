@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1590,7 +1590,7 @@ func (n *Node) appendEntry(entry core.RaftLogEntry) {
 
 func (n *Node) newElectionTimer() *time.Timer {
 	// Randomize timeout between 1x and 2x election timeout
-	d := n.electionTimeout + time.Duration(rand.Int63n(int64(n.electionTimeout)))
+	d := n.electionTimeout + time.Duration(rand.Int64N(int64(n.electionTimeout)))
 	return time.NewTimer(d)
 }
 
