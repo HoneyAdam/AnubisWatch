@@ -16,7 +16,7 @@ import (
 // TestWSClient_JoinRoom tests joining a room
 func TestWSClient_JoinRoom(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	client := &WSClient{
 		ID:        "test-client",
@@ -52,7 +52,7 @@ func TestWSClient_JoinRoom(t *testing.T) {
 // TestWSClient_LeaveRoom tests leaving a room
 func TestWSClient_LeaveRoom(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	client := &WSClient{
 		ID:        "test-client",
@@ -87,7 +87,7 @@ func TestWSClient_LeaveRoom(t *testing.T) {
 // TestWSClient_LeaveRoom_LastClient tests leaving a room as the last client
 func TestWSClient_LeaveRoom_LastClient(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	client := &WSClient{
 		ID:        "test-client",
@@ -177,7 +177,7 @@ func TestWSClient_createErrorMessage(t *testing.T) {
 // TestWebSocketServer_removeClient_NonExistent tests removing a non-existent client
 func TestWebSocketServer_removeClient_NonExistent(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	// Should not panic
 	server.removeClient("non-existent-client")
@@ -186,7 +186,7 @@ func TestWebSocketServer_removeClient_NonExistent(t *testing.T) {
 // TestWebSocketServer_Stop_NoClients tests stopping a server with no clients
 func TestWebSocketServer_Stop_NoClients(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	server.Start()
 	time.Sleep(10 * time.Millisecond)
@@ -198,7 +198,7 @@ func TestWebSocketServer_Stop_NoClients(t *testing.T) {
 // TestWebSocketServer_BroadcastIncident tests broadcasting an incident
 func TestWebSocketServer_BroadcastIncident(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 	server.Start()
 	defer server.Stop()
 
@@ -233,7 +233,7 @@ func TestWebSocketServer_BroadcastIncident(t *testing.T) {
 // TestWebSocketServer_BroadcastSoulUpdate tests broadcasting a soul update
 func TestWebSocketServer_BroadcastSoulUpdate(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 	server.Start()
 	defer server.Stop()
 
@@ -289,7 +289,7 @@ func TestIsWebSocketRequest(t *testing.T) {
 // TestWebSocketServer_SubscribeClient tests subscribing a client to events
 func TestWebSocketServer_SubscribeClient(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	client := &WSClient{
 		ID:     "test-client",
@@ -319,7 +319,7 @@ func TestWebSocketServer_SubscribeClient(t *testing.T) {
 // TestWebSocketServer_UnsubscribeClient tests unsubscribing a client
 func TestWebSocketServer_UnsubscribeClient(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	client := &WSClient{
 		ID:     "test-client",
@@ -349,7 +349,7 @@ func TestWebSocketServer_UnsubscribeClient(t *testing.T) {
 // TestWebSocketServer_SubscribeNonExistentClient tests subscribing a non-existent client
 func TestWebSocketServer_SubscribeNonExistentClient(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	// Should not panic
 	server.SubscribeClient("non-existent", []string{"judgment"})
@@ -358,7 +358,7 @@ func TestWebSocketServer_SubscribeNonExistentClient(t *testing.T) {
 // TestWebSocketServer_BroadcastIncident_WithoutWorkspace tests broadcasting without workspace
 func TestWebSocketServer_BroadcastIncident_WithoutWorkspace(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 	server.Start()
 	defer server.Stop()
 
@@ -380,14 +380,14 @@ func TestWebSocketServer_BroadcastIncident_WithoutWorkspace(t *testing.T) {
 // TestWebSocketServer_removeClient_WithRooms tests removing a client that is in rooms
 func TestWebSocketServer_removeClient_WithRooms(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	// Create a test server to get a real WebSocket connection
 	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleConnection))
 	defer httpServer.Close()
 
 	// Connect a WebSocket client
-	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "?workspace=test&user_id=user1"
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "?workspace=test&user_id=user1&token=valid-token"
 	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("Failed to connect WebSocket: %v", err)
@@ -435,7 +435,7 @@ func TestWebSocketServer_removeClient_WithRooms(t *testing.T) {
 // TestWebSocketServer_broadcastToRoom_NonExistent tests broadcasting to non-existent room
 func TestWebSocketServer_broadcastToRoom_NonExistent(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	msg := WSMessage{
 		Type:      "test",
@@ -450,7 +450,7 @@ func TestWebSocketServer_broadcastToRoom_NonExistent(t *testing.T) {
 // TestWebSocketServer_broadcastToRoom_WithClients tests broadcasting to room with clients
 func TestWebSocketServer_broadcastToRoom_WithClients(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	client := &WSClient{
 		ID:        "test-client",
@@ -487,14 +487,14 @@ func TestWebSocketServer_broadcastToRoom_WithClients(t *testing.T) {
 // TestWebSocketServer_broadcastToRoom_FullBuffer tests broadcasting when client buffer is full
 func TestWebSocketServer_broadcastToRoom_FullBuffer(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	// Create a test server to get a real WebSocket connection
 	httpServer := httptest.NewServer(http.HandlerFunc(server.HandleConnection))
 	defer httpServer.Close()
 
 	// Connect a WebSocket client
-	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "?workspace=test&user_id=user1"
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "?workspace=test&user_id=user1&token=valid-token"
 	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("Failed to connect WebSocket: %v", err)
@@ -550,7 +550,7 @@ func TestWebSocketServer_broadcastToRoom_FullBuffer(t *testing.T) {
 // TestWebSocketServer_broadcastToRoom_NilClient tests broadcasting when client is nil
 func TestWebSocketServer_broadcastToRoom_NilClient(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	// Setup room with non-existent client ID
 	server.mu.Lock()
@@ -570,7 +570,7 @@ func TestWebSocketServer_broadcastToRoom_NilClient(t *testing.T) {
 // TestWebSocketServer_BroadcastAlert_NoWorkspace tests broadcasting alert without workspace
 func TestWebSocketServer_BroadcastAlert_NoWorkspace(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 	server.Start()
 	defer server.Stop()
 
@@ -604,7 +604,7 @@ func TestWebSocketServer_BroadcastAlert_NoWorkspace(t *testing.T) {
 // TestWebSocketServer_BroadcastStats_NoWorkspace tests broadcasting stats without workspace
 func TestWebSocketServer_BroadcastStats_NoWorkspace(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 	server.Start()
 	defer server.Stop()
 
@@ -632,7 +632,7 @@ func TestWebSocketServer_BroadcastStats_NoWorkspace(t *testing.T) {
 // TestWebSocketServer_GetStats_WithClients tests getting server stats with clients
 func TestWebSocketServer_GetStats_WithClients(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	// Create test clients
 	for i := 0; i < 3; i++ {
@@ -658,7 +658,7 @@ func TestWebSocketServer_GetStats_WithClients(t *testing.T) {
 // TestWebSocketServer_Stop_WithClients tests stopping server with clients
 func TestWebSocketServer_Stop_WithClients(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 	server.Start()
 
 	// Create test clients with send channels
@@ -889,7 +889,7 @@ func TestWSClient_handleMessage_JoinWorkspace_Empty(t *testing.T) {
 // TestWebSocketServer_BroadcastClusterEvent tests cluster event broadcasting
 func TestWebSocketServer_BroadcastClusterEvent(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	// Create a client subscribed to cluster events
 	client := &WSClient{
@@ -937,7 +937,7 @@ func TestWebSocketServer_BroadcastClusterEvent(t *testing.T) {
 
 func TestWebSocketServer_BroadcastJackalJoined(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	client := &WSClient{
 		ID:     "test-join",
@@ -972,7 +972,7 @@ func TestWebSocketServer_BroadcastJackalJoined(t *testing.T) {
 
 func TestWebSocketServer_BroadcastJackalLeft(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	client := &WSClient{
 		ID:     "test-leave",
@@ -1004,7 +1004,7 @@ func TestWebSocketServer_BroadcastJackalLeft(t *testing.T) {
 
 func TestWebSocketServer_BroadcastRaftLeaderChange(t *testing.T) {
 	logger := newTestLogger()
-	server := NewWebSocketServer(logger)
+	server := NewWebSocketServer(logger, &mockAuthenticator{}, nil)
 
 	client := &WSClient{
 		ID:     "test-leader",

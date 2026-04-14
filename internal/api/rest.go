@@ -7,12 +7,18 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
+)
+
+const (
+	// maxRequestBodySize limits JSON request body size to prevent DoS (1MB)
+	maxRequestBodySize = 1 << 20 // 1MB
 )
 
 // RESTServer implements the HTTP REST API
@@ -188,8 +194,8 @@ type Authenticator interface {
 // OIDCAuth extends Authenticator with OIDC methods
 type OIDCAuth interface {
 	Authenticator
-	OIDCLoginURL() (string, string, error)
-	OIDCCallback(code, state string) (*User, string, error)
+	OIDCLoginURL() (string, string, string, error)
+	OIDCCallback(code, state, nonce string) (*User, string, error)
 }
 
 // ClusterManager interface for cluster operations
@@ -223,7 +229,7 @@ type User struct {
 
 // NewRESTServer creates a new REST server
 func NewRESTServer(config core.ServerConfig, authConfig core.AuthConfig, store Storage, probe ProbeEngine, alert AlertManager, auth Authenticator, cluster ClusterManager, journey JourneyExecutor, dashboard http.Handler, statusPage http.Handler, mcp *MCPServer, logger *slog.Logger) *RESTServer {
-	wsServer := NewWebSocketServer(logger)
+	wsServer := NewWebSocketServer(logger, auth, nil) // allowedOrigins will use defaults
 
 	s := &RESTServer{
 		config:     config,
@@ -289,11 +295,11 @@ func (s *RESTServer) setupRoutes() {
 
 	// Souls
 	s.router.Handle("GET", "/api/v1/souls", s.requireAuth(s.handleListSouls))
-	s.router.Handle("POST", "/api/v1/souls", s.requireAuth(s.handleCreateSoul))
+	s.router.Handle("POST", "/api/v1/souls", s.requireRole(s.handleCreateSoul, "souls:*"))
 	s.router.Handle("GET", "/api/v1/souls/:id", s.requireAuth(s.handleGetSoul))
-	s.router.Handle("PUT", "/api/v1/souls/:id", s.requireAuth(s.handleUpdateSoul))
-	s.router.Handle("DELETE", "/api/v1/souls/:id", s.requireAuth(s.handleDeleteSoul))
-	s.router.Handle("POST", "/api/v1/souls/:id/check", s.requireAuth(s.handleForceCheck))
+	s.router.Handle("PUT", "/api/v1/souls/:id", s.requireRole(s.handleUpdateSoul, "souls:*"))
+	s.router.Handle("DELETE", "/api/v1/souls/:id", s.requireRole(s.handleDeleteSoul, "souls:*"))
+	s.router.Handle("POST", "/api/v1/souls/:id/check", s.requireRole(s.handleForceCheck, "souls:*"))
 	s.router.Handle("GET", "/api/v1/souls/:id/judgments", s.requireAuth(s.handleListJudgments))
 
 	// Judgments
@@ -302,25 +308,25 @@ func (s *RESTServer) setupRoutes() {
 
 	// Channels
 	s.router.Handle("GET", "/api/v1/channels", s.requireAuth(s.handleListChannels))
-	s.router.Handle("POST", "/api/v1/channels", s.requireAuth(s.handleCreateChannel))
+	s.router.Handle("POST", "/api/v1/channels", s.requireRole(s.handleCreateChannel, "channels:*"))
 	s.router.Handle("GET", "/api/v1/channels/:id", s.requireAuth(s.handleGetChannel))
-	s.router.Handle("PUT", "/api/v1/channels/:id", s.requireAuth(s.handleUpdateChannel))
-	s.router.Handle("DELETE", "/api/v1/channels/:id", s.requireAuth(s.handleDeleteChannel))
-	s.router.Handle("POST", "/api/v1/channels/:id/test", s.requireAuth(s.handleTestChannel))
+	s.router.Handle("PUT", "/api/v1/channels/:id", s.requireRole(s.handleUpdateChannel, "channels:*"))
+	s.router.Handle("DELETE", "/api/v1/channels/:id", s.requireRole(s.handleDeleteChannel, "channels:*"))
+	s.router.Handle("POST", "/api/v1/channels/:id/test", s.requireRole(s.handleTestChannel, "channels:*"))
 
 	// Rules
 	s.router.Handle("GET", "/api/v1/rules", s.requireAuth(s.handleListRules))
-	s.router.Handle("POST", "/api/v1/rules", s.requireAuth(s.handleCreateRule))
+	s.router.Handle("POST", "/api/v1/rules", s.requireRole(s.handleCreateRule, "rules:*"))
 	s.router.Handle("GET", "/api/v1/rules/:id", s.requireAuth(s.handleGetRule))
-	s.router.Handle("PUT", "/api/v1/rules/:id", s.requireAuth(s.handleUpdateRule))
-	s.router.Handle("DELETE", "/api/v1/rules/:id", s.requireAuth(s.handleDeleteRule))
+	s.router.Handle("PUT", "/api/v1/rules/:id", s.requireRole(s.handleUpdateRule, "rules:*"))
+	s.router.Handle("DELETE", "/api/v1/rules/:id", s.requireRole(s.handleDeleteRule, "rules:*"))
 
 	// Workspaces
 	s.router.Handle("GET", "/api/v1/workspaces", s.requireAuth(s.handleListWorkspaces))
-	s.router.Handle("POST", "/api/v1/workspaces", s.requireAuth(s.handleCreateWorkspace))
+	s.router.Handle("POST", "/api/v1/workspaces", s.requireRole(s.handleCreateWorkspace, "members:*"))
 	s.router.Handle("GET", "/api/v1/workspaces/:id", s.requireAuth(s.handleGetWorkspace))
-	s.router.Handle("PUT", "/api/v1/workspaces/:id", s.requireAuth(s.handleUpdateWorkspace))
-	s.router.Handle("DELETE", "/api/v1/workspaces/:id", s.requireAuth(s.handleDeleteWorkspace))
+	s.router.Handle("PUT", "/api/v1/workspaces/:id", s.requireRole(s.handleUpdateWorkspace, "settings:write"))
+	s.router.Handle("DELETE", "/api/v1/workspaces/:id", s.requireRole(s.handleDeleteWorkspace, "members:*"))
 
 	// Stats
 	s.router.Handle("GET", "/api/v1/stats", s.requireAuth(s.handleStats))
@@ -332,64 +338,64 @@ func (s *RESTServer) setupRoutes() {
 
 	// Config
 	s.router.Handle("GET", "/api/v1/config", s.requireAuth(s.handleGetConfig))
-	s.router.Handle("PUT", "/api/v1/config", s.requireAuth(s.handleUpdateConfig))
+	s.router.Handle("PUT", "/api/v1/config", s.requireRole(s.handleUpdateConfig, "settings:write"))
 
 	// Incidents
 	s.router.Handle("GET", "/api/v1/incidents", s.requireAuth(s.handleListIncidents))
-	s.router.Handle("POST", "/api/v1/incidents/:id/acknowledge", s.requireAuth(s.handleAcknowledgeIncident))
-	s.router.Handle("POST", "/api/v1/incidents/:id/resolve", s.requireAuth(s.handleResolveIncident))
+	s.router.Handle("POST", "/api/v1/incidents/:id/acknowledge", s.requireRole(s.handleAcknowledgeIncident, "rules:*"))
+	s.router.Handle("POST", "/api/v1/incidents/:id/resolve", s.requireRole(s.handleResolveIncident, "rules:*"))
 
 	// Status Pages
 	s.router.Handle("GET", "/api/v1/status-pages", s.requireAuth(s.handleListStatusPages))
-	s.router.Handle("POST", "/api/v1/status-pages", s.requireAuth(s.handleCreateStatusPage))
+	s.router.Handle("POST", "/api/v1/status-pages", s.requireRole(s.handleCreateStatusPage, "settings:write"))
 	s.router.Handle("GET", "/api/v1/status-pages/:id", s.requireAuth(s.handleGetStatusPage))
-	s.router.Handle("PUT", "/api/v1/status-pages/:id", s.requireAuth(s.handleUpdateStatusPage))
-	s.router.Handle("DELETE", "/api/v1/status-pages/:id", s.requireAuth(s.handleDeleteStatusPage))
+	s.router.Handle("PUT", "/api/v1/status-pages/:id", s.requireRole(s.handleUpdateStatusPage, "settings:write"))
+	s.router.Handle("DELETE", "/api/v1/status-pages/:id", s.requireRole(s.handleDeleteStatusPage, "settings:write"))
 
 	// MCP (Model Context Protocol)
-	s.router.Handle("POST", "/api/v1/mcp", s.handleMCP)
+	s.router.Handle("POST", "/api/v1/mcp", s.requireAuth(s.handleMCP))
 
 	// Alerts aliases for frontend compatibility
 	s.router.Handle("GET", "/api/v1/alerts/channels", s.requireAuth(s.handleListChannels))
-	s.router.Handle("POST", "/api/v1/alerts/channels", s.requireAuth(s.handleCreateChannel))
+	s.router.Handle("POST", "/api/v1/alerts/channels", s.requireRole(s.handleCreateChannel, "channels:*"))
 	s.router.Handle("GET", "/api/v1/alerts/channels/:id", s.requireAuth(s.handleGetChannel))
-	s.router.Handle("PUT", "/api/v1/alerts/channels/:id", s.requireAuth(s.handleUpdateChannel))
-	s.router.Handle("DELETE", "/api/v1/alerts/channels/:id", s.requireAuth(s.handleDeleteChannel))
-	s.router.Handle("POST", "/api/v1/alerts/channels/:id/test", s.requireAuth(s.handleTestChannel))
+	s.router.Handle("PUT", "/api/v1/alerts/channels/:id", s.requireRole(s.handleUpdateChannel, "channels:*"))
+	s.router.Handle("DELETE", "/api/v1/alerts/channels/:id", s.requireRole(s.handleDeleteChannel, "channels:*"))
+	s.router.Handle("POST", "/api/v1/alerts/channels/:id/test", s.requireRole(s.handleTestChannel, "channels:*"))
 
 	s.router.Handle("GET", "/api/v1/alerts/rules", s.requireAuth(s.handleListRules))
-	s.router.Handle("POST", "/api/v1/alerts/rules", s.requireAuth(s.handleCreateRule))
+	s.router.Handle("POST", "/api/v1/alerts/rules", s.requireRole(s.handleCreateRule, "rules:*"))
 	s.router.Handle("GET", "/api/v1/alerts/rules/:id", s.requireAuth(s.handleGetRule))
-	s.router.Handle("PUT", "/api/v1/alerts/rules/:id", s.requireAuth(s.handleUpdateRule))
-	s.router.Handle("DELETE", "/api/v1/alerts/rules/:id", s.requireAuth(s.handleDeleteRule))
+	s.router.Handle("PUT", "/api/v1/alerts/rules/:id", s.requireRole(s.handleUpdateRule, "rules:*"))
+	s.router.Handle("DELETE", "/api/v1/alerts/rules/:id", s.requireRole(s.handleDeleteRule, "rules:*"))
 
 	// Users alias
 	s.router.Handle("GET", "/api/v1/users/me", s.requireAuth(s.handleMe))
 
 	// Journeys endpoints
 	s.router.Handle("GET", "/api/v1/journeys", s.requireAuth(s.handleListJourneys))
-	s.router.Handle("POST", "/api/v1/journeys", s.requireAuth(s.handleCreateJourney))
+	s.router.Handle("POST", "/api/v1/journeys", s.requireRole(s.handleCreateJourney, "souls:*"))
 	s.router.Handle("GET", "/api/v1/journeys/:id", s.requireAuth(s.handleGetJourney))
-	s.router.Handle("PUT", "/api/v1/journeys/:id", s.requireAuth(s.handleUpdateJourney))
-	s.router.Handle("DELETE", "/api/v1/journeys/:id", s.requireAuth(s.handleDeleteJourney))
-	s.router.Handle("POST", "/api/v1/journeys/:id/run", s.requireAuth(s.handleRunJourney))
+	s.router.Handle("PUT", "/api/v1/journeys/:id", s.requireRole(s.handleUpdateJourney, "souls:*"))
+	s.router.Handle("DELETE", "/api/v1/journeys/:id", s.requireRole(s.handleDeleteJourney, "souls:*"))
+	s.router.Handle("POST", "/api/v1/journeys/:id/run", s.requireRole(s.handleRunJourney, "souls:*"))
 	s.router.Handle("GET", "/api/v1/journeys/:id/runs", s.requireAuth(s.handleListJourneyRuns))
 	s.router.Handle("GET", "/api/v1/journeys/:id/runs/:runId", s.requireAuth(s.handleGetJourneyRun))
 
 	// Maintenance Windows
 	s.router.Handle("GET", "/api/v1/maintenance", s.requireAuth(s.handleListMaintenanceWindows))
-	s.router.Handle("POST", "/api/v1/maintenance", s.requireAuth(s.handleCreateMaintenanceWindow))
+	s.router.Handle("POST", "/api/v1/maintenance", s.requireRole(s.handleCreateMaintenanceWindow, "settings:write"))
 	s.router.Handle("GET", "/api/v1/maintenance/:id", s.requireAuth(s.handleGetMaintenanceWindow))
-	s.router.Handle("PUT", "/api/v1/maintenance/:id", s.requireAuth(s.handleUpdateMaintenanceWindow))
-	s.router.Handle("DELETE", "/api/v1/maintenance/:id", s.requireAuth(s.handleDeleteMaintenanceWindow))
+	s.router.Handle("PUT", "/api/v1/maintenance/:id", s.requireRole(s.handleUpdateMaintenanceWindow, "settings:write"))
+	s.router.Handle("DELETE", "/api/v1/maintenance/:id", s.requireRole(s.handleDeleteMaintenanceWindow, "settings:write"))
 
 	// Dashboards endpoints
 	s.router.Handle("GET", "/api/v1/dashboards", s.requireAuth(s.handleListDashboards))
-	s.router.Handle("POST", "/api/v1/dashboards", s.requireAuth(s.handleCreateDashboard))
+	s.router.Handle("POST", "/api/v1/dashboards", s.requireRole(s.handleCreateDashboard, "settings:write"))
 	s.router.Handle("GET", "/api/v1/dashboards/:id", s.requireAuth(s.handleGetDashboard))
-	s.router.Handle("PUT", "/api/v1/dashboards/:id", s.requireAuth(s.handleUpdateDashboard))
-	s.router.Handle("DELETE", "/api/v1/dashboards/:id", s.requireAuth(s.handleDeleteDashboard))
-	s.router.Handle("POST", "/api/v1/dashboards/:id/query", s.requireAuth(s.handleDashboardQuery))
+	s.router.Handle("PUT", "/api/v1/dashboards/:id", s.requireRole(s.handleUpdateDashboard, "settings:write"))
+	s.router.Handle("DELETE", "/api/v1/dashboards/:id", s.requireRole(s.handleDeleteDashboard, "settings:write"))
+	s.router.Handle("POST", "/api/v1/dashboards/:id/query", s.requireRole(s.handleDashboardQuery, "souls:read"))
 	s.router.Handle("GET", "/api/v1/dashboards/templates", s.requireAuth(s.handleDashboardTemplates))
 
 	// MCP tools endpoint
@@ -544,11 +550,34 @@ func (s *RESTServer) handleOIDCLogin(ctx *Context) error {
 		return ctx.Error(http.StatusBadRequest, "OIDC not configured")
 	}
 
-	loginURL, _, err := oidcAuth.OIDCLoginURL()
+	loginURL, state, nonce, err := oidcAuth.OIDCLoginURL()
 	if err != nil {
 		s.logger.Error("OIDC login failed", "error", err)
 		return ctx.Error(http.StatusInternalServerError, "OIDC login failed: "+err.Error())
 	}
+
+	// Store nonce in secure cookie for CSRF protection
+	// The nonce binds the callback to this specific authentication flow
+	http.SetCookie(ctx.Response, &http.Cookie{
+		Name:     "oidc_nonce",
+		Value:    nonce,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   600, // 10 minutes
+	})
+
+	// Store state in cookie for verification
+	http.SetCookie(ctx.Response, &http.Cookie{
+		Name:     "oidc_state",
+		Value:    state,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   600, // 10 minutes
+	})
 
 	// Redirect to OIDC provider
 	ctx.Response.Header().Set("Location", loginURL)
@@ -575,7 +604,37 @@ func (s *RESTServer) handleOIDCCallback(ctx *Context) error {
 		return ctx.Error(http.StatusBadRequest, fmt.Sprintf("OIDC error: %s (%s)", errParam, errDesc))
 	}
 
-	user, token, err := oidcAuth.OIDCCallback(code, state)
+	// Retrieve nonce from secure cookie for CSRF protection
+	nonceCookie, err := ctx.Request.Cookie("oidc_nonce")
+	if err != nil {
+		s.logger.Error("OIDC callback missing nonce cookie", "error", err)
+		return ctx.Error(http.StatusBadRequest, "missing nonce cookie: possible CSRF attack")
+	}
+	nonce := nonceCookie.Value
+
+	// Clear the nonce cookie after use
+	http.SetCookie(ctx.Response, &http.Cookie{
+		Name:     "oidc_nonce",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1, // Delete cookie
+	})
+
+	// Clear the state cookie
+	http.SetCookie(ctx.Response, &http.Cookie{
+		Name:     "oidc_state",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1, // Delete cookie
+	})
+
+	user, token, err := oidcAuth.OIDCCallback(code, state, nonce)
 	if err != nil {
 		s.logger.Error("OIDC callback failed", "error", err)
 		return ctx.Error(http.StatusUnauthorized, "OIDC authentication failed: "+err.Error())
@@ -596,7 +655,8 @@ func (s *RESTServer) handleListSouls(ctx *Context) error {
 
 	souls, err := s.store.ListSoulsNoCtx(workspace, offset, limit)
 	if err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		s.logger.Error("failed to list souls", "error", err, "workspace", workspace)
+		return ctx.Error(http.StatusInternalServerError, "failed to retrieve souls")
 	}
 
 	// Check if there are more results
@@ -649,6 +709,11 @@ func (s *RESTServer) handleGetSoul(ctx *Context) error {
 		return ctx.Error(http.StatusNotFound, "soul not found")
 	}
 
+	// IDOR protection: Check if soul belongs to user's workspace
+	if soul.WorkspaceID != ctx.Workspace {
+		return ctx.Error(http.StatusForbidden, "access denied")
+	}
+
 	return ctx.JSON(http.StatusOK, soul)
 }
 
@@ -664,7 +729,8 @@ func (s *RESTServer) handleUpdateSoul(ctx *Context) error {
 	soul.UpdatedAt = time.Now()
 
 	if err := s.store.SaveSoul(ctx.Request.Context(), &soul); err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		s.logger.Error("failed to update soul", "error", err, "soul_id", id)
+		return ctx.Error(http.StatusInternalServerError, "failed to update soul")
 	}
 
 	return ctx.JSON(http.StatusOK, soul)
@@ -673,7 +739,8 @@ func (s *RESTServer) handleUpdateSoul(ctx *Context) error {
 func (s *RESTServer) handleDeleteSoul(ctx *Context) error {
 	id := ctx.Params["id"]
 	if err := s.store.DeleteSoul(ctx.Request.Context(), id); err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		s.logger.Error("failed to delete soul", "error", err, "soul_id", id)
+		return ctx.Error(http.StatusInternalServerError, "failed to delete soul")
 	}
 
 	return ctx.JSON(http.StatusNoContent, nil)
@@ -1100,6 +1167,8 @@ func (s *RESTServer) handleGetConfig(ctx *Context) error {
 
 func (s *RESTServer) handleUpdateConfig(ctx *Context) error {
 	var input map[string]interface{}
+	// Limit request body size to prevent memory exhaustion
+	ctx.Request.Body = http.MaxBytesReader(ctx.Response, ctx.Request.Body, maxRequestBodySize)
 	if err := json.NewDecoder(ctx.Request.Body).Decode(&input); err != nil {
 		return ctx.Error(http.StatusBadRequest, "invalid JSON")
 	}
@@ -1204,7 +1273,15 @@ func (s *RESTServer) handleSSE(ctx *Context) error {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// CORS headers - use same logic as middleware
+	origin := ctx.Request.Header.Get("Origin")
+	allowedOrigins := s.getAllowedOrigins()
+	if s.isOriginAllowed(origin, allowedOrigins) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+	}
+	w.Header().Set("Vary", "Origin")
 
 	// Send initial connection message
 	fmt.Fprintf(w, "data: %s\n\n", `{"type":"connected","timestamp":`+fmt.Sprintf("%d", time.Now().Unix())+`}`)
@@ -1230,13 +1307,17 @@ func (s *RESTServer) handleSSE(ctx *Context) error {
 
 func (s *RESTServer) requireAuth(handler Handler) Handler {
 	return func(ctx *Context) error {
-		// Skip auth if disabled
+		// When auth is disabled, deny all mutating requests and allow read-only for GET/HEAD
 		if !s.authConfig.IsEnabled() {
+			method := ctx.Request.Method
+			if method != http.MethodGet && method != http.MethodHead {
+				return ctx.Error(http.StatusForbidden, "authentication is required for this operation — enable auth in config to access this endpoint")
+			}
 			ctx.User = &User{
 				ID:        "anonymous",
 				Email:     "anonymous@anubis.watch",
 				Name:      "Anonymous",
-				Role:      "admin",
+				Role:      "viewer",
 				Workspace: "default",
 			}
 			ctx.Workspace = "default"
@@ -1261,6 +1342,21 @@ func (s *RESTServer) requireAuth(handler Handler) Handler {
 	}
 }
 
+// requireRole wraps requireAuth and additionally checks that the authenticated user
+// has the specified permission via their workspace role.
+func (s *RESTServer) requireRole(handler Handler, permission string) Handler {
+	return s.requireAuth(func(ctx *Context) error {
+		if ctx.User == nil || ctx.User.Role == "" {
+			return ctx.Error(http.StatusForbidden, "insufficient permissions")
+		}
+		role := core.MemberRole(ctx.User.Role)
+		if !role.Can(permission) {
+			return ctx.Error(http.StatusForbidden, "role '"+ctx.User.Role+"' lacks permission '"+permission+"'")
+		}
+		return handler(ctx)
+	})
+}
+
 func (s *RESTServer) loggingMiddleware(handler Handler) Handler {
 	return func(ctx *Context) error {
 		ctx.StartTime = time.Now()
@@ -1279,9 +1375,22 @@ func (s *RESTServer) loggingMiddleware(handler Handler) Handler {
 
 func (s *RESTServer) corsMiddleware(handler Handler) Handler {
 	return func(ctx *Context) error {
-		ctx.Response.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := ctx.Request.Header.Get("Origin")
+
+		// Get allowed origins from config or use defaults
+		allowedOrigins := s.getAllowedOrigins()
+
+		// Check if origin is allowed
+		if s.isOriginAllowed(origin, allowedOrigins) {
+			ctx.Response.Header().Set("Access-Control-Allow-Origin", origin)
+			ctx.Response.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+		// Always set Vary: Origin to prevent cache poisoning
+		ctx.Response.Header().Set("Vary", "Origin")
+
 		ctx.Response.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		ctx.Response.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		ctx.Response.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		ctx.Response.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
 
 		if ctx.Request.Method == "OPTIONS" {
 			ctx.Response.WriteHeader(http.StatusNoContent)
@@ -1290,6 +1399,35 @@ func (s *RESTServer) corsMiddleware(handler Handler) Handler {
 
 		return handler(ctx)
 	}
+}
+
+// getAllowedOrigins returns the list of allowed CORS origins
+func (s *RESTServer) getAllowedOrigins() []string {
+	// TODO: Make this configurable via config file
+	// For now, check environment variable
+	if allowed := os.Getenv("ANUBIS_CORS_ORIGINS"); allowed != "" {
+		return strings.Split(allowed, ",")
+	}
+	// Default: allow localhost for development
+	return []string{
+		"http://localhost:3000",
+		"http://localhost:8080",
+		"http://127.0.0.1:3000",
+		"http://127.0.0.1:8080",
+	}
+}
+
+// isOriginAllowed checks if an origin is in the allowed list
+func (s *RESTServer) isOriginAllowed(origin string, allowed []string) bool {
+	if origin == "" {
+		return false
+	}
+	for _, allowed := range allowed {
+		if strings.EqualFold(origin, allowed) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *RESTServer) recoveryMiddleware(handler Handler) Handler {
@@ -1580,9 +1718,35 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	// Handle CORS preflight globally (before route matching)
 	if method == "OPTIONS" {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := req.Header.Get("Origin")
+		// For preflight, check origin against allowed list
+		allowedOrigins := []string{
+			"http://localhost:3000",
+			"http://localhost:8080",
+			"http://127.0.0.1:3000",
+			"http://127.0.0.1:8080",
+		}
+		// Also check environment variable
+		if envOrigins := os.Getenv("ANUBIS_CORS_ORIGINS"); envOrigins != "" {
+			allowedOrigins = strings.Split(envOrigins, ",")
+		}
+
+		originAllowed := false
+		for _, allowed := range allowedOrigins {
+			if strings.EqualFold(origin, allowed) {
+				originAllowed = true
+				break
+			}
+		}
+
+		if originAllowed {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		w.Header().Set("Access-Control-Max-Age", "86400")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -1678,7 +1842,17 @@ func (c *Context) Error(status int, message string) error {
 	return c.JSON(status, map[string]string{"error": message})
 }
 
+// InternalError logs the actual error and returns a generic internal server error
+// Use this for 500 errors to prevent information leakage (CWE-209)
+func (s *RESTServer) internalError(ctx *Context, err error, context string) error {
+	s.logger.Error("internal server error", "context", context, "error", err, "path", ctx.Request.URL.Path)
+	return ctx.Error(http.StatusInternalServerError, "internal server error")
+}
+
+// Bind parses JSON request body with size limits to prevent DoS
 func (c *Context) Bind(v interface{}) error {
+	// Limit request body size to prevent memory exhaustion
+	c.Request.Body = http.MaxBytesReader(c.Response, c.Request.Body, maxRequestBodySize)
 	return json.NewDecoder(c.Request.Body).Decode(v)
 }
 
@@ -1694,6 +1868,8 @@ func (s *RESTServer) handleListMaintenanceWindows(ctx *Context) error {
 
 func (s *RESTServer) handleCreateMaintenanceWindow(ctx *Context) error {
 	var w core.MaintenanceWindow
+	// Limit request body size to prevent memory exhaustion
+	ctx.Request.Body = http.MaxBytesReader(ctx.Response, ctx.Request.Body, maxRequestBodySize)
 	if err := json.NewDecoder(ctx.Request.Body).Decode(&w); err != nil {
 		return ctx.Error(http.StatusBadRequest, "invalid JSON")
 	}
@@ -1719,6 +1895,8 @@ func (s *RESTServer) handleUpdateMaintenanceWindow(ctx *Context) error {
 		return ctx.Error(http.StatusNotFound, "maintenance window not found")
 	}
 	var input map[string]interface{}
+	// Limit request body size to prevent memory exhaustion
+	ctx.Request.Body = http.MaxBytesReader(ctx.Response, ctx.Request.Body, maxRequestBodySize)
 	if err := json.NewDecoder(ctx.Request.Body).Decode(&input); err != nil {
 		return ctx.Error(http.StatusBadRequest, "invalid JSON")
 	}

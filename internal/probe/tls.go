@@ -29,10 +29,28 @@ func (c *TLSChecker) Validate(soul *core.Soul) error {
 	if soul.Target == "" {
 		return configError("target", "target host:port is required")
 	}
-	// Ensure port is specified
-	if !strings.Contains(soul.Target, ":") {
-		soul.Target += ":443"
+
+	// Strip scheme if present (e.g., "https://example.com:443" -> "example.com:443")
+	target := soul.Target
+	if strings.HasPrefix(target, "https://") {
+		target = strings.TrimPrefix(target, "https://")
+	} else if strings.HasPrefix(target, "http://") {
+		target = strings.TrimPrefix(target, "http://")
 	}
+
+	// Ensure port is specified
+	if !strings.Contains(target, ":") {
+		target += ":443"
+	}
+
+	// Update soul.Target with normalized value
+	soul.Target = target
+
+	// SSRF protection - validate target address
+	if err := ValidateAddress(target); err != nil {
+		return configError("target", fmt.Sprintf("SSRF validation failed: %v", err))
+	}
+
 	return nil
 }
 
@@ -60,24 +78,26 @@ func (c *TLSChecker) Judge(ctx context.Context, soul *core.Soul) (*core.Judgment
 		host = soul.Target
 	}
 
-	// Configure TLS
+	// Configure TLS with proper verification
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true, // We'll verify manually
 		ServerName:         host,
+		MinVersion:         tls.VersionTLS12, // Enforce TLS 1.2 minimum
 	}
 
-	// Set minimum protocol version
+	// Set minimum protocol version from config (if specified and stricter)
 	if cfg.MinProtocol != "" {
 		version := parseTLSVersion(cfg.MinProtocol)
-		if version > 0 {
+		if version > tlsConfig.MinVersion {
 			tlsConfig.MinVersion = version
 		}
 	}
 
-	// Connect and perform handshake
+	// Connect and perform handshake with verification enabled
 	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: timeout}, "tcp", soul.Target, tlsConfig)
 	if err != nil {
-		return failJudgment(soul, fmt.Errorf("TLS connection failed: %w", err)), nil
+		// If connection fails due to certificate issues, try to get certificate info for diagnostics
+		// but still return a failure judgment
+		return c.diagnoseTLSFailure(soul, err, timeout), nil
 	}
 	defer conn.Close()
 
@@ -273,7 +293,40 @@ func (c *TLSChecker) Judge(ctx context.Context, soul *core.Soul) (*core.Judgment
 	return judgment, nil
 }
 
-// parseTLSVersion parses a TLS version string
+// diagnoseTLSFailure attempts to get certificate info even when TLS verification fails
+func (c *TLSChecker) diagnoseTLSFailure(soul *core.Soul, dialErr error, timeout time.Duration) *core.Judgment {
+	// Try to connect with InsecureSkipVerify just to extract certificate info for diagnostics
+	// This connection is only used for error reporting, not for actual service monitoring
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true,
+	}
+
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: timeout}, "tcp", soul.Target, tlsConfig)
+	if err != nil {
+		// Can't even connect, return the original error
+		return failJudgment(soul, fmt.Errorf("TLS connection failed: %w", dialErr))
+	}
+	defer conn.Close()
+
+	state := conn.ConnectionState()
+	tlsInfo := extractTLSInfo(&state)
+
+	// Build detailed error message based on the original error
+	errMsg := fmt.Sprintf("TLS verification failed: %v", dialErr)
+	if tlsInfo != nil && len(state.PeerCertificates) > 0 {
+		cert := state.PeerCertificates[0]
+		daysUntilExpiry := int(time.Until(cert.NotAfter).Hours() / 24)
+		if daysUntilExpiry < 0 {
+			errMsg = fmt.Sprintf("Certificate expired %d days ago", -daysUntilExpiry)
+		} else {
+			errMsg = fmt.Sprintf("Certificate expires in %d days but verification failed: %v", daysUntilExpiry, dialErr)
+		}
+	}
+
+	judgment := failJudgment(soul, fmt.Errorf("%s", errMsg))
+	judgment.TLSInfo = tlsInfo
+	return judgment
+}
 func parseTLSVersion(s string) uint16 {
 	s = strings.ToUpper(strings.ReplaceAll(s, ".", ""))
 	switch s {

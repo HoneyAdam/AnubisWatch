@@ -39,6 +39,11 @@ func (c *gRPCChecker) Validate(soul *core.Soul) error {
 		return configError("target", "target must be in host:port format")
 	}
 
+	// SSRF protection - validate target address
+	if err := ValidateAddress(soul.Target); err != nil {
+		return configError("target", fmt.Sprintf("SSRF validation failed: %v", err))
+	}
+
 	// Security warning for disabled TLS verification
 	if soul.GRPC != nil && soul.GRPC.InsecureSkipVerify {
 		slog.Warn("SECURITY WARNING: gRPC check has InsecureSkipVerify enabled. TLS certificate verification is disabled. This should only be used for testing, never in production.",

@@ -4082,8 +4082,12 @@ func TestInitSimpleWithPath(t *testing.T) {
 	if !strings.Contains(output, "Dashboard: http://localhost:") {
 		t.Error("Expected dashboard URL in output")
 	}
-	if !strings.Contains(output, "Login: admin@anubis.watch / admin") {
+	// Check for secure password generation message (password is now random)
+	if !strings.Contains(output, "Login: admin@anubis.watch /") {
 		t.Error("Expected login credentials in output")
+	}
+	if !strings.Contains(output, "IMPORTANT: Save this password") {
+		t.Error("Expected password warning message")
 	}
 }
 

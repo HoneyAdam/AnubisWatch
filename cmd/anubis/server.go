@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -26,6 +28,11 @@ import (
 	"github.com/AnubisWatch/anubiswatch/internal/probe"
 	"github.com/AnubisWatch/anubiswatch/internal/statuspage"
 	"github.com/AnubisWatch/anubiswatch/internal/storage"
+)
+
+const (
+	// maxRequestBodySize limits JSON request body size to prevent DoS (1MB)
+	maxRequestBodySize = 1 << 20 // 1MB
 )
 
 // ServerDependencies holds all dependencies for the server
@@ -381,12 +388,22 @@ func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 	// Initialize auth
 	sessionPath := filepath.Join(cfg.Storage.Path, "sessions.json")
 	adminEmail := "admin@anubis.watch"
-	adminPassword := "admin"
 	if cfg.Auth.Local.AdminEmail != "" {
 		adminEmail = cfg.Auth.Local.AdminEmail
 	}
-	if cfg.Auth.Local.AdminPassword != "" {
-		adminPassword = cfg.Auth.Local.AdminPassword
+
+	// CRITICAL: Never use a hardcoded default password. If no password is configured,
+	// generate a random one and log it so the operator must explicitly set it.
+	adminPassword := cfg.Auth.Local.AdminPassword
+	if adminPassword == "" {
+		b := make([]byte, 24)
+		if _, err := rand.Read(b); err != nil {
+			return nil, fmt.Errorf("failed to generate admin password: %w", err)
+		}
+		adminPassword = base64.RawURLEncoding.EncodeToString(b)
+		logger.Warn("no admin password configured — random password generated",
+			"action", "set auth.local.admin_password in config",
+			"password", adminPassword)
 	}
 
 	var authenticator api.Authenticator
@@ -463,6 +480,7 @@ func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 			fmt.Sprintf(":%d", cfg.Server.GRPCPort),
 			grpcStore,
 			&grpcProbeAdapter{engine: probeEngine},
+			authenticator,
 			logger,
 		)
 	}
@@ -497,6 +515,8 @@ func handleLogin(a *auth.LocalAuthenticator) http.HandlerFunc {
 			Email    string `json:"email"`
 			Password string `json:"password"`
 		}
+		// Limit request body size to prevent memory exhaustion
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return

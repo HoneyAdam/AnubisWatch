@@ -35,6 +35,12 @@ func (c *TCPChecker) Validate(soul *core.Soul) error {
 	if _, _, err := net.SplitHostPort(soul.Target); err != nil {
 		return configError("target", "target must be in host:port format")
 	}
+
+	// SSRF protection - validate target address
+	if err := ValidateAddress(soul.Target); err != nil {
+		return configError("target", fmt.Sprintf("SSRF validation failed: %v", err))
+	}
+
 	return nil
 }
 
@@ -162,6 +168,12 @@ func (c *UDPChecker) Validate(soul *core.Soul) error {
 	if _, _, err := net.SplitHostPort(soul.Target); err != nil {
 		return configError("target", "target must be in host:port format")
 	}
+
+	// SSRF protection - validate target address
+	if err := ValidateAddress(soul.Target); err != nil {
+		return configError("target", fmt.Sprintf("SSRF validation failed: %v", err))
+	}
+
 	return nil
 }
 

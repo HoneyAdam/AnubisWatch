@@ -7,12 +7,15 @@ import (
 
 // initSimpleWithPath creates simple config at specific path
 func initSimpleWithPath(configPath string) {
+	// Generate secure random admin password
+	securePassword := generateSecurePassword()
+
 	opts := ConfigOptions{
 		Host:            "0.0.0.0",
 		HTTPPort:        findAvailablePort(8080),
 		EnableTLS:       false,
 		AdminEmail:      "admin@anubis.watch",
-		AdminPassword:   "admin",
+		AdminPassword:   securePassword,
 		DataDir:         getDefaultDataDir(),
 		RetentionDays:   90,
 		EnableDashboard: true,
@@ -36,5 +39,7 @@ func initSimpleWithPath(configPath string) {
 	fmt.Println("  anubis serve   (if in same directory)")
 	fmt.Println()
 	fmt.Printf("Dashboard: http://localhost:%d\n", opts.HTTPPort)
-	fmt.Println("Login: admin@anubis.watch / admin")
+	fmt.Printf("Login: admin@anubis.watch / %s\n", securePassword)
+	fmt.Println()
+	fmt.Println("⚠️  IMPORTANT: Save this password! It will not be shown again.")
 }

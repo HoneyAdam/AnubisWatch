@@ -3,6 +3,7 @@ package statuspage
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"strings"
 	"time"
@@ -267,10 +268,10 @@ func (h *Handler) showPasswordForm(w http.ResponseWriter, r *http.Request, page 
     </div>
 </body>
 </html>`,
-		page.Name,
+		html.EscapeString(page.Name),
 		theme.PrimaryColor, theme.BackgroundColor, theme.TextColor, theme.AccentColor,
 		theme.FontFamily,
-		page.Name,
+		html.EscapeString(page.Name),
 	)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -462,7 +463,7 @@ func (h *Handler) renderStatusPage(page *core.StatusPage, data *core.StatusPageD
 				<span>%.2f%% uptime</span>
 			</div>
 		</div>`,
-			soulClass, soul.Name, soulClass, soul.Status, soul.ResponseTime, soul.UptimePercent,
+			soulClass, html.EscapeString(soul.Name), soulClass, html.EscapeString(soul.Status), soul.ResponseTime, soul.UptimePercent,
 		)
 	}
 
@@ -477,7 +478,7 @@ func (h *Handler) renderStatusPage(page *core.StatusPage, data *core.StatusPageD
 				<span class="status-indicator %s"></span>
 				%s
 			</div>`,
-				soulClass, soulClass, soul.Name,
+				soulClass, soulClass, html.EscapeString(soul.Name),
 			)
 		}
 		groupsHTML += fmt.Sprintf(`
@@ -486,7 +487,7 @@ func (h *Handler) renderStatusPage(page *core.StatusPage, data *core.StatusPageD
 			<p>%s</p>
 			<div class="group-souls">%s</div>
 		</div>`,
-			group.Name, group.Description, groupSouls,
+			html.EscapeString(group.Name), html.EscapeString(group.Description), groupSouls,
 		)
 	}
 
@@ -504,8 +505,8 @@ func (h *Handler) renderStatusPage(page *core.StatusPage, data *core.StatusPageD
 					<span>Status: %s</span>
 				</div>
 			</div>`,
-				inc.Severity, inc.Title, inc.Description,
-				inc.StartedAt.Format(time.RFC3339), inc.Status,
+				html.EscapeString(string(inc.Severity)), html.EscapeString(inc.Title), html.EscapeString(inc.Description),
+				inc.StartedAt.Format(time.RFC3339), html.EscapeString(string(inc.Status)),
 			)
 		}
 		incidentsHTML += "</div>"
@@ -747,12 +748,12 @@ func (h *Handler) renderStatusPage(page *core.StatusPage, data *core.StatusPageD
     </div>
 </body>
 </html>`,
-		page.Name,
+		html.EscapeString(page.Name),
 		theme.PrimaryColor, theme.BackgroundColor, theme.TextColor, theme.AccentColor,
 		theme.FontFamily,
 		theme.CustomCSS,
-		page.Name, page.Description,
-		data.Status.Status, statusClass, data.Status.Title, data.Status.Description,
+		html.EscapeString(page.Name), html.EscapeString(page.Description),
+		data.Status.Status, statusClass, html.EscapeString(data.Status.Title), html.EscapeString(data.Status.Description),
 		incidentsHTML,
 		soulsHTML,
 		groupsHTML,
@@ -1021,7 +1022,7 @@ func (h *Handler) WidgetHandler(w http.ResponseWriter, r *http.Request) {
 			soulRows += fmt.Sprintf(`<tr>
 				<td style="padding:4px 8px;font-size:12px;">%s</td>
 				<td style="padding:4px 8px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%%;background:%s;"></span></td>
-			</tr>`, soul.Name, dotColor)
+			</tr>`, html.EscapeString(soul.Name), dotColor)
 		}
 
 		html := fmt.Sprintf(`<!DOCTYPE html>
@@ -1056,7 +1057,7 @@ tbody tr:hover{background:#f3f4f6}
   <div class="footer">Powered by <a href="https://anubiswatch.com" target="_blank">AnubisWatch</a></div>
 </div>
 </body>
-</html>`, statusColor, statusColor, page.Name, strings.ToTitle(string(overallStatus.Status[0]))+overallStatus.Status[1:], soulRows)
+</html>`, statusColor, statusColor, html.EscapeString(page.Name), strings.ToTitle(string(overallStatus.Status[0]))+overallStatus.Status[1:], soulRows)
 
 		w.Write([]byte(html))
 	} else {
@@ -1081,7 +1082,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   %s: %s
 </a>
 </body>
-</html>`, statusColor, pageID, page.Name, strings.ToTitle(string(overallStatus.Status[0]))+overallStatus.Status[1:])
+</html>`, statusColor, html.EscapeString(pageID), html.EscapeString(page.Name), strings.ToTitle(string(overallStatus.Status[0]))+overallStatus.Status[1:])
 
 		w.Write([]byte(html))
 	}
@@ -1113,7 +1114,7 @@ func (h *Handler) RSSFeedHandler(w http.ResponseWriter, r *http.Request) {
     <link>https://%s</link>
     <lastBuildDate>%s</lastBuildDate>
     <generator>AnubisWatch</generator>
-`, page.Name, page.Name, page.CustomDomain, time.Now().UTC().Format(time.RFC1123Z))
+`, html.EscapeString(page.Name), html.EscapeString(page.Name), html.EscapeString(page.CustomDomain), time.Now().UTC().Format(time.RFC1123Z))
 
 	for _, inc := range incidents {
 		// Get soul name for context
@@ -1129,9 +1130,9 @@ func (h *Handler) RSSFeedHandler(w http.ResponseWriter, r *http.Request) {
       <link>https://%s/incidents/%s</link>
       <guid>%s</guid>
     </item>
-`, soulName, inc.Status, soulName, inc.Status,
+`, html.EscapeString(soulName), html.EscapeString(string(inc.Status)), html.EscapeString(soulName), html.EscapeString(string(inc.Status)),
 			inc.StartedAt.Format(time.RFC1123Z),
-			page.CustomDomain, inc.ID, inc.ID)
+			html.EscapeString(page.CustomDomain), html.EscapeString(inc.ID), html.EscapeString(inc.ID))
 	}
 
 	rss += `  </channel>

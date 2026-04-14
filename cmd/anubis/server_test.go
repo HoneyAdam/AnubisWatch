@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AnubisWatch/anubiswatch/internal/api"
 	"github.com/AnubisWatch/anubiswatch/internal/auth"
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 	"github.com/AnubisWatch/anubiswatch/internal/grpcapi"
@@ -702,7 +703,7 @@ func TestServer_Start_GRPCServerError(t *testing.T) {
 
 	// Override gRPC server with invalid address to force start error
 	grpcStore := &grpcStorageAdapter{inner: &restStorageAdapter{store: deps.Store}}
-	deps.GRPCServer = grpcapi.NewServer("invalid://:abc", grpcStore, &mockGRPCProbe{}, logger)
+	deps.GRPCServer = grpcapi.NewServer("invalid://:abc", grpcStore, &mockGRPCProbe{}, &mockAuthenticator{}, logger)
 	// Avoid REST server port conflicts with other tests
 	deps.RESTServer = nil
 
@@ -721,4 +722,13 @@ type mockGRPCProbe struct{}
 
 func (m *mockGRPCProbe) ForceCheck(soulID string) (interface{}, error) {
 	return nil, fmt.Errorf("mock error")
+}
+
+type mockAuthenticator struct{}
+
+func (m *mockAuthenticator) Authenticate(token string) (*api.User, error) {
+	if token == "valid-token" {
+		return &api.User{ID: "user-1", Email: "test@example.com", Workspace: "default"}, nil
+	}
+	return nil, fmt.Errorf("invalid token")
 }

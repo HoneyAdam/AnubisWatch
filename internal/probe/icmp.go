@@ -31,6 +31,13 @@ func (c *ICMPChecker) Validate(soul *core.Soul) error {
 	if soul.Target == "" {
 		return configError("target", "target host is required")
 	}
+
+	// SSRF protection - validate target host
+	// ICMP targets are hostnames or IPs, not URLs, so we check against blocked hosts/IPs
+	if err := ValidateAddress(soul.Target + ":0"); err != nil {
+		return configError("target", fmt.Sprintf("SSRF validation failed: %v", err))
+	}
+
 	return nil
 }
 

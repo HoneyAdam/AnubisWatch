@@ -207,7 +207,7 @@ func replaceAll(s, old, new string) string {
 }
 
 func TestSlackDispatcher_Send_MockedHTTP(t *testing.T) {
-	dispatcher := &SlackDispatcher{logger: newTestLogger()}
+	_ = &SlackDispatcher{logger: newTestLogger()}
 
 	channel := &core.AlertChannel{
 		ID:      "test-channel",
@@ -221,7 +221,7 @@ func TestSlackDispatcher_Send_MockedHTTP(t *testing.T) {
 	}
 
 	// Verify getClient returns non-nil
-	client := dispatcher.getClient()
+	client := getHTTPClient()
 	if client == nil {
 		t.Error("Expected HTTP client")
 	}
@@ -230,7 +230,7 @@ func TestSlackDispatcher_Send_MockedHTTP(t *testing.T) {
 }
 
 func TestDiscordDispatcher_Send_MockedHTTP(t *testing.T) {
-	dispatcher := &DiscordDispatcher{logger: newTestLogger()}
+	_ = &DiscordDispatcher{logger: newTestLogger()}
 
 	channel := &core.AlertChannel{
 		ID:   "test-channel",
@@ -240,7 +240,7 @@ func TestDiscordDispatcher_Send_MockedHTTP(t *testing.T) {
 		},
 	}
 
-	client := dispatcher.getClient()
+	client := getHTTPClient()
 	if client == nil {
 		t.Error("Expected HTTP client")
 	}
@@ -249,7 +249,7 @@ func TestDiscordDispatcher_Send_MockedHTTP(t *testing.T) {
 }
 
 func TestTelegramDispatcher_Send_MockedHTTP(t *testing.T) {
-	dispatcher := &TelegramDispatcher{logger: newTestLogger()}
+	_ = &TelegramDispatcher{logger: newTestLogger()}
 
 	channel := &core.AlertChannel{
 		ID:   "test-channel",
@@ -260,7 +260,7 @@ func TestTelegramDispatcher_Send_MockedHTTP(t *testing.T) {
 		},
 	}
 
-	client := dispatcher.getClient()
+	client := getHTTPClient()
 	if client == nil {
 		t.Error("Expected HTTP client")
 	}
@@ -269,7 +269,7 @@ func TestTelegramDispatcher_Send_MockedHTTP(t *testing.T) {
 }
 
 func TestPagerDutyDispatcher_Send_MockedHTTP(t *testing.T) {
-	dispatcher := &PagerDutyDispatcher{logger: newTestLogger()}
+	_ = &PagerDutyDispatcher{logger: newTestLogger()}
 
 	channel := &core.AlertChannel{
 		ID:   "test-channel",
@@ -279,7 +279,7 @@ func TestPagerDutyDispatcher_Send_MockedHTTP(t *testing.T) {
 		},
 	}
 
-	client := dispatcher.getClient()
+	client := getHTTPClient()
 	if client == nil {
 		t.Error("Expected HTTP client")
 	}
@@ -288,7 +288,7 @@ func TestPagerDutyDispatcher_Send_MockedHTTP(t *testing.T) {
 }
 
 func TestOpsGenieDispatcher_Send_MockedHTTP(t *testing.T) {
-	dispatcher := &OpsGenieDispatcher{logger: newTestLogger()}
+	_ = &OpsGenieDispatcher{logger: newTestLogger()}
 
 	channel := &core.AlertChannel{
 		ID:   "test-channel",
@@ -298,7 +298,7 @@ func TestOpsGenieDispatcher_Send_MockedHTTP(t *testing.T) {
 		},
 	}
 
-	client := dispatcher.getClient()
+	client := getHTTPClient()
 	if client == nil {
 		t.Error("Expected HTTP client")
 	}
@@ -307,7 +307,7 @@ func TestOpsGenieDispatcher_Send_MockedHTTP(t *testing.T) {
 }
 
 func TestNtfyDispatcher_Send_MockedHTTP(t *testing.T) {
-	dispatcher := &NtfyDispatcher{logger: newTestLogger()}
+	_ = &NtfyDispatcher{logger: newTestLogger()}
 
 	channel := &core.AlertChannel{
 		ID:   "test-channel",
@@ -317,7 +317,7 @@ func TestNtfyDispatcher_Send_MockedHTTP(t *testing.T) {
 		},
 	}
 
-	client := dispatcher.getClient()
+	client := getHTTPClient()
 	if client == nil {
 		t.Error("Expected HTTP client")
 	}
@@ -326,7 +326,7 @@ func TestNtfyDispatcher_Send_MockedHTTP(t *testing.T) {
 }
 
 func TestWebHookDispatcher_Send_MockedHTTP(t *testing.T) {
-	dispatcher := &WebHookDispatcher{logger: newTestLogger()}
+	_ = &WebHookDispatcher{logger: newTestLogger()}
 
 	channel := &core.AlertChannel{
 		ID:   "test-channel",
@@ -337,7 +337,7 @@ func TestWebHookDispatcher_Send_MockedHTTP(t *testing.T) {
 		},
 	}
 
-	client := dispatcher.getClient()
+	client := getHTTPClient()
 	if client == nil {
 		t.Error("Expected HTTP client")
 	}
@@ -463,7 +463,6 @@ func TestSlackDispatcher_Send(t *testing.T) {
 
 	dispatcher := &SlackDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{},
 	}
 
 	event := &core.AlertEvent{
@@ -515,7 +514,6 @@ func TestDiscordDispatcher_Send(t *testing.T) {
 
 	dispatcher := &DiscordDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{},
 	}
 
 	event := &core.AlertEvent{
@@ -559,7 +557,6 @@ func TestTelegramDispatcher_Send(t *testing.T) {
 	// Full integration testing requires Telegram API setup
 	dispatcher := &TelegramDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{},
 	}
 
 	event := &core.AlertEvent{
@@ -655,7 +652,6 @@ func TestWebHookDispatcher_Send(t *testing.T) {
 
 	dispatcher := &WebHookDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{},
 	}
 
 	event := &core.AlertEvent{
@@ -815,10 +811,9 @@ func TestOpsGenieDispatcher_Send_EURegion(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Use a custom transport to intercept the request
+	// Use the shared HTTP client (request will fail at connection, but we verify URL construction)
 	dispatcher := &OpsGenieDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{Transport: &testTransport{original: &http.Transport{}}},
 	}
 
 	event := &core.AlertEvent{
@@ -1525,7 +1520,6 @@ func TestTelegramDispatcher_Send_HttpSuccess(t *testing.T) {
 
 	dispatcher := &TelegramDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{},
 	}
 
 	event := &core.AlertEvent{
@@ -1560,7 +1554,6 @@ func TestDiscordDispatcher_Send_ErrorStatus(t *testing.T) {
 
 	dispatcher := &DiscordDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{},
 	}
 
 	event := &core.AlertEvent{
@@ -1593,7 +1586,6 @@ func TestSlackDispatcher_Send_HttpSuccess(t *testing.T) {
 
 	dispatcher := &SlackDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{},
 	}
 
 	event := &core.AlertEvent{
@@ -1626,7 +1618,6 @@ func TestSlackDispatcher_Send_ErrorStatus(t *testing.T) {
 
 	dispatcher := &SlackDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{},
 	}
 
 	event := &core.AlertEvent{
@@ -1690,7 +1681,6 @@ func TestNtfyDispatcher_Send_HttpSuccess(t *testing.T) {
 
 	dispatcher := &NtfyDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{},
 	}
 
 	event := &core.AlertEvent{
@@ -1724,7 +1714,6 @@ func TestNtfyDispatcher_Send_ErrorStatus(t *testing.T) {
 
 	dispatcher := &NtfyDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{},
 	}
 
 	event := &core.AlertEvent{
@@ -1758,7 +1747,6 @@ func TestWebHookDispatcher_Send_HttpError(t *testing.T) {
 
 	dispatcher := &WebHookDispatcher{
 		logger: newTestLogger(),
-		client: &http.Client{},
 	}
 
 	event := &core.AlertEvent{

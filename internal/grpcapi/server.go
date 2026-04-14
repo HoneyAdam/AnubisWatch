@@ -6,16 +6,19 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/AnubisWatch/anubiswatch/internal/api"
 	v1 "github.com/AnubisWatch/anubiswatch/internal/grpcapi/v1"
 )
 
@@ -30,6 +33,7 @@ type Server struct {
 
 	store Store
 	probe ProbeEngine
+	auth  Authenticator
 }
 
 // Store defines the storage operations available to the gRPC server
@@ -69,15 +73,35 @@ type ProbeEngine interface {
 // AlertManager interface (reserved for future use)
 type AlertManager interface{}
 
-// NewServer creates a new gRPC server
-func NewServer(addr string, store Store, probe ProbeEngine, logger *slog.Logger) *Server {
+// Authenticator interface for authentication
+type Authenticator interface {
+	Authenticate(token string) (*api.User, error)
+}
+
+// contextKey is used for context values
+type contextKey int
+
+const (
+	userContextKey contextKey = iota
+)
+
+// NewServer creates a new gRPC server with authentication
+func NewServer(addr string, store Store, probe ProbeEngine, auth Authenticator, logger *slog.Logger) *Server {
 	s := &Server{
 		addr:   addr,
 		logger: logger,
 		store:  store,
 		probe:  probe,
+		auth:   auth,
 	}
-	s.grpc = grpc.NewServer()
+
+	// Create gRPC server with authentication interceptor
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(s.authInterceptor),
+		grpc.StreamInterceptor(s.authStreamInterceptor),
+	)
+
+	s.grpc = grpcServer
 	v1.RegisterAnubisWatchServiceServer(s.grpc, s)
 	reflection.Register(s.grpc)
 	return s
@@ -807,8 +831,35 @@ func (s *Server) UpdateChannel(ctx context.Context, req *v1.UpdateChannelRequest
 			m["enabled"] = *req.Enabled
 		}
 		if req.Config != nil {
+			// Whitelist of allowed config fields to prevent mass assignment
+			allowedConfigFields := map[string]bool{
+				"webhook_url":     true,
+				"channel":         true,
+				"bot_token":       true,
+				"chat_id":         true,
+				"api_key":         true,
+				"region":          true,
+				"integration_key": true,
+				"server":          true,
+				"topic":           true,
+				"to":              true,
+				"from":            true,
+				"subject":         true,
+				"smtp_host":       true,
+				"smtp_port":       true,
+				"username":        true,
+				"password":        true,
+				"use_tls":         true,
+				"template":        true,
+				"headers":         true,
+				"secret":          true,
+				"method":          true,
+				"url":             true,
+			}
 			for k, v := range req.Config {
-				m[k] = v
+				if allowedConfigFields[k] {
+					m[k] = v
+				}
 			}
 		}
 		if err := s.store.SaveChannelNoCtx(m); err != nil {
@@ -1191,4 +1242,94 @@ func (s *Server) StreamVerdicts(req *v1.StreamRequest, stream v1.AnubisWatchServ
 			}
 		}
 	}
+}
+
+// authInterceptor is a gRPC unary interceptor for authentication
+func (s *Server) authInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	// Extract token from metadata
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "missing metadata")
+	}
+
+	// Get authorization header
+	authHeader := md.Get("authorization")
+	if len(authHeader) == 0 {
+		return nil, status.Error(codes.Unauthenticated, "missing authorization header")
+	}
+
+	// Extract token (Bearer token)
+	token := authHeader[0]
+	if strings.HasPrefix(token, "Bearer ") {
+		token = strings.TrimPrefix(token, "Bearer ")
+	}
+
+	// Validate token
+	user, err := s.auth.Authenticate(token)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("gRPC authentication failed", "error", err, "method", info.FullMethod)
+		}
+		return nil, status.Error(codes.Unauthenticated, "invalid token")
+	}
+
+	// Add user to context
+	ctx = context.WithValue(ctx, userContextKey, user)
+
+	return handler(ctx, req)
+}
+
+// authStreamInterceptor is a gRPC stream interceptor for authentication
+func (s *Server) authStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	// Extract token from metadata
+	ctx := ss.Context()
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "missing metadata")
+	}
+
+	// Get authorization header
+	authHeader := md.Get("authorization")
+	if len(authHeader) == 0 {
+		return status.Error(codes.Unauthenticated, "missing authorization header")
+	}
+
+	// Extract token (Bearer token)
+	token := authHeader[0]
+	if strings.HasPrefix(token, "Bearer ") {
+		token = strings.TrimPrefix(token, "Bearer ")
+	}
+
+	// Validate token
+	user, err := s.auth.Authenticate(token)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("gRPC stream authentication failed", "error", err, "method", info.FullMethod)
+		}
+		return status.Error(codes.Unauthenticated, "invalid token")
+	}
+
+	// Add user to context
+	ctx = context.WithValue(ctx, userContextKey, user)
+
+	// Wrap the stream with the new context
+	wrapped := &wrappedStream{ServerStream: ss, ctx: ctx}
+
+	return handler(srv, wrapped)
+}
+
+// wrappedStream wraps a grpc.ServerStream with a new context
+type wrappedStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (w *wrappedStream) Context() context.Context {
+	return w.ctx
+}
+
+// GetUserFromContext retrieves the authenticated user from the context
+func GetUserFromContext(ctx context.Context) (*api.User, bool) {
+	user, ok := ctx.Value(userContextKey).(*api.User)
+	return user, ok
 }

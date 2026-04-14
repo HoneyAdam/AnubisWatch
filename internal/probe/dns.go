@@ -29,6 +29,13 @@ func (c *DNSChecker) Validate(soul *core.Soul) error {
 	if soul.Target == "" {
 		return configError("target", "target domain is required")
 	}
+
+	// SSRF protection - validate target domain
+	// DNS targets are domain names, not URLs, so we check against blocked hosts
+	if err := ValidateAddress(soul.Target + ":53"); err != nil {
+		return configError("target", fmt.Sprintf("SSRF validation failed: %v", err))
+	}
+
 	return nil
 }
 

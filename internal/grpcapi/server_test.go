@@ -11,9 +11,21 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	v1 "github.com/AnubisWatch/anubiswatch/internal/grpcapi/v1"
+	"github.com/AnubisWatch/anubiswatch/internal/api"
 )
+
+// mockAuthenticator implements Authenticator interface for testing
+type mockAuthenticator struct{}
+
+func (m *mockAuthenticator) Authenticate(token string) (*api.User, error) {
+	if token == "valid-token" {
+		return &api.User{ID: "user-1", Email: "test@example.com", Workspace: "default"}, nil
+	}
+	return nil, fmt.Errorf("invalid token")
+}
 
 // mockGRPCStore implements Store with in-memory data
 type mockGRPCStore struct {
@@ -281,7 +293,7 @@ func (m *mockAlertEvent) GetAcknowledged() bool   { return false }
 
 func TestNewServer(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 	if srv == nil {
 		t.Fatal("NewServer returned nil")
 	}
@@ -292,7 +304,7 @@ func TestNewServer(t *testing.T) {
 
 func TestServer_ListSouls(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.ListSouls(context.Background(), &v1.ListSoulsRequest{
 		Offset: 0,
@@ -308,7 +320,7 @@ func TestServer_ListSouls(t *testing.T) {
 
 func TestServer_GetSoul_NotFound(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	_, err := srv.GetSoul(context.Background(), &v1.GetSoulRequest{Id: "nonexistent"})
 	if err == nil {
@@ -318,7 +330,7 @@ func TestServer_GetSoul_NotFound(t *testing.T) {
 
 func TestServer_GetClusterStatus(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.GetClusterStatus(context.Background(), nil)
 	if err != nil {
@@ -334,7 +346,7 @@ func TestServer_GetClusterStatus(t *testing.T) {
 
 func TestServer_ListChannels(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.ListChannels(context.Background(), &v1.ListChannelsRequest{})
 	if err != nil {
@@ -347,7 +359,7 @@ func TestServer_ListChannels(t *testing.T) {
 
 func TestServer_ListRules(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.ListRules(context.Background(), &v1.ListRulesRequest{})
 	if err != nil {
@@ -360,7 +372,7 @@ func TestServer_ListRules(t *testing.T) {
 
 func TestServer_ListJourneys(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.ListJourneys(context.Background(), &v1.ListJourneysRequest{})
 	if err != nil {
@@ -374,7 +386,7 @@ func TestServer_ListJourneys(t *testing.T) {
 // TestGRPCServer_Listen tests that the server can actually listen and accept connections
 func TestGRPCServer_Listen(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer("127.0.0.1:0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer("127.0.0.1:0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	if err := srv.Start(); err != nil {
 		t.Fatalf("Failed to start gRPC server: %v", err)
@@ -396,7 +408,11 @@ func TestGRPCServer_Listen(t *testing.T) {
 	defer conn.Close()
 
 	client := v1.NewAnubisWatchServiceClient(conn)
-	status, err := client.GetClusterStatus(ctx, nil)
+
+	// Add authorization header to context
+	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer valid-token")
+
+	status, err := client.GetClusterStatus(ctx, &emptypb.Empty{})
 	if err != nil {
 		t.Fatalf("GetClusterStatus RPC failed: %v", err)
 	}
@@ -411,7 +427,7 @@ func TestGRPCServer_Bufconn(t *testing.T) {
 	lis := bufconn.Listen(bufSize)
 
 	store := newMockGRPCStore()
-	srv := NewServer("bufconn", store, &mockGRPCProbe{}, nil)
+	srv := NewServer("bufconn", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	go func() {
 		srv.grpc.Serve(lis)
@@ -437,6 +453,9 @@ func TestGRPCServer_Bufconn(t *testing.T) {
 	defer conn.Close()
 
 	client := v1.NewAnubisWatchServiceClient(conn)
+
+	// Add authorization header to context
+	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer valid-token")
 
 	// Test ListSouls
 	resp, err := client.ListSouls(ctx, &v1.ListSoulsRequest{Limit: 10})
@@ -467,7 +486,7 @@ func TestServer_ListVerdicts(t *testing.T) {
 			message: "Test alert", timestamp: time.Now(),
 		},
 	}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.ListVerdicts(context.Background(), &v1.ListVerdictsRequest{
 		Limit: 20,
@@ -486,7 +505,7 @@ func TestServer_ListVerdicts(t *testing.T) {
 // TestServer_CreateSoul tests the CreateSoul mutation RPC
 func TestServer_CreateSoul(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	name := "test-soul"
 	target := "example.com"
@@ -514,7 +533,7 @@ func TestServer_CreateSoul(t *testing.T) {
 func TestServer_DeleteSoul(t *testing.T) {
 	store := newMockGRPCStore()
 	store.souls["soul_1"] = &mockSoul{id: "soul_1", name: "test"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	_, err := srv.DeleteSoul(context.Background(), &v1.DeleteSoulRequest{Id: "soul_1"})
 	if err != nil {
@@ -530,7 +549,7 @@ func TestServer_DeleteSoul(t *testing.T) {
 // TestServer_CreateChannel tests the CreateChannel mutation RPC
 func TestServer_CreateChannel(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.CreateChannel(context.Background(), &v1.CreateChannelRequest{
 		Name:      "test-slack",
@@ -551,7 +570,7 @@ func TestServer_CreateChannel(t *testing.T) {
 func TestServer_DeleteChannel(t *testing.T) {
 	store := newMockGRPCStore()
 	store.channels["ch_1"] = &mockChannel{id: "ch_1", name: "test", chType: "slack"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	_, err := srv.DeleteChannel(context.Background(), &v1.DeleteChannelRequest{Id: "ch_1"})
 	if err != nil {
@@ -562,7 +581,7 @@ func TestServer_DeleteChannel(t *testing.T) {
 // TestServer_CreateRule tests the CreateRule mutation RPC
 func TestServer_CreateRule(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.CreateRule(context.Background(), &v1.CreateRuleRequest{
 		Name:          "test-rule",
@@ -584,7 +603,7 @@ func TestServer_CreateRule(t *testing.T) {
 func TestServer_DeleteRule(t *testing.T) {
 	store := newMockGRPCStore()
 	store.rules["rule_1"] = &mockRule{id: "rule_1", name: "test"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	_, err := srv.DeleteRule(context.Background(), &v1.DeleteRuleRequest{Id: "rule_1"})
 	if err != nil {
@@ -595,7 +614,7 @@ func TestServer_DeleteRule(t *testing.T) {
 // TestServer_CreateJourney tests the CreateJourney mutation RPC
 func TestServer_CreateJourney(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.CreateJourney(context.Background(), &v1.CreateJourneyRequest{
 		Name:        "test-journey",
@@ -624,7 +643,7 @@ func TestServer_CreateJourney(t *testing.T) {
 func TestServer_DeleteJourney(t *testing.T) {
 	store := newMockGRPCStore()
 	store.journeys["j_1"] = &mockJourney{id: "j_1", name: "test"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	_, err := srv.DeleteJourney(context.Background(), &v1.DeleteJourneyRequest{Id: "j_1"})
 	if err != nil {
@@ -681,7 +700,7 @@ func (m *mockVerdictsStream) Send(v *v1.Verdict) error { return nil }
 func TestServer_GetSoul_Found(t *testing.T) {
 	store := newMockGRPCStore()
 	store.souls["soul_1"] = &mockSoul{id: "soul_1", name: "test"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.GetSoul(context.Background(), &v1.GetSoulRequest{Id: "soul_1"})
 	if err != nil {
@@ -695,7 +714,7 @@ func TestServer_GetSoul_Found(t *testing.T) {
 func TestServer_UpdateSoul(t *testing.T) {
 	store := newMockGRPCStore()
 	store.souls["soul_1"] = map[string]interface{}{"id": "soul_1", "name": "old", "type": "http", "target": "old.com"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	name := "updated"
 	_, err := srv.UpdateSoul(context.Background(), &v1.UpdateSoulRequest{
@@ -731,7 +750,7 @@ func TestServer_ListJudgments(t *testing.T) {
 	store.judgments = []interface{}{
 		&mockJudgment{id: "j1", soulID: "s1", status: "alive", duration: 10 * time.Millisecond, message: "ok", timestamp: time.Now()},
 	}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.ListJudgments(context.Background(), &v1.ListJudgmentsRequest{Limit: 10})
 	if err != nil {
@@ -747,7 +766,7 @@ func TestServer_GetSoulJudgments(t *testing.T) {
 	store.judgments = []interface{}{
 		&mockJudgment{id: "j1", soulID: "s1", status: "alive", duration: 10 * time.Millisecond, message: "ok", timestamp: time.Now()},
 	}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.GetSoulJudgments(context.Background(), &v1.GetSoulJudgmentsRequest{SoulId: "s1", Limit: 10})
 	if err != nil {
@@ -760,7 +779,7 @@ func TestServer_GetSoulJudgments(t *testing.T) {
 
 func TestServer_JudgeSoul(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	_, err := srv.JudgeSoul(context.Background(), &v1.JudgeSoulRequest{SoulId: "s1"})
 	if err != nil {
@@ -771,7 +790,7 @@ func TestServer_JudgeSoul(t *testing.T) {
 func TestServer_GetChannel(t *testing.T) {
 	store := newMockGRPCStore()
 	store.channels["ch_1"] = &mockChannel{id: "ch_1", name: "test", chType: "slack"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.GetChannel(context.Background(), &v1.GetChannelRequest{Id: "ch_1"})
 	if err != nil {
@@ -785,7 +804,7 @@ func TestServer_GetChannel(t *testing.T) {
 func TestServer_UpdateChannel(t *testing.T) {
 	store := newMockGRPCStore()
 	store.channels["ch_1"] = map[string]interface{}{"id": "ch_1", "name": "old", "type": "slack"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	name := "updated"
 	_, err := srv.UpdateChannel(context.Background(), &v1.UpdateChannelRequest{
@@ -800,7 +819,7 @@ func TestServer_UpdateChannel(t *testing.T) {
 func TestServer_GetRule(t *testing.T) {
 	store := newMockGRPCStore()
 	store.rules["rule_1"] = &mockRule{id: "rule_1", name: "test"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.GetRule(context.Background(), &v1.GetRuleRequest{Id: "rule_1"})
 	if err != nil {
@@ -814,7 +833,7 @@ func TestServer_GetRule(t *testing.T) {
 func TestServer_UpdateRule(t *testing.T) {
 	store := newMockGRPCStore()
 	store.rules["rule_1"] = map[string]interface{}{"id": "rule_1", "name": "old"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	name := "updated"
 	_, err := srv.UpdateRule(context.Background(), &v1.UpdateRuleRequest{
@@ -829,7 +848,7 @@ func TestServer_UpdateRule(t *testing.T) {
 func TestServer_GetJourney(t *testing.T) {
 	store := newMockGRPCStore()
 	store.journeys["j_1"] = &mockJourney{id: "j_1", name: "test"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.GetJourney(context.Background(), &v1.GetJourneyRequest{Id: "j_1"})
 	if err != nil {
@@ -843,7 +862,7 @@ func TestServer_GetJourney(t *testing.T) {
 func TestServer_UpdateJourney(t *testing.T) {
 	store := newMockGRPCStore()
 	store.journeys["j_1"] = map[string]interface{}{"id": "j_1", "name": "old"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	name := "updated"
 	_, err := srv.UpdateJourney(context.Background(), &v1.UpdateJourneyRequest{
@@ -858,7 +877,7 @@ func TestServer_UpdateJourney(t *testing.T) {
 func TestServer_RunJourney(t *testing.T) {
 	store := newMockGRPCStore()
 	store.journeys["j_1"] = &mockJourney{id: "j_1", name: "test"}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.RunJourney(context.Background(), &v1.RunJourneyRequest{Id: "j_1"})
 	if err != nil {
@@ -874,7 +893,7 @@ func TestServer_ListJourneyRuns(t *testing.T) {
 	store.journeyRuns = []interface{}{
 		&mockJourneyRun{id: "run_1", journeyID: "j_1", status: "success"},
 	}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.ListJourneyRuns(context.Background(), &v1.ListJourneyRunsRequest{JourneyId: "j_1", Limit: 10})
 	if err != nil {
@@ -890,7 +909,7 @@ func TestServer_GetJourneyRun(t *testing.T) {
 	store.journeyRuns = []interface{}{
 		&mockJourneyRun{id: "run_1", journeyID: "j_1", status: "success"},
 	}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.GetJourneyRun(context.Background(), &v1.GetJourneyRunRequest{JourneyId: "j_1", RunId: "run_1"})
 	if err != nil {
@@ -906,7 +925,7 @@ func TestServer_StreamJudgments(t *testing.T) {
 	store.judgments = []interface{}{
 		&mockJudgment{id: "j1", soulID: "s1", status: "alive", duration: 10 * time.Millisecond, message: "ok", timestamp: time.Now()},
 	}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -924,7 +943,7 @@ func TestServer_StreamVerdicts(t *testing.T) {
 	store.events = []interface{}{
 		&mockAlertEvent{id: "evt_1", soulID: "s1", status: "firing", severity: "critical", message: "alert", timestamp: time.Now()},
 	}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()

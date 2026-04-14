@@ -12,12 +12,18 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
+
+func init() {
+	// Allow private IPs in tests (for localhost test servers)
+	os.Setenv("ANUBIS_SSRF_ALLOW_PRIVATE", "1")
+}
 
 func TestWebSocketChecker_Validate_MissingTarget(t *testing.T) {
 	checker := NewWebSocketChecker()
@@ -73,7 +79,7 @@ func TestWebSocketChecker_Validate_ValidWS(t *testing.T) {
 		ID:     "test-ws",
 		Name:   "Test WebSocket",
 		Type:   core.CheckWebSocket,
-		Target: "ws://localhost:8080",
+		Target: "ws://example.com:8080",
 	}
 
 	err := checker.Validate(soul)
@@ -89,7 +95,7 @@ func TestWebSocketChecker_Validate_ValidWSS(t *testing.T) {
 		ID:     "test-ws",
 		Name:   "Test WebSocket",
 		Type:   core.CheckWebSocket,
-		Target: "wss://localhost:8080",
+		Target: "wss://example.com:8080",
 	}
 
 	err := checker.Validate(soul)

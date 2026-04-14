@@ -5,12 +5,18 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
+
+func init() {
+	// Allow private IPs in tests (for localhost test servers)
+	os.Setenv("ANUBIS_SSRF_ALLOW_PRIVATE", "1")
+}
 
 // mockSMTPServer is a simple mock SMTP server for testing
 type mockSMTPServer struct {

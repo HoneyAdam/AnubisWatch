@@ -16,7 +16,8 @@ func (s *RESTServer) handleListJourneys(ctx *Context) error {
 
 	journeys, err := s.store.ListJourneysNoCtx(workspace, offset, limit)
 	if err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		s.logger.Error("failed to list journeys", "error", err, "workspace", workspace)
+		return ctx.Error(http.StatusInternalServerError, "failed to retrieve journeys")
 	}
 
 	return ctx.JSON(http.StatusOK, journeys)
@@ -35,7 +36,7 @@ func (s *RESTServer) handleCreateJourney(ctx *Context) error {
 	journey.UpdatedAt = time.Now()
 
 	if err := s.store.SaveJourneyNoCtx(&journey); err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		return s.internalError(ctx, err, "failed to save journey")
 	}
 
 	return ctx.JSON(http.StatusCreated, journey)
@@ -51,12 +52,31 @@ func (s *RESTServer) handleGetJourney(ctx *Context) error {
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "journey not found")
 	}
+
+	// IDOR protection: Check if journey belongs to user's workspace
+	if journey.WorkspaceID != ctx.Workspace {
+		return ctx.Error(http.StatusForbidden, "access denied")
+	}
+
 	return ctx.JSON(http.StatusOK, journey)
 }
 
 // handleUpdateJourney updates a journey
 func (s *RESTServer) handleUpdateJourney(ctx *Context) error {
 	id := ctx.Params["id"]
+
+	// IDOR protection: Check if journey belongs to user's workspace
+	existing, err := s.store.GetJourneyNoCtx(id)
+	if err == nil && existing == nil {
+		err = fmt.Errorf("journey not found")
+	}
+	if err != nil {
+		return ctx.Error(http.StatusNotFound, "journey not found")
+	}
+	if existing.WorkspaceID != ctx.Workspace {
+		return ctx.Error(http.StatusForbidden, "access denied")
+	}
+
 	var journey core.JourneyConfig
 	if err := ctx.Bind(&journey); err != nil {
 		return ctx.Error(http.StatusBadRequest, "invalid journey data")
@@ -67,7 +87,7 @@ func (s *RESTServer) handleUpdateJourney(ctx *Context) error {
 	journey.UpdatedAt = time.Now()
 
 	if err := s.store.SaveJourneyNoCtx(&journey); err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		return s.internalError(ctx, err, "failed to save journey")
 	}
 
 	return ctx.JSON(http.StatusOK, journey)
@@ -76,8 +96,21 @@ func (s *RESTServer) handleUpdateJourney(ctx *Context) error {
 // handleDeleteJourney deletes a journey
 func (s *RESTServer) handleDeleteJourney(ctx *Context) error {
 	id := ctx.Params["id"]
+
+	// IDOR protection: Check if journey belongs to user's workspace
+	journey, err := s.store.GetJourneyNoCtx(id)
+	if err == nil && journey == nil {
+		err = fmt.Errorf("journey not found")
+	}
+	if err != nil {
+		return ctx.Error(http.StatusNotFound, "journey not found")
+	}
+	if journey.WorkspaceID != ctx.Workspace {
+		return ctx.Error(http.StatusForbidden, "access denied")
+	}
+
 	if err := s.store.DeleteJourneyNoCtx(id); err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		return s.internalError(ctx, err, "failed to delete journey")
 	}
 	return ctx.JSON(http.StatusNoContent, nil)
 }
@@ -92,6 +125,11 @@ func (s *RESTServer) handleRunJourney(ctx *Context) error {
 	}
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "journey not found")
+	}
+
+	// IDOR protection: Check if journey belongs to user's workspace
+	if journey.WorkspaceID != ctx.Workspace {
+		return ctx.Error(http.StatusForbidden, "access denied")
 	}
 
 	return ctx.JSON(http.StatusAccepted, map[string]interface{}{
@@ -118,7 +156,7 @@ func (s *RESTServer) handleListJourneyRuns(ctx *Context) error {
 
 	runs, err := s.journey.ListRuns(ctx.Request.Context(), ctx.Workspace, id, n)
 	if err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		return s.internalError(ctx, err, "failed to list journey runs")
 	}
 	return ctx.JSON(http.StatusOK, runs)
 }
@@ -177,7 +215,7 @@ func (s *RESTServer) handleSoulLogs(ctx *Context) error {
 func (s *RESTServer) handleListDashboards(ctx *Context) error {
 	dashboards, err := s.store.ListDashboardsNoCtx()
 	if err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		return s.internalError(ctx, err, "failed to list dashboards")
 	}
 	return ctx.JSON(http.StatusOK, dashboards)
 }
@@ -194,7 +232,7 @@ func (s *RESTServer) handleCreateDashboard(ctx *Context) error {
 	dashboard.UpdatedAt = time.Now()
 
 	if err := s.store.SaveDashboardNoCtx(&dashboard); err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		return s.internalError(ctx, err, "failed to save dashboard")
 	}
 
 	return ctx.JSON(http.StatusCreated, dashboard)
@@ -209,11 +247,30 @@ func (s *RESTServer) handleGetDashboard(ctx *Context) error {
 	if err != nil {
 		return ctx.Error(http.StatusNotFound, "dashboard not found")
 	}
+
+	// IDOR protection: Check if dashboard belongs to user's workspace
+	if dashboard.WorkspaceID != ctx.Workspace {
+		return ctx.Error(http.StatusForbidden, "access denied")
+	}
+
 	return ctx.JSON(http.StatusOK, dashboard)
 }
 
 func (s *RESTServer) handleUpdateDashboard(ctx *Context) error {
 	id := ctx.Params["id"]
+
+	// IDOR protection: Check if dashboard belongs to user's workspace
+	existing, err := s.store.GetDashboardNoCtx(id)
+	if err == nil && existing == nil {
+		err = fmt.Errorf("dashboard not found")
+	}
+	if err != nil {
+		return ctx.Error(http.StatusNotFound, "dashboard not found")
+	}
+	if existing.WorkspaceID != ctx.Workspace {
+		return ctx.Error(http.StatusForbidden, "access denied")
+	}
+
 	var dashboard core.CustomDashboard
 	if err := ctx.Bind(&dashboard); err != nil {
 		return ctx.Error(http.StatusBadRequest, "invalid dashboard data")
@@ -224,7 +281,7 @@ func (s *RESTServer) handleUpdateDashboard(ctx *Context) error {
 	dashboard.UpdatedAt = time.Now()
 
 	if err := s.store.SaveDashboardNoCtx(&dashboard); err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		return s.internalError(ctx, err, "failed to save dashboard")
 	}
 
 	return ctx.JSON(http.StatusOK, dashboard)
@@ -232,8 +289,21 @@ func (s *RESTServer) handleUpdateDashboard(ctx *Context) error {
 
 func (s *RESTServer) handleDeleteDashboard(ctx *Context) error {
 	id := ctx.Params["id"]
+
+	// IDOR protection: Check if dashboard belongs to user's workspace
+	dashboard, err := s.store.GetDashboardNoCtx(id)
+	if err == nil && dashboard == nil {
+		err = fmt.Errorf("dashboard not found")
+	}
+	if err != nil {
+		return ctx.Error(http.StatusNotFound, "dashboard not found")
+	}
+	if dashboard.WorkspaceID != ctx.Workspace {
+		return ctx.Error(http.StatusForbidden, "access denied")
+	}
+
 	if err := s.store.DeleteDashboardNoCtx(id); err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		return s.internalError(ctx, err, "failed to delete dashboard")
 	}
 	return ctx.JSON(http.StatusNoContent, nil)
 }
@@ -262,7 +332,7 @@ func (s *RESTServer) handleDashboardQuery(ctx *Context) error {
 	}
 
 	if err != nil {
-		return ctx.Error(http.StatusInternalServerError, err.Error())
+		return s.internalError(ctx, err, "dashboard query failed")
 	}
 
 	return ctx.JSON(http.StatusOK, result)

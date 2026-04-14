@@ -64,7 +64,7 @@ func (m *errorVerdictsStream) Context() context.Context { return m.ctx }
 func (m *errorVerdictsStream) Send(v *v1.Verdict) error { return errors.New("send error") }
 
 func TestServer_Start_InvalidAddress(t *testing.T) {
-	srv := NewServer("invalid://:abc", newMockGRPCStore(), &mockGRPCProbe{}, nil)
+	srv := NewServer("invalid://:abc", newMockGRPCStore(), &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 	if err := srv.Start(); err == nil {
 		t.Error("Expected error for invalid listen address")
 	}
@@ -72,7 +72,7 @@ func TestServer_Start_InvalidAddress(t *testing.T) {
 
 func TestServer_StreamJudgments_StoreError(t *testing.T) {
 	store := &failingMockGRPCStore{mockGRPCStore: newMockGRPCStore(), listJudgmentsErr: true}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
@@ -90,7 +90,7 @@ func TestServer_StreamJudgments_SendError(t *testing.T) {
 	store.judgments = []interface{}{
 		&mockJudgment{id: "j1", soulID: "s1", status: "alive", duration: 10 * time.Millisecond, message: "ok", timestamp: time.Now()},
 	}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1100*time.Millisecond)
 	defer cancel()
@@ -105,7 +105,7 @@ func TestServer_StreamJudgments_SendError(t *testing.T) {
 
 func TestServer_StreamVerdicts_StoreError(t *testing.T) {
 	store := &failingMockGRPCStore{mockGRPCStore: newMockGRPCStore(), listEventsErr: true}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
@@ -123,7 +123,7 @@ func TestServer_StreamVerdicts_SendError(t *testing.T) {
 	store.events = []interface{}{
 		&mockAlertEvent{id: "evt_1", soulID: "s1", status: "firing", severity: "critical", message: "alert", timestamp: time.Now()},
 	}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1100*time.Millisecond)
 	defer cancel()
@@ -138,7 +138,7 @@ func TestServer_StreamVerdicts_SendError(t *testing.T) {
 
 func TestServer_GetJourneyRun_NotFound(t *testing.T) {
 	store := newMockGRPCStore()
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	_, err := srv.GetJourneyRun(context.Background(), &v1.GetJourneyRunRequest{
 		JourneyId: "missing",
@@ -151,7 +151,7 @@ func TestServer_GetJourneyRun_NotFound(t *testing.T) {
 
 func TestServer_GetJourneyRun_StorageError(t *testing.T) {
 	store := &failingMockGRPCStore{mockGRPCStore: newMockGRPCStore(), getJourneyRunErr: true}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	_, err := srv.GetJourneyRun(context.Background(), &v1.GetJourneyRunRequest{
 		JourneyId: "j1",
@@ -164,7 +164,7 @@ func TestServer_GetJourneyRun_StorageError(t *testing.T) {
 
 func TestServer_ListSouls_StoreError(t *testing.T) {
 	store := &failingMockGRPCStore{mockGRPCStore: newMockGRPCStore(), listSoulsErr: true}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	_, err := srv.ListSouls(context.Background(), &v1.ListSoulsRequest{})
 	if err == nil {
@@ -177,7 +177,7 @@ func TestServer_ListSouls_PaginationHasMore(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		_ = store.SaveSoulNoCtx(map[string]interface{}{"name": fmt.Sprintf("soul-%d", i)})
 	}
-	srv := NewServer(":0", store, &mockGRPCProbe{}, nil)
+	srv := NewServer(":0", store, &mockGRPCProbe{}, &mockAuthenticator{}, nil)
 
 	resp, err := srv.ListSouls(context.Background(), &v1.ListSoulsRequest{Limit: 3})
 	if err != nil {

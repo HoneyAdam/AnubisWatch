@@ -110,6 +110,12 @@ func TestHandleCreateJourney_InvalidData(t *testing.T) {
 // TestHandleUpdateJourney tests handleUpdateJourney
 func TestHandleUpdateJourney(t *testing.T) {
 	store := newMockStorage()
+	// Create the journey first for IDOR check
+	store.SaveJourneyNoCtx(&core.JourneyConfig{
+		ID:          "journey-1",
+		Name:        "Test Journey",
+		WorkspaceID: "default",
+	})
 	server := newTestServerWithStorage(store)
 
 	updated := core.JourneyConfig{
@@ -141,15 +147,22 @@ func TestHandleUpdateJourney(t *testing.T) {
 // TestHandleUpdateJourney_InvalidData tests handleUpdateJourney with invalid data
 func TestHandleUpdateJourney_InvalidData(t *testing.T) {
 	store := newMockStorage()
+	// Create the journey first for IDOR check
+	store.SaveJourneyNoCtx(&core.JourneyConfig{
+		ID:          "journey-1",
+		Name:        "Test Journey",
+		WorkspaceID: "default",
+	})
 	server := newTestServerWithStorage(store)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("PUT", "/api/v1/journeys/journey-1", bytes.NewReader([]byte("invalid")))
 	req.Header.Set("Content-Type", "application/json")
 	ctx := &Context{
-		Request:  req,
-		Response: rec,
-		Params:   map[string]string{"id": "journey-1"},
+		Request:   req,
+		Response:  rec,
+		Params:    map[string]string{"id": "journey-1"},
+		Workspace: "default",
 	}
 
 	err := server.handleUpdateJourney(ctx)
@@ -161,13 +174,20 @@ func TestHandleUpdateJourney_InvalidData(t *testing.T) {
 // TestHandleDeleteJourney tests handleDeleteJourney
 func TestHandleDeleteJourney(t *testing.T) {
 	store := newMockStorage()
+	// Create the journey first for IDOR check
+	store.SaveJourneyNoCtx(&core.JourneyConfig{
+		ID:          "journey-1",
+		Name:        "Test Journey",
+		WorkspaceID: "default",
+	})
 	server := newTestServerWithStorage(store)
 
 	rec := httptest.NewRecorder()
 	ctx := &Context{
-		Request:  httptest.NewRequest("DELETE", "/api/v1/journeys/journey-1", nil),
-		Response: rec,
-		Params:   map[string]string{"id": "journey-1"},
+		Request:   httptest.NewRequest("DELETE", "/api/v1/journeys/journey-1", nil),
+		Response:  rec,
+		Params:    map[string]string{"id": "journey-1"},
+		Workspace: "default",
 	}
 
 	// Just verify it doesn't panic
@@ -181,8 +201,9 @@ func TestHandleGetJourney(t *testing.T) {
 
 	// Create a journey first
 	store.SaveJourneyNoCtx(&core.JourneyConfig{
-		ID:   "journey-1",
-		Name: "Test Journey",
+		ID:          "journey-1",
+		Name:        "Test Journey",
+		WorkspaceID: "default",
 	})
 
 	rec := httptest.NewRecorder()
@@ -1778,10 +1799,11 @@ func TestHandleDeleteSoul_StorageError(t *testing.T) {
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		store:  store,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		store:      store,
+		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
 	}
 
 	router.Handle("DELETE", "/api/v1/souls/:id", server.requireAuth(server.handleDeleteSoul))
@@ -1803,14 +1825,15 @@ func TestHandleDeleteChannel_StorageError(t *testing.T) {
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		store:  store,
-		router: router,
-		alert:  &failingAlertManager{},
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		store:      store,
+		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
+		router:     router,
+		alert:      &failingAlertManager{},
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
 	}
 
-	router.Handle("DELETE", "/api/v1/channels/:id", server.requireAuth(server.handleDeleteChannel))
+	router.Handle("DELETE", "/api/v1/channels/:id", server.requireRole(server.handleDeleteChannel, "channels:*"))
 
 	req := httptest.NewRequest("DELETE", "/api/v1/channels/ch-1", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
@@ -1829,14 +1852,15 @@ func TestHandleDeleteRule_StorageError(t *testing.T) {
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		store:  store,
-		router: router,
-		alert:  &failingAlertManager{},
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		store:      store,
+		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
+		router:     router,
+		alert:      &failingAlertManager{},
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
 	}
 
-	router.Handle("DELETE", "/api/v1/rules/:id", server.requireAuth(server.handleDeleteRule))
+	router.Handle("DELETE", "/api/v1/rules/:id", server.requireRole(server.handleDeleteRule, "rules:*"))
 
 	req := httptest.NewRequest("DELETE", "/api/v1/rules/rule-1", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
@@ -1855,10 +1879,11 @@ func TestHandleDeleteWorkspace_StorageError(t *testing.T) {
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		store:  store,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		store:      store,
+		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
 	}
 
 	router.Handle("DELETE", "/api/v1/workspaces/:id", server.requireAuth(server.handleDeleteWorkspace))
@@ -1876,14 +1901,16 @@ func TestHandleDeleteWorkspace_StorageError(t *testing.T) {
 
 // TestHandleDeleteJourney_StorageError tests delete journey with storage error
 func TestHandleDeleteJourney_StorageError(t *testing.T) {
-	store := &failingMockStorage{}
+	// Custom mock that returns journey for Get but fails on Delete
+	store := &failingJourneyDeleteStorage{}
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		store:  store,
-		router: router,
-		auth:   &mockAuthenticator{},
-		logger: newTestLogger(),
+		store:      store,
+		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
 	}
 
 	router.Handle("DELETE", "/api/v1/journeys/:id", server.requireAuth(server.handleDeleteJourney))
@@ -1897,6 +1924,19 @@ func TestHandleDeleteJourney_StorageError(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, rec.Code)
 	}
+}
+
+// failingJourneyDeleteStorage is a mock that returns a journey for Get but fails on Delete
+type failingJourneyDeleteStorage struct {
+	failingMockStorage
+}
+
+func (m *failingJourneyDeleteStorage) GetJourneyNoCtx(id string) (*core.JourneyConfig, error) {
+	return &core.JourneyConfig{
+		ID:          id,
+		Name:        "Test Journey",
+		WorkspaceID: "default",
+	}, nil
 }
 
 // mockJourneyExecutor implements JourneyExecutor for testing
@@ -2166,7 +2206,7 @@ func TestHandleGetDashboard_NotFound(t *testing.T) {
 
 func TestHandleUpdateDashboard(t *testing.T) {
 	store := newMockStorage()
-	store.SaveDashboardNoCtx(&core.CustomDashboard{ID: "dash-1", Name: "Test Dashboard"})
+	store.SaveDashboardNoCtx(&core.CustomDashboard{ID: "dash-1", Name: "Test Dashboard", WorkspaceID: "default"})
 	server := newTestServerWithJourney(store, nil)
 
 	dashboard := core.CustomDashboard{Name: "Updated Dashboard"}
@@ -2192,6 +2232,8 @@ func TestHandleUpdateDashboard(t *testing.T) {
 
 func TestHandleUpdateDashboard_InvalidData(t *testing.T) {
 	store := newMockStorage()
+	// Create the dashboard first for IDOR check
+	store.SaveDashboardNoCtx(&core.CustomDashboard{ID: "dash-1", Name: "Test Dashboard", WorkspaceID: "default"})
 	server := newTestServerWithJourney(store, nil)
 
 	rec := httptest.NewRecorder()

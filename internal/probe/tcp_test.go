@@ -5,11 +5,17 @@ import (
 	"context"
 	"io"
 	"net"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
+
+func init() {
+	// Allow private IPs in tests (for localhost test servers)
+	os.Setenv("ANUBIS_SSRF_ALLOW_PRIVATE", "1")
+}
 
 func TestTCPChecker_Judge_Basic(t *testing.T) {
 	// Create TCP listener

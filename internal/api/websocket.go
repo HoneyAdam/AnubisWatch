@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,12 +16,14 @@ import (
 // WebSocketServer handles real-time WebSocket connections
 // The Oracle's live visions stream to the priests
 type WebSocketServer struct {
-	mu        sync.RWMutex
-	clients   map[string]*WSClient
-	rooms     map[string]map[string]bool // room -> clientIDs
-	upgrader  websocket.Upgrader
-	logger    *slog.Logger
-	broadcast chan WSMessage
+	mu             sync.RWMutex
+	clients        map[string]*WSClient
+	rooms          map[string]map[string]bool // room -> clientIDs
+	upgrader       websocket.Upgrader
+	logger         *slog.Logger
+	broadcast      chan WSMessage
+	authenticator  Authenticator // Added for token validation - uses Authenticator from rest.go
+	allowedOrigins []string      // Allowed origins for WebSocket connections (CSRF protection)
 }
 
 // WSClient represents a connected WebSocket client
@@ -36,7 +39,17 @@ type WSClient struct {
 }
 
 // NewWebSocketServer creates a new WebSocket server
-func NewWebSocketServer(logger *slog.Logger) *WebSocketServer {
+func NewWebSocketServer(logger *slog.Logger, authenticator Authenticator, allowedOrigins []string) *WebSocketServer {
+	if len(allowedOrigins) == 0 {
+		// Default origins for development
+		allowedOrigins = []string{
+			"http://localhost:3000",
+			"http://localhost:8080",
+			"http://127.0.0.1:3000",
+			"http://127.0.0.1:8080",
+		}
+	}
+
 	return &WebSocketServer{
 		clients: make(map[string]*WSClient),
 		rooms:   make(map[string]map[string]bool),
@@ -44,13 +57,24 @@ func NewWebSocketServer(logger *slog.Logger) *WebSocketServer {
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 			CheckOrigin: func(r *http.Request) bool {
-				// Allow all origins in development
-				// In production, this should be restricted
-				return true
+				origin := r.Header.Get("Origin")
+				// If no origin header, allow (for non-browser clients)
+				if origin == "" {
+					return true
+				}
+				// Check against allowed origins
+				for _, allowed := range allowedOrigins {
+					if origin == allowed {
+						return true
+					}
+				}
+				return false
 			},
 		},
-		logger:    logger.With("component", "websocket"),
-		broadcast: make(chan WSMessage, 256),
+		logger:         logger.With("component", "websocket"),
+		broadcast:      make(chan WSMessage, 256),
+		authenticator:  authenticator,
+		allowedOrigins: allowedOrigins,
 	}
 }
 
@@ -82,16 +106,40 @@ func (s *WebSocketServer) Stop() {
 
 // HandleConnection handles new WebSocket connections
 func (s *WebSocketServer) HandleConnection(w http.ResponseWriter, r *http.Request) {
-	// Get workspace from query params
-	workspace := r.URL.Query().Get("workspace")
-	if workspace == "" {
-		workspace = "default"
+	// Extract token from query param or Authorization header
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		// Try Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		}
 	}
 
-	// Get user ID from query params (in production, this should come from auth token)
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		userID = "anonymous"
+	// Validate token
+	if token == "" {
+		s.logger.Warn("WebSocket connection rejected: missing token", "remote_addr", r.RemoteAddr)
+		http.Error(w, "Unauthorized: missing token", http.StatusUnauthorized)
+		return
+	}
+
+	// Authenticate the token
+	user, err := s.authenticator.Authenticate(token)
+	if err != nil {
+		s.logger.Warn("WebSocket connection rejected: invalid token",
+			"remote_addr", r.RemoteAddr,
+			"error", err)
+		http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	// Get workspace from query params or use user's workspace
+	workspace := r.URL.Query().Get("workspace")
+	if workspace == "" {
+		workspace = user.Workspace
+	}
+	if workspace == "" {
+		workspace = "default"
 	}
 
 	// Upgrade HTTP to WebSocket
@@ -101,12 +149,12 @@ func (s *WebSocketServer) HandleConnection(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Create client
+	// Create client with authenticated user info
 	client := &WSClient{
 		ID:        generateClientID(),
 		Conn:      conn,
 		Workspace: workspace,
-		UserID:    userID,
+		UserID:    user.ID,
 		Rooms:     make(map[string]bool),
 		send:      make(chan []byte, 256),
 		server:    s,
@@ -127,6 +175,7 @@ func (s *WebSocketServer) HandleConnection(w http.ResponseWriter, r *http.Reques
 		Payload: map[string]interface{}{
 			"client_id":   client.ID,
 			"workspace":   workspace,
+			"user_id":     user.ID,
 			"server_time": time.Now().UTC(),
 		},
 	}
@@ -135,6 +184,7 @@ func (s *WebSocketServer) HandleConnection(w http.ResponseWriter, r *http.Reques
 
 	s.logger.Info("Client connected",
 		"client_id", client.ID,
+		"user_id", user.ID,
 		"workspace", workspace,
 		"remote_addr", r.RemoteAddr)
 

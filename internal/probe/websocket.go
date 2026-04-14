@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -42,6 +43,11 @@ func (c *WebSocketChecker) Validate(soul *core.Soul) error {
 	}
 	if u.Scheme != "ws" && u.Scheme != "wss" {
 		return configError("target", "URL must use ws:// or wss:// scheme")
+	}
+
+	// SSRF protection - validate target URL
+	if err := ValidateTarget(soul.Target); err != nil {
+		return configError("target", fmt.Sprintf("SSRF validation failed: %v", err))
 	}
 
 	// Security warning for disabled TLS verification
@@ -140,7 +146,9 @@ func (c *WebSocketChecker) Judge(ctx context.Context, soul *core.Soul) (*core.Ju
 	if err != nil {
 		return failJudgment(soul, fmt.Errorf("failed to read upgrade response: %w", err)), nil
 	}
-	defer resp.Body.Close()
+	// Drain and close body to ensure connection reuse
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
 
 	duration := time.Since(start)
 

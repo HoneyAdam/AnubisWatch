@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
@@ -13,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 var (
@@ -259,7 +262,7 @@ func (m *Manager) RotateKey(newKey []byte) error {
 	return nil
 }
 
-// encrypt encrypts data using AES-GCM
+// encrypt encrypts data using AES-GCM with HKDF key derivation
 func (m *Manager) encrypt(plaintext []byte) ([]byte, []byte, []byte, error) {
 	// Generate salt
 	salt := make([]byte, 32)
@@ -267,10 +270,12 @@ func (m *Manager) encrypt(plaintext []byte) ([]byte, []byte, []byte, error) {
 		return nil, nil, nil, err
 	}
 
-	// Derive key using XOR with salt (simple approach, consider HKDF for production)
+	// Derive key using HKDF (RFC 5869) - secure key derivation
+	// info: "anubiswatch-secrets-v1" provides domain separation
 	derivedKey := make([]byte, 32)
-	for i := range m.key {
-		derivedKey[i] = m.key[i] ^ salt[i%len(salt)]
+	hkdfReader := hkdf.New(sha256.New, m.key, salt, []byte("anubiswatch-secrets-v1"))
+	if _, err := io.ReadFull(hkdfReader, derivedKey); err != nil {
+		return nil, nil, nil, fmt.Errorf("HKDF key derivation failed: %w", err)
 	}
 
 	block, err := aes.NewCipher(derivedKey)
@@ -300,10 +305,12 @@ func (m *Manager) encrypt(plaintext []byte) ([]byte, []byte, []byte, error) {
 
 // decrypt decrypts data using AES-GCM
 func (m *Manager) decrypt(secret *Secret) ([]byte, error) {
-	// Derive key using XOR with salt
+	// Derive key using HKDF (RFC 5869) - secure key derivation
+	// Must use same info parameter as encrypt for domain separation
 	derivedKey := make([]byte, 32)
-	for i := range m.key {
-		derivedKey[i] = m.key[i] ^ secret.Salt[i%len(secret.Salt)]
+	hkdfReader := hkdf.New(sha256.New, m.key, secret.Salt, []byte("anubiswatch-secrets-v1"))
+	if _, err := io.ReadFull(hkdfReader, derivedKey); err != nil {
+		return nil, fmt.Errorf("HKDF key derivation failed: %w", err)
 	}
 
 	block, err := aes.NewCipher(derivedKey)

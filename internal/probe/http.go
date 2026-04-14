@@ -50,6 +50,11 @@ func (c *HTTPChecker) Validate(soul *core.Soul) error {
 		return configError("target", "target must start with http:// or https://")
 	}
 
+	// SSRF protection - validate target URL
+	if err := ValidateTarget(soul.Target); err != nil {
+		return configError("target", fmt.Sprintf("SSRF validation failed: %v", err))
+	}
+
 	// Security warning for disabled TLS verification
 	if soul.HTTP != nil && soul.HTTP.InsecureSkipVerify {
 		slog.Warn("SECURITY WARNING: HTTP check has InsecureSkipVerify enabled. TLS certificate verification is disabled. This should only be used for testing, never in production.",

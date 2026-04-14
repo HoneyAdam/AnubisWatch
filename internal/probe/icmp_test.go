@@ -2,11 +2,17 @@ package probe
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
+
+func init() {
+	// Allow private IPs in tests (for localhost test servers)
+	os.Setenv("ANUBIS_SSRF_ALLOW_PRIVATE", "1")
+}
 
 func TestICMPChecker_Validate_MissingTarget(t *testing.T) {
 	checker := NewICMPChecker()

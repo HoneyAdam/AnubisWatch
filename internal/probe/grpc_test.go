@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"testing"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
+
+func init() {
+	// Allow private IPs in tests (for localhost test servers)
+	os.Setenv("ANUBIS_SSRF_ALLOW_PRIVATE", "1")
+}
 
 func TestGRPCChecker_Validate_MissingTarget(t *testing.T) {
 	checker := NewGRPCChecker()
@@ -51,7 +57,7 @@ func TestGRPCChecker_Validate_Valid(t *testing.T) {
 		ID:     "test-grpc",
 		Name:   "Test gRPC",
 		Type:   core.CheckGRPC,
-		Target: "localhost:50051",
+		Target: "example.com:50051",
 	}
 
 	err := checker.Validate(soul)
@@ -809,9 +815,9 @@ func TestGRPCChecker_Judge_VariousTargets(t *testing.T) {
 		name   string
 		target string
 	}{
-		{"localhost with port", "localhost:50051"},
-		{"IPv4 with port", "192.168.1.1:8080"},
-		{"IPv6 localhost", "[::1]:50051"},
+		{"hostname with port", "example.com:50051"},
+		{"public IPv4 with port", "8.8.8.8:8080"},
+		{"public IPv6", "[2001:db8::1]:50051"},
 	}
 
 	for _, tt := range tests {
@@ -994,7 +1000,7 @@ func TestGRPCChecker_Validate_InsecureSkipVerify(t *testing.T) {
 	soul := &core.Soul{
 		ID:     "test-grpc-insecure",
 		Name:   "Test",
-		Target: "localhost:50051",
+		Target: "example.com:50051",
 		Type:   core.CheckGRPC,
 		GRPC: &core.GRPCConfig{
 			InsecureSkipVerify: true,

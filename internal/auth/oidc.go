@@ -40,6 +40,7 @@ type OIDCAuthenticator struct {
 
 type oidcState struct {
 	Email     string    `json:"email"`
+	Nonce     string    `json:"nonce"`     // CSRF protection: binds state to session
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
@@ -112,19 +113,23 @@ func NewOIDCAuthenticator(cfg core.OIDCAuth, localPath, adminEmail, adminPasswor
 }
 
 // OIDCLoginURL returns the OIDC authorization URL for redirect
-func (o *OIDCAuthenticator) OIDCLoginURL() (string, string, error) {
+func (o *OIDCAuthenticator) OIDCLoginURL() (string, string, string, error) {
 	// Fetch OIDC configuration from issuer
 	cfg, err := o.fetchOIDCConfig()
 	if err != nil {
-		return "", "", fmt.Errorf("failed to fetch OIDC config: %w", err)
+		return "", "", "", fmt.Errorf("failed to fetch OIDC config: %w", err)
 	}
 
-	// Generate CSRF state
+	// Generate CSRF state and nonce
 	state := generateToken()
+	nonce := generateToken() // Used to bind state to session (CSRF protection)
 	expiresAt := time.Now().Add(10 * time.Minute)
 
 	o.mu.Lock()
-	o.state[state] = &oidcState{ExpiresAt: expiresAt}
+	o.state[state] = &oidcState{
+		Nonce:     nonce,
+		ExpiresAt: expiresAt,
+	}
 	o.mu.Unlock()
 
 	// Build authorization URL
@@ -135,11 +140,11 @@ func (o *OIDCAuthenticator) OIDCLoginURL() (string, string, error) {
 		"&scope=openid+profile+email" +
 		"&state=" + state
 
-	return redirectURL, state, nil
+	return redirectURL, state, nonce, nil
 }
 
 // OIDCCallback handles the OIDC callback
-func (o *OIDCAuthenticator) OIDCCallback(code, state string) (*api.User, string, error) {
+func (o *OIDCAuthenticator) OIDCCallback(code, state, nonce string) (*api.User, string, error) {
 	// Verify state (CSRF protection)
 	o.mu.Lock()
 	csrfState, exists := o.state[state]
@@ -151,6 +156,13 @@ func (o *OIDCAuthenticator) OIDCCallback(code, state string) (*api.User, string,
 		delete(o.state, state)
 		o.mu.Unlock()
 		return nil, "", fmt.Errorf("state expired")
+	}
+	// Verify nonce matches (binds callback to original session)
+	if csrfState.Nonce != nonce {
+		delete(o.state, state)
+		o.mu.Unlock()
+		slog.Warn("OIDC callback nonce mismatch - possible CSRF attack", "state", state)
+		return nil, "", fmt.Errorf("invalid nonce: possible CSRF attack")
 	}
 	delete(o.state, state)
 	o.mu.Unlock()

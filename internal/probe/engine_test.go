@@ -14,6 +14,11 @@ import (
 	"log/slog"
 )
 
+func init() {
+	// Allow private IPs in tests (for localhost test servers)
+	os.Setenv("ANUBIS_SSRF_ALLOW_PRIVATE", "1")
+}
+
 func newTestProbeLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelWarn,
@@ -94,7 +99,7 @@ func TestTCPChecker_Validate(t *testing.T) {
 		ID:     "test-tcp",
 		Name:   "Test TCP",
 		Type:   core.CheckTCP,
-		Target: "localhost:443",
+		Target: "example.com:443",
 		TCP:    &core.TCPConfig{},
 	}
 
@@ -107,7 +112,7 @@ func TestTCPChecker_Validate(t *testing.T) {
 		ID:     "test-invalid",
 		Name:   "Invalid",
 		Type:   core.CheckTCP,
-		Target: "localhost",
+		Target: "example.com",
 	}
 
 	if err := checker.Validate(invalidSoul); err == nil {
@@ -247,7 +252,7 @@ func TestEngine_AssignSouls(t *testing.T) {
 			ID:      "soul-2",
 			Name:    "Soul 2",
 			Type:    core.CheckTCP,
-			Target:  "localhost:443",
+			Target:  "example.com:443",
 			Enabled: true,
 			Weight:  core.Duration{Duration: 30 * time.Second},
 			TCP:     &core.TCPConfig{},
@@ -868,7 +873,7 @@ func TestGRPCChecker_Judge_ConnectionFailed(t *testing.T) {
 		ID:      "test-grpc-fail",
 		Name:    "Test gRPC Fail",
 		Type:    core.CheckGRPC,
-		Target:  "localhost:1",
+		Target:  "example.com:1",
 		Timeout: core.Duration{Duration: 1 * time.Second},
 		GRPC:    &core.GRPCConfig{},
 	}
@@ -1880,7 +1885,7 @@ func TestEngine_TriggerImmediate_ContextCancelled(t *testing.T) {
 		ID:      "ctx-cancel-trigger",
 		Name:    "Ctx Cancel Trigger",
 		Type:    "ctx-check",
-		Target:  "localhost:1",
+		Target:  "example.com:1",
 		Timeout: core.Duration{Duration: 5 * time.Second},
 	}
 
@@ -1932,7 +1937,7 @@ func TestEngine_judgeSoul_CheckerError(t *testing.T) {
 		ID:      "error-checker-soul",
 		Name:    "Error Checker",
 		Type:    "error-check",
-		Target:  "localhost:1",
+		Target:  "example.com:1",
 		Timeout: core.Duration{Duration: 100 * time.Millisecond},
 	}
 

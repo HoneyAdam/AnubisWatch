@@ -121,9 +121,40 @@ func TestOIDCAuthenticator_OIDCCallback_InvalidState(t *testing.T) {
 	defer auth.Shutdown()
 
 	// Test callback with invalid state (no matching state was generated)
-	_, _, err := auth.OIDCCallback("test-code", "invalid-state")
+	_, _, err := auth.OIDCCallback("test-code", "invalid-state", "invalid-nonce")
 	if err == nil {
 		t.Error("Expected error for invalid state")
+	}
+}
+
+func TestOIDCAuthenticator_OIDCCallback_InvalidNonce(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:       "https://example.com",
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		RedirectURL:  "http://localhost:8080/callback",
+	}
+
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "admin123")
+	defer auth.Shutdown()
+
+	// Create a valid state with a nonce
+	state := "valid-state"
+	correctNonce := "correct-nonce"
+	auth.mu.Lock()
+	auth.state[state] = &oidcState{
+		Nonce:     correctNonce,
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+	}
+	auth.mu.Unlock()
+
+	// Test callback with wrong nonce (CSRF attack simulation)
+	_, _, err := auth.OIDCCallback("test-code", state, "wrong-nonce")
+	if err == nil {
+		t.Error("Expected error for invalid nonce (possible CSRF attack)")
+	}
+	if err != nil && err.Error() != "invalid nonce: possible CSRF attack" {
+		t.Errorf("Expected CSRF error message, got: %v", err)
 	}
 }
 
@@ -139,7 +170,7 @@ func TestOIDCAuthenticator_OIDCLoginURL_ConfigError(t *testing.T) {
 	defer auth.Shutdown()
 
 	// Should fail because the issuer domain doesn't exist
-	_, _, err := auth.OIDCLoginURL()
+	_, _, _, err := auth.OIDCLoginURL()
 	if err == nil {
 		t.Error("Expected error for invalid OIDC issuer")
 	}
@@ -475,11 +506,12 @@ func TestOIDCAuthenticator_OIDCCallback_StateExpiration(t *testing.T) {
 	// Manually add an expired state
 	auth.mu.Lock()
 	auth.state["expired-state"] = &oidcState{
+		Nonce:     "test-nonce",
 		ExpiresAt: time.Now().Add(-1 * time.Hour), // Expired 1 hour ago
 	}
 	auth.mu.Unlock()
 
-	_, _, err := auth.OIDCCallback("test-code", "expired-state")
+	_, _, err := auth.OIDCCallback("test-code", "expired-state", "test-nonce")
 	if err == nil {
 		t.Error("Expected error for expired state")
 	}
@@ -506,7 +538,7 @@ func TestOIDCAuthenticator_OIDCCallback_OIDCError(t *testing.T) {
 	defer auth.Shutdown()
 
 	// Generate a valid state
-	loginURL, state, _ := auth.OIDCLoginURL()
+	loginURL, state, nonce, _ := auth.OIDCLoginURL()
 	if loginURL == "" {
 		// OIDC config fetch failed, which is expected for the mock server
 		t.Log("OIDC login URL fetch failed as expected for mock server")
@@ -514,7 +546,7 @@ func TestOIDCAuthenticator_OIDCCallback_OIDCError(t *testing.T) {
 	}
 
 	// Try callback with valid state (the token exchange will fail)
-	_, _, err := auth.OIDCCallback("test-code", state)
+	_, _, err := auth.OIDCCallback("test-code", state, nonce)
 	if err == nil {
 		t.Error("Expected error from failed token exchange")
 	}
@@ -935,12 +967,15 @@ func TestOIDCAuthenticator_OIDCLoginURL_Success(t *testing.T) {
 	}, "", "", "")
 	defer auth.Shutdown()
 
-	url, state, err := auth.OIDCLoginURL()
+	url, state, nonce, err := auth.OIDCLoginURL()
 	if err != nil {
 		t.Fatalf("OIDCLoginURL failed: %v", err)
 	}
 	if state == "" {
 		t.Error("Expected non-empty state")
+	}
+	if nonce == "" {
+		t.Error("Expected non-empty nonce")
 	}
 	if url == "" {
 		t.Error("Expected non-empty URL")
@@ -1119,13 +1154,15 @@ func TestOIDCAuthenticator_OIDCCallback_Success(t *testing.T) {
 
 	// Inject a valid state
 	state := "valid-state-abc"
+	nonce := "valid-nonce-xyz"
 	auth.mu.Lock()
 	auth.state[state] = &oidcState{
+		Nonce:     nonce,
 		ExpiresAt: time.Now().Add(5 * time.Minute),
 	}
 	auth.mu.Unlock()
 
-	user, token, err := auth.OIDCCallback("test-code", state)
+	user, token, err := auth.OIDCCallback("test-code", state, nonce)
 	if err != nil {
 		t.Fatalf("OIDCCallback failed: %v", err)
 	}
@@ -1196,13 +1233,15 @@ func TestOIDCAuthenticator_OIDCCallback_EmptyEmail(t *testing.T) {
 	defer auth.Shutdown()
 
 	state := "empty-email-state"
+	nonce := "empty-email-nonce"
 	auth.mu.Lock()
 	auth.state[state] = &oidcState{
+		Nonce:     nonce,
 		ExpiresAt: time.Now().Add(5 * time.Minute),
 	}
 	auth.mu.Unlock()
 
-	_, _, err = auth.OIDCCallback("test-code", state)
+	_, _, err = auth.OIDCCallback("test-code", state, nonce)
 	if err == nil {
 		t.Error("Expected error for empty email in OIDC response")
 	}
@@ -1264,14 +1303,16 @@ func TestOIDCAuthenticator_OIDCCallback_GetUserInfoError(t *testing.T) {
 	defer auth.Shutdown()
 
 	state := "userinfo-error-state"
+	nonce := "userinfo-error-nonce"
 	auth.mu.Lock()
 	auth.state[state] = &oidcState{
+		Nonce:     nonce,
 		ExpiresAt: time.Now().Add(5 * time.Minute),
 	}
 	auth.mu.Unlock()
 
 	// Callback should still succeed because ID token has email
-	user, token, err := auth.OIDCCallback("test-code", state)
+	user, token, err := auth.OIDCCallback("test-code", state, nonce)
 	if err != nil {
 		t.Fatalf("OIDCCallback failed: %v", err)
 	}

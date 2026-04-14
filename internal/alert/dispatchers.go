@@ -8,20 +8,52 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/smtp"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
+	"github.com/AnubisWatch/anubiswatch/internal/probe"
 )
+
+// sharedHTTPClient is a concurrency-safe, lazily-initialized HTTP client
+// used by all dispatchers. This eliminates the race condition in the
+// previous per-dispatcher nil-check-then-initialize pattern.
+var sharedHTTPClient struct {
+	once sync.Once
+	c    *http.Client
+}
+
+func getHTTPClient() *http.Client {
+	sharedHTTPClient.once.Do(func() {
+		sharedHTTPClient.c = &http.Client{
+			Timeout: 30 * time.Second,
+			// Disable redirects to prevent SSRF via HTTP redirects
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+	})
+	return sharedHTTPClient.c
+}
+
+// closeResponseBody drains and closes the response body to ensure connection reuse
+// and prevent resource leaks. This helper should be used instead of defer resp.Body.Close()
+func closeResponseBody(resp *http.Response) {
+	if resp != nil && resp.Body != nil {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+}
 
 // SlackDispatcher sends alerts to Slack via webhooks
 type SlackDispatcher struct {
 	logger *slog.Logger
-	client *http.Client
 }
 
 // Send sends an alert to Slack
@@ -82,12 +114,12 @@ func (d *SlackDispatcher) Send(ctx context.Context, event *core.AlertEvent, chan
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := d.getClient()
+	client := getHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
@@ -102,13 +134,6 @@ func (d *SlackDispatcher) Validate(config map[string]any) error {
 		return fmt.Errorf("webhook_url is required")
 	}
 	return nil
-}
-
-func (d *SlackDispatcher) getClient() *http.Client {
-	if d.client == nil {
-		d.client = &http.Client{Timeout: 30 * time.Second}
-	}
-	return d.client
 }
 
 func (d *SlackDispatcher) getColor(severity core.Severity, status core.SoulStatus) string {
@@ -165,7 +190,6 @@ type slackField struct {
 // DiscordDispatcher sends alerts to Discord via webhooks
 type DiscordDispatcher struct {
 	logger *slog.Logger
-	client *http.Client
 }
 
 // Send sends an alert to Discord
@@ -226,12 +250,12 @@ func (d *DiscordDispatcher) Send(ctx context.Context, event *core.AlertEvent, ch
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := d.getClient()
+	client := getHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
@@ -246,13 +270,6 @@ func (d *DiscordDispatcher) Validate(config map[string]any) error {
 		return fmt.Errorf("webhook_url is required")
 	}
 	return nil
-}
-
-func (d *DiscordDispatcher) getClient() *http.Client {
-	if d.client == nil {
-		d.client = &http.Client{Timeout: 30 * time.Second}
-	}
-	return d.client
 }
 
 func (d *DiscordDispatcher) getColor(severity core.Severity, status core.SoulStatus) int {
@@ -416,7 +433,6 @@ func (a *plainAuth) Next(fromServer []byte, more bool) ([]byte, error) {
 // PagerDutyDispatcher sends alerts to PagerDuty
 type PagerDutyDispatcher struct {
 	logger *slog.Logger
-	client *http.Client
 }
 
 // Send sends an alert to PagerDuty
@@ -464,12 +480,12 @@ func (d *PagerDutyDispatcher) Send(ctx context.Context, event *core.AlertEvent, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := d.getClient()
+	client := getHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
@@ -484,13 +500,6 @@ func (d *PagerDutyDispatcher) Validate(config map[string]any) error {
 		return fmt.Errorf("integration_key is required")
 	}
 	return nil
-}
-
-func (d *PagerDutyDispatcher) getClient() *http.Client {
-	if d.client == nil {
-		d.client = &http.Client{Timeout: 30 * time.Second}
-	}
-	return d.client
 }
 
 func (d *PagerDutyDispatcher) mapSeverity(severity core.Severity) string {
@@ -527,7 +536,6 @@ type pagerDutyEventPayload struct {
 // OpsGenieDispatcher sends alerts to OpsGenie
 type OpsGenieDispatcher struct {
 	logger *slog.Logger
-	client *http.Client
 }
 
 // Send sends an alert to OpsGenie
@@ -584,12 +592,12 @@ func (d *OpsGenieDispatcher) Send(ctx context.Context, event *core.AlertEvent, c
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "GenieKey "+apiKey)
 
-	client := d.getClient()
+	client := getHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
@@ -606,12 +614,12 @@ func (d *OpsGenieDispatcher) closeAlert(ctx context.Context, host, apiKey, alias
 	}
 	req.Header.Set("Authorization", "GenieKey "+apiKey)
 
-	client := d.getClient()
+	client := getHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp)
 
 	return nil
 }
@@ -622,13 +630,6 @@ func (d *OpsGenieDispatcher) Validate(config map[string]any) error {
 		return fmt.Errorf("api_key is required")
 	}
 	return nil
-}
-
-func (d *OpsGenieDispatcher) getClient() *http.Client {
-	if d.client == nil {
-		d.client = &http.Client{Timeout: 30 * time.Second}
-	}
-	return d.client
 }
 
 // OpsGenie types
@@ -645,7 +646,6 @@ type opsGeniePayload struct {
 // NtfyDispatcher sends alerts to Ntfy
 type NtfyDispatcher struct {
 	logger *slog.Logger
-	client *http.Client
 }
 
 // Send sends an alert to Ntfy
@@ -690,12 +690,12 @@ func (d *NtfyDispatcher) Send(ctx context.Context, event *core.AlertEvent, chann
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	client := d.getClient()
+	client := getHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
@@ -712,17 +712,9 @@ func (d *NtfyDispatcher) Validate(config map[string]any) error {
 	return nil
 }
 
-func (d *NtfyDispatcher) getClient() *http.Client {
-	if d.client == nil {
-		d.client = &http.Client{Timeout: 30 * time.Second}
-	}
-	return d.client
-}
-
 // TelegramDispatcher sends alerts to Telegram
 type TelegramDispatcher struct {
 	logger *slog.Logger
-	client *http.Client
 }
 
 // Send sends an alert to Telegram
@@ -781,12 +773,12 @@ func (d *TelegramDispatcher) Send(ctx context.Context, event *core.AlertEvent, c
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := d.getClient()
+	client := getHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
@@ -806,13 +798,6 @@ func (d *TelegramDispatcher) Validate(config map[string]any) error {
 	return nil
 }
 
-func (d *TelegramDispatcher) getClient() *http.Client {
-	if d.client == nil {
-		d.client = &http.Client{Timeout: 30 * time.Second}
-	}
-	return d.client
-}
-
 func (d *TelegramDispatcher) getEmoji(status core.SoulStatus) string {
 	switch status {
 	case core.SoulAlive:
@@ -829,7 +814,6 @@ func (d *TelegramDispatcher) getEmoji(status core.SoulStatus) string {
 // SMSDispatcher sends alerts via SMS (Twilio/Vonage)
 type SMSDispatcher struct {
 	logger *slog.Logger
-	client *http.Client
 }
 
 // Send sends an SMS alert
@@ -895,12 +879,12 @@ func (d *SMSDispatcher) sendTwilio(ctx context.Context, event *core.AlertEvent, 
 	req.SetBasicAuth(accountSID, authToken)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := d.getClient()
+	client := getHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
@@ -949,12 +933,12 @@ func (d *SMSDispatcher) sendVonage(ctx context.Context, event *core.AlertEvent, 
 			req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 			req.Header.Set("Content-Type", "application/json")
 
-			client := d.getClient()
+			client := getHTTPClient()
 			resp, err := client.Do(req)
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
+			defer closeResponseBody(resp)
 		}
 	}
 
@@ -992,17 +976,9 @@ func (d *SMSDispatcher) Validate(config map[string]any) error {
 	return nil
 }
 
-func (d *SMSDispatcher) getClient() *http.Client {
-	if d.client == nil {
-		d.client = &http.Client{Timeout: 30 * time.Second}
-	}
-	return d.client
-}
-
 // WebHookDispatcher sends alerts to generic webhooks
 type WebHookDispatcher struct {
 	logger *slog.Logger
-	client *http.Client
 }
 
 // Send sends an alert to a webhook
@@ -1010,6 +986,11 @@ func (d *WebHookDispatcher) Send(ctx context.Context, event *core.AlertEvent, ch
 	webhookURL, _ := channel.Config["url"].(string)
 	if webhookURL == "" {
 		return fmt.Errorf("missing url")
+	}
+
+	// SSRF protection - validate webhook URL
+	if err := probe.ValidateTarget(webhookURL); err != nil {
+		return fmt.Errorf("SSRF validation failed: %w", err)
 	}
 
 	method := "POST"
@@ -1068,12 +1049,12 @@ func (d *WebHookDispatcher) Send(ctx context.Context, event *core.AlertEvent, ch
 		req.Header.Set("X-Anubis-Signature", sig)
 	}
 
-	client := d.getClient()
+	client := getHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp)
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
@@ -1084,17 +1065,22 @@ func (d *WebHookDispatcher) Send(ctx context.Context, event *core.AlertEvent, ch
 
 // Validate validates webhook configuration
 func (d *WebHookDispatcher) Validate(config map[string]any) error {
-	if _, ok := config["url"]; !ok {
+	url, ok := config["url"]
+	if !ok {
 		return fmt.Errorf("url is required")
 	}
-	return nil
-}
 
-func (d *WebHookDispatcher) getClient() *http.Client {
-	if d.client == nil {
-		d.client = &http.Client{Timeout: 30 * time.Second}
+	webhookURL, ok := url.(string)
+	if !ok || webhookURL == "" {
+		return fmt.Errorf("url must be a non-empty string")
 	}
-	return d.client
+
+	// SSRF protection - validate webhook URL at configuration time
+	if err := probe.ValidateTarget(webhookURL); err != nil {
+		return fmt.Errorf("SSRF validation failed: %w", err)
+	}
+
+	return nil
 }
 
 func hmacSha256(data []byte, secret string) string {

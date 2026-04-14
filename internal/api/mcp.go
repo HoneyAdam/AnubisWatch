@@ -230,6 +230,8 @@ func (s *MCPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req MCPRequest
+	// Limit request body size to prevent memory exhaustion
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeError(w, nil, -32700, "Parse error")
 		return
