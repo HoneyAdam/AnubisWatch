@@ -1,0 +1,59 @@
+# AnubisWatch .dockerignore
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Secrets and environment
+.env
+.env.*
+*.env
+*.pem
+*.key
+
+# Build output
+bin/
+dist/
+anubis
+anubis.exe
+
+# Node modules (built inside container)
+web/node_modules/
+web/dist/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test and coverage artifacts
+coverage.out
+coverage.html
+*.cover
+security-report/
+*.prof
+
+# Documentation (not needed in build)
+.docs/
+*.md
+LICENSE
+SECURITY-REPORT.md
+
+# CI/CD
+.github/
+.claude/
+CLAUDE.md
+.goreleaser.yml
+
+# Misc
+Dockerfile
+.dockerignore
+Makefile
+tmp/
