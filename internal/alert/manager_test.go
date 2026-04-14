@@ -1046,7 +1046,7 @@ func TestManager_AcknowledgeIncident(t *testing.T) {
 	manager.incidents[incident.ID] = incident
 	manager.mu.Unlock()
 
-	err := manager.AcknowledgeIncident(incident.ID, "test-user")
+	err := manager.AcknowledgeIncident(incident.ID, "test-user", "default")
 	if err != nil {
 		t.Fatalf("AcknowledgeIncident failed: %v", err)
 	}
@@ -1081,7 +1081,7 @@ func TestManager_ResolveIncident(t *testing.T) {
 	manager.incidents[incident.ID] = incident
 	manager.mu.Unlock()
 
-	err := manager.ResolveIncident(incident.ID, "test-user")
+	err := manager.ResolveIncident(incident.ID, "test-user", "default")
 	if err != nil {
 		t.Fatalf("ResolveIncident failed: %v", err)
 	}

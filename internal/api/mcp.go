@@ -550,7 +550,7 @@ func (s *MCPServer) handleAcknowledgeIncident(args json.RawMessage) (interface{}
 		return nil, err
 	}
 
-	return nil, s.alert.AcknowledgeIncident(params.IncidentID, "mcp-user")
+	return nil, s.alert.AcknowledgeIncident(params.IncidentID, "mcp-user", "")
 }
 
 func (s *MCPServer) handleCreateSoul(args json.RawMessage) (interface{}, error) {

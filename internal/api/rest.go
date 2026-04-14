@@ -178,8 +178,8 @@ type AlertManager interface {
 	RegisterRule(rule *core.AlertRule) error
 	DeleteChannel(id string) error
 	DeleteRule(id string) error
-	AcknowledgeIncident(incidentID, userID string) error
-	ResolveIncident(incidentID, userID string) error
+	AcknowledgeIncident(incidentID, userID, workspace string) error
+	ResolveIncident(incidentID, userID, workspace string) error
 	ListActiveIncidents() []*core.Incident
 }
 
@@ -748,6 +748,16 @@ func (s *RESTServer) handleUpdateSoul(ctx *Context) error {
 
 func (s *RESTServer) handleDeleteSoul(ctx *Context) error {
 	id := ctx.Params["id"]
+
+	// Verify soul belongs to user's workspace
+	soul, err := s.store.GetSoulNoCtx(id)
+	if err != nil || soul == nil {
+		return ctx.Error(http.StatusNotFound, "soul not found")
+	}
+	if soul.WorkspaceID != ctx.Workspace {
+		return ctx.Error(http.StatusForbidden, "access denied: soul belongs to another workspace")
+	}
+
 	if err := s.store.DeleteSoul(ctx.Request.Context(), id); err != nil {
 		s.logger.Error("failed to delete soul", "error", err, "soul_id", id)
 		return ctx.Error(http.StatusInternalServerError, "failed to delete soul")
@@ -758,6 +768,14 @@ func (s *RESTServer) handleDeleteSoul(ctx *Context) error {
 
 func (s *RESTServer) handleForceCheck(ctx *Context) error {
 	id := ctx.Params["id"]
+	soul, err := s.store.GetSoulNoCtx(id)
+	if err != nil || soul == nil {
+		return ctx.Error(http.StatusNotFound, "soul not found")
+	}
+	if soul.WorkspaceID != ctx.Workspace {
+		return ctx.Error(http.StatusForbidden, "access denied: soul belongs to another workspace")
+	}
+
 	judgment, err := s.probe.ForceCheck(id)
 	if err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
@@ -768,6 +786,16 @@ func (s *RESTServer) handleForceCheck(ctx *Context) error {
 
 func (s *RESTServer) handleListJudgments(ctx *Context) error {
 	soulID := ctx.Params["id"]
+
+	// Verify soul belongs to user's workspace
+	soul, err := s.store.GetSoulNoCtx(soulID)
+	if err != nil || soul == nil {
+		return ctx.Error(http.StatusNotFound, "soul not found")
+	}
+	if soul.WorkspaceID != ctx.Workspace {
+		return ctx.Error(http.StatusForbidden, "access denied: soul belongs to another workspace")
+	}
+
 	start := time.Now().Add(-24 * time.Hour)
 	end := time.Now()
 
@@ -1134,7 +1162,7 @@ func (s *RESTServer) handleAcknowledgeIncident(ctx *Context) error {
 	id := ctx.Params["id"]
 	userID := ctx.User.ID
 
-	if err := s.alert.AcknowledgeIncident(id, userID); err != nil {
+	if err := s.alert.AcknowledgeIncident(id, userID, ctx.Workspace); err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
 
@@ -1145,7 +1173,7 @@ func (s *RESTServer) handleResolveIncident(ctx *Context) error {
 	id := ctx.Params["id"]
 	userID := ctx.User.ID
 
-	if err := s.alert.ResolveIncident(id, userID); err != nil {
+	if err := s.alert.ResolveIncident(id, userID, ctx.Workspace); err != nil {
 		return ctx.Error(http.StatusInternalServerError, err.Error())
 	}
 

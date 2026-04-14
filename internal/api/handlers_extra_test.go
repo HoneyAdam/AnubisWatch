@@ -459,7 +459,7 @@ func TestHandleUpdateSoul_StorageError(t *testing.T) {
 // TestHandleForceCheck_ProbeError tests force check when probe fails
 func TestHandleForceCheck_ProbeError(t *testing.T) {
 	storage := newMockStorage()
-	storage.SaveSoul(nil, &core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP})
+	storage.SaveSoul(nil, &core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP, WorkspaceID: "default"})
 
 	probe := &mockProbeEngine{forceCheckError: true}
 
@@ -475,9 +475,10 @@ func TestHandleForceCheck_ProbeError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/souls/soul-1/check", nil)
 	ctx := &Context{
-		Request:  req,
-		Response: rec,
-		Params:   map[string]string{"id": "soul-1"},
+		Request:   req,
+		Response:  rec,
+		Params:    map[string]string{"id": "soul-1"},
+		Workspace: "default",
 	}
 
 	server.handleForceCheck(ctx)
@@ -508,9 +509,9 @@ func TestHandleListJudgments_StorageError(t *testing.T) {
 	}
 
 	server.handleListJudgments(ctx)
-	// Check response code
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	// Failing MockStorage.GetSoulNoCtx returns error -> 404
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
 	}
 }
 
@@ -1814,8 +1815,9 @@ func TestHandleDeleteSoul_StorageError(t *testing.T) {
 
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	// Failing MockStorage.GetSoulNoCtx returns error -> 404
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
 	}
 }
 

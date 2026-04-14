@@ -879,13 +879,16 @@ func (m *Manager) copyVerdictsBySeverity() map[string]uint64 {
 }
 
 // AcknowledgeIncident acknowledges an incident
-func (m *Manager) AcknowledgeIncident(incidentID, userID string) error {
+func (m *Manager) AcknowledgeIncident(incidentID, userID, workspace string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	incident, ok := m.incidents[incidentID]
 	if !ok {
 		return fmt.Errorf("incident not found: %s", incidentID)
+	}
+	if workspace != "" && incident.WorkspaceID != workspace {
+		return fmt.Errorf("access denied: incident belongs to another workspace")
 	}
 
 	now := time.Now()
@@ -903,13 +906,16 @@ func (m *Manager) AcknowledgeIncident(incidentID, userID string) error {
 }
 
 // ResolveIncident marks an incident as resolved
-func (m *Manager) ResolveIncident(incidentID, userID string) error {
+func (m *Manager) ResolveIncident(incidentID, userID, workspace string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	incident, ok := m.incidents[incidentID]
 	if !ok {
 		return fmt.Errorf("incident not found: %s", incidentID)
+	}
+	if workspace != "" && incident.WorkspaceID != workspace {
+		return fmt.Errorf("access denied: incident belongs to another workspace")
 	}
 
 	now := time.Now()

@@ -292,8 +292,8 @@ func (m *mockStorage) RegisterChannel(ch *core.AlertChannel) error {
 func (m *mockStorage) RegisterRule(rule *core.AlertRule) error {
 	return m.SaveRuleNoCtx(rule)
 }
-func (m *mockStorage) AcknowledgeIncident(incidentID, userID string) error { return nil }
-func (m *mockStorage) ResolveIncident(incidentID, userID string) error     { return nil }
+func (m *mockStorage) AcknowledgeIncident(incidentID, userID, workspace string) error { return nil }
+func (m *mockStorage) ResolveIncident(incidentID, userID, workspace string) error     { return nil }
 func (m *mockStorage) ListActiveIncidents() []*core.Incident               { return nil }
 func (m *mockStorage) GetWorkspaceNoCtx(id string) (*core.Workspace, error) {
 	if w, ok := m.workspaces[id]; ok {
@@ -428,8 +428,8 @@ func (a *mockAlertManager) RegisterChannel(ch *core.AlertChannel) error         
 func (a *mockAlertManager) RegisterRule(rule *core.AlertRule) error             { return nil }
 func (a *mockAlertManager) DeleteChannel(id string) error                       { return nil }
 func (a *mockAlertManager) DeleteRule(id string) error                          { return nil }
-func (a *mockAlertManager) AcknowledgeIncident(incidentID, userID string) error { return nil }
-func (a *mockAlertManager) ResolveIncident(incidentID, userID string) error     { return nil }
+func (a *mockAlertManager) AcknowledgeIncident(incidentID, userID, workspace string) error { return nil }
+func (a *mockAlertManager) ResolveIncident(incidentID, userID, workspace string) error     { return nil }
 func (a *mockAlertManager) ListActiveIncidents() []*core.Incident               { return nil }
 
 // failingAlertManager is an AlertManager that always returns errors
@@ -454,10 +454,10 @@ func (a *failingAlertManager) RegisterRule(rule *core.AlertRule) error {
 }
 func (a *failingAlertManager) DeleteChannel(id string) error { return fmt.Errorf("alert error") }
 func (a *failingAlertManager) DeleteRule(id string) error    { return fmt.Errorf("alert error") }
-func (a *failingAlertManager) AcknowledgeIncident(incidentID, userID string) error {
+func (a *failingAlertManager) AcknowledgeIncident(incidentID, userID, workspace string) error {
 	return fmt.Errorf("alert error")
 }
-func (a *failingAlertManager) ResolveIncident(incidentID, userID string) error {
+func (a *failingAlertManager) ResolveIncident(incidentID, userID, workspace string) error {
 	return fmt.Errorf("alert error")
 }
 func (a *failingAlertManager) ListActiveIncidents() []*core.Incident { return nil }
@@ -717,7 +717,7 @@ func TestHandleGetSoul_NotFound(t *testing.T) {
 
 func TestHandleDeleteSoul(t *testing.T) {
 	storage := newMockStorage()
-	storage.SaveSoul(context.Background(), &core.Soul{ID: "to-delete", Name: "Delete Me", Type: core.CheckHTTP, Target: "https://example.com"})
+	storage.SaveSoul(context.Background(), &core.Soul{ID: "to-delete", Name: "Delete Me", Type: core.CheckHTTP, Target: "https://example.com", WorkspaceID: "default"})
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
@@ -1008,6 +1008,7 @@ func TestHandleUpdateSoul(t *testing.T) {
 
 func TestHandleForceCheck(t *testing.T) {
 	storage := newMockStorage()
+	storage.SaveSoul(context.Background(), &core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP, Target: "https://example.com", WorkspaceID: "default"})
 	probe := &mockProbeEngine{}
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
@@ -2453,6 +2454,7 @@ func TestHandleDeleteWorkspace(t *testing.T) {
 
 func TestHandleListJudgments(t *testing.T) {
 	storage := newMockStorage()
+	storage.SaveSoul(context.Background(), &core.Soul{ID: "soul-1", Name: "Test Soul", Type: core.CheckHTTP, Target: "https://example.com", WorkspaceID: "default"})
 
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
