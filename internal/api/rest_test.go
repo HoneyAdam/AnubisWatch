@@ -4,16 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
-	"log/slog"
-	"os"
 )
 
 func newTestLogger() *slog.Logger {
@@ -557,6 +558,21 @@ func (a *mockAuthenticator) Login(email, password string) (*User, string, error)
 }
 func (a *mockAuthenticator) Logout(token string) error { return nil }
 func (a *mockAuthenticator) Shutdown()                 {}
+func (a *mockAuthenticator) ChangePassword(token, currentPassword, newPassword string) error {
+	if currentPassword == "TestPass1234!" && newPassword == "NewTestPass1234!" {
+		return nil
+	}
+	return errors.New("current password is incorrect")
+}
+func (a *mockAuthenticator) RequestPasswordReset(email string) (string, error) {
+	return "reset-token-123", nil
+}
+func (a *mockAuthenticator) ConfirmPasswordReset(token, newPassword string) error {
+	if token == "valid-reset-token" {
+		return nil
+	}
+	return errors.New("invalid reset token")
+}
 
 // failingMockAuthenticator always returns errors
 type failingMockAuthenticator struct{}
@@ -569,6 +585,15 @@ func (a *failingMockAuthenticator) Login(email, password string) (*User, string,
 }
 func (a *failingMockAuthenticator) Logout(token string) error { return fmt.Errorf("logout failed") }
 func (a *failingMockAuthenticator) Shutdown()                 {}
+func (a *failingMockAuthenticator) ChangePassword(token, currentPassword, newPassword string) error {
+	return fmt.Errorf("change password failed")
+}
+func (a *failingMockAuthenticator) RequestPasswordReset(email string) (string, error) {
+	return "", fmt.Errorf("reset request failed")
+}
+func (a *failingMockAuthenticator) ConfirmPasswordReset(token, newPassword string) error {
+	return fmt.Errorf("confirm reset failed")
+}
 
 // mockClusterManager implements ClusterManager interface
 type mockClusterManager struct {
@@ -4733,5 +4758,179 @@ func TestHandleDeleteMaintenanceWindow_NotFound(t *testing.T) {
 	}
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("Expected status %d, got %d", http.StatusNotFound, rec.Code)
+	}
+}
+
+// Password Management Tests (HIGH-04)
+
+func authEnabled() core.AuthConfig {
+	enabled := true
+	return core.AuthConfig{Type: "local", Enabled: &enabled}
+}
+
+func TestHandleChangePassword_Success(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticator{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:      storage,
+		router:     router,
+		auth:       auth,
+		authConfig: authEnabled(),
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+	}
+
+	router.Handle("PUT", "/api/v1/auth/change-password", server.requireAuth(server.handleChangePassword))
+
+	body := bytes.NewBufferString(`{"current_password":"TestPass1234!","new_password":"NewTestPass1234!"}`)
+	req := httptest.NewRequest("PUT", "/api/v1/auth/change-password", body)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleChangePassword_WrongCurrentPassword(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticator{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:      storage,
+		router:     router,
+		auth:       auth,
+		authConfig: authEnabled(),
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+	}
+
+	router.Handle("PUT", "/api/v1/auth/change-password", server.requireAuth(server.handleChangePassword))
+
+	body := bytes.NewBufferString(`{"current_password":"WrongPassword1!","new_password":"NewTestPass1234!"}`)
+	req := httptest.NewRequest("PUT", "/api/v1/auth/change-password", body)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleChangePassword_MissingAuth(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticator{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:      storage,
+		router:     router,
+		auth:       auth,
+		authConfig: authEnabled(),
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+	}
+
+	router.Handle("PUT", "/api/v1/auth/change-password", server.requireAuth(server.handleChangePassword))
+
+	body := bytes.NewBufferString(`{"current_password":"TestPass1234!","new_password":"NewTestPass1234!"}`)
+	req := httptest.NewRequest("PUT", "/api/v1/auth/change-password", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleRequestPasswordReset_Success(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticator{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/api/v1/auth/reset-password", server.handleRequestPasswordReset)
+
+	body := bytes.NewBufferString(`{"email":"test@example.com"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/reset-password", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleConfirmPasswordReset_Success(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticator{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/api/v1/auth/reset-password/confirm", server.handleConfirmPasswordReset)
+
+	body := bytes.NewBufferString(`{"token":"valid-reset-token","new_password":"NewTestPass1234!"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/reset-password/confirm", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleConfirmPasswordReset_InvalidToken(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticator{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/api/v1/auth/reset-password/confirm", server.handleConfirmPasswordReset)
+
+	body := bytes.NewBufferString(`{"token":"bad-token","new_password":"NewTestPass1234!"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/reset-password/confirm", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d: %s", w.Code, w.Body.String())
 	}
 }

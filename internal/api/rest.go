@@ -219,6 +219,10 @@ type Authenticator interface {
 	Login(email, password string) (*User, string, error)
 	Logout(token string) error
 	Shutdown()
+	// Password management (HIGH-04)
+	ChangePassword(token, currentPassword, newPassword string) error
+	RequestPasswordReset(email string) (string, error)
+	ConfirmPasswordReset(token, newPassword string) error
 }
 
 // OIDCAuth extends Authenticator with OIDC methods
@@ -316,6 +320,10 @@ func (s *RESTServer) setupRoutes() {
 	s.router.Handle("POST", "/api/v1/auth/login", s.handleLogin)
 	s.router.Handle("POST", "/api/v1/auth/logout", s.handleLogout)
 	s.router.Handle("GET", "/api/v1/auth/me", s.requireAuth(s.handleMe))
+	// Password management (HIGH-04)
+	s.router.Handle("PUT", "/api/v1/auth/change-password", s.requireAuth(s.handleChangePassword))
+	s.router.Handle("POST", "/api/v1/auth/reset-password", s.handleRequestPasswordReset)
+	s.router.Handle("POST", "/api/v1/auth/reset-password/confirm", s.handleConfirmPasswordReset)
 
 	// OIDC Auth (if configured)
 	if _, ok := s.auth.(OIDCAuth); ok {
@@ -571,6 +579,82 @@ func (s *RESTServer) handleLogout(ctx *Context) error {
 
 func (s *RESTServer) handleMe(ctx *Context) error {
 	return ctx.JSON(http.StatusOK, ctx.User)
+}
+
+// Password management handlers (HIGH-04)
+
+func (s *RESTServer) handleChangePassword(ctx *Context) error {
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := ctx.Bind(&req); err != nil {
+		return ctx.Error(http.StatusBadRequest, "invalid request body")
+	}
+
+	// Extract token from Authorization header (already validated by requireAuth)
+	authHeader := ctx.Request.Header.Get("Authorization")
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+
+	if err := s.auth.ChangePassword(token, req.CurrentPassword, req.NewPassword); err != nil {
+		if strings.Contains(err.Error(), "current password") {
+			return ctx.Error(http.StatusUnauthorized, err.Error())
+		}
+		if strings.Contains(err.Error(), "policy") {
+			return ctx.Error(http.StatusBadRequest, err.Error())
+		}
+		s.logger.Error("change password failed", "error", err)
+		return ctx.Error(http.StatusInternalServerError, "failed to change password")
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]string{
+		"message": "password changed successfully, please login again",
+	})
+}
+
+func (s *RESTServer) handleRequestPasswordReset(ctx *Context) error {
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := ctx.Bind(&req); err != nil {
+		return ctx.Error(http.StatusBadRequest, "invalid request body")
+	}
+
+	_, err := s.auth.RequestPasswordReset(req.Email)
+	if err != nil {
+		s.logger.Error("password reset request failed", "error", err)
+		return ctx.Error(http.StatusInternalServerError, "failed to request password reset")
+	}
+
+	// Always return success (even for unknown emails) to prevent enumeration
+	return ctx.JSON(http.StatusOK, map[string]string{
+		"message": "if the email exists, a reset token has been generated (check server logs)",
+	})
+}
+
+func (s *RESTServer) handleConfirmPasswordReset(ctx *Context) error {
+	var req struct {
+		Token       string `json:"token"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := ctx.Bind(&req); err != nil {
+		return ctx.Error(http.StatusBadRequest, "invalid request body")
+	}
+
+	if err := s.auth.ConfirmPasswordReset(req.Token, req.NewPassword); err != nil {
+		if strings.Contains(err.Error(), "expired") || strings.Contains(err.Error(), "invalid") {
+			return ctx.Error(http.StatusBadRequest, err.Error())
+		}
+		if strings.Contains(err.Error(), "policy") {
+			return ctx.Error(http.StatusBadRequest, err.Error())
+		}
+		s.logger.Error("password reset confirm failed", "error", err)
+		return ctx.Error(http.StatusInternalServerError, "failed to reset password")
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]string{
+		"message": "password reset successfully, please login with your new password",
+	})
 }
 
 // OIDC handlers

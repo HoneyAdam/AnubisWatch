@@ -30,6 +30,13 @@ type LocalAuthenticator struct {
 	// login attempts tracking for brute force protection
 	loginAttempts   map[string]*loginAttempt
 	attemptsMu      sync.RWMutex
+	// password reset tokens (protected by a.mu)
+	resetTokens map[string]*resetToken
+}
+
+type resetToken struct {
+	Email     string    `json:"email"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 type loginAttempt struct {
@@ -45,8 +52,9 @@ type session struct {
 
 // sessionData represents the data persisted to disk
 type sessionData struct {
-	Tokens map[string]*session  `json:"tokens"`
-	Users  map[string]*api.User `json:"users"`
+	Tokens      map[string]*session   `json:"tokens"`
+	Users       map[string]*api.User  `json:"users"`
+	ResetTokens map[string]*resetToken `json:"reset_tokens"`
 }
 
 // NewLocalAuthenticator creates a new local authenticator
@@ -83,6 +91,7 @@ func NewLocalAuthenticator(sessionPath, adminEmail, adminPassword string) *Local
 		stopCleanup:       make(chan struct{}),
 		cleanupDone:       make(chan struct{}),
 		loginAttempts:     make(map[string]*loginAttempt),
+		resetTokens:       make(map[string]*resetToken),
 	}
 
 	// Create admin user if credentials provided
@@ -138,6 +147,12 @@ func (a *LocalAuthenticator) loadSessions() {
 			}
 		}
 	}
+	// Load non-expired reset tokens
+	for token, rt := range sessionData.ResetTokens {
+		if now.Before(rt.ExpiresAt) {
+			a.resetTokens[token] = rt
+		}
+	}
 }
 
 // saveSessionsLocked persists sessions and users to disk
@@ -148,8 +163,9 @@ func (a *LocalAuthenticator) saveSessionsLocked() {
 	}
 
 	data := sessionData{
-		Tokens: a.tokens,
-		Users:  a.users,
+		Tokens:      a.tokens,
+		Users:       a.users,
+		ResetTokens: a.resetTokens,
 	}
 
 	jsonData, err := json.Marshal(data)
@@ -470,4 +486,111 @@ func HashPassword(password string) (string, error) {
 		return "", err
 	}
 	return string(hash), nil
+}
+
+// ChangePassword validates the current password and sets a new one.
+// All existing sessions are invalidated on success.
+func (a *LocalAuthenticator) ChangePassword(token, currentPassword, newPassword string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Validate token
+	sess, ok := a.tokens[token]
+	if !ok {
+		return errors.New("invalid token")
+	}
+	if time.Now().After(sess.ExpiresAt) {
+		delete(a.tokens, token)
+		return errors.New("token expired")
+	}
+
+	// Verify current password
+	if err := bcrypt.CompareHashAndPassword([]byte(a.adminPasswordHash), []byte(currentPassword)); err != nil {
+		return errors.New("current password is incorrect")
+	}
+
+	// Validate new password policy
+	if err := validatePassword(newPassword); err != nil {
+		return fmt.Errorf("new password does not meet policy: %w", err)
+	}
+
+	// Hash and set new password
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcryptCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash new password: %w", err)
+	}
+	a.adminPasswordHash = string(newHash)
+
+	// Invalidate all existing sessions (force re-login)
+	a.tokens = make(map[string]*session)
+	a.saveSessionsLocked()
+
+	return nil
+}
+
+// RequestPasswordReset generates a time-limited reset token for the given email.
+// The token is logged to the server log (since no email infrastructure exists).
+func (a *LocalAuthenticator) RequestPasswordReset(email string) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Use constant-time comparison to prevent user enumeration
+	if subtle.ConstantTimeCompare([]byte(email), []byte(a.adminEmail)) != 1 {
+		// Run dummy bcrypt to prevent timing attacks (same as login)
+		dummyHash, _ := bcrypt.GenerateFromPassword([]byte("dummy-password-for-timing"), bcrypt.DefaultCost)
+		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte("dummy"))
+		// Still return success to prevent email enumeration
+		return "", nil
+	}
+
+	// Generate reset token
+	token := generateToken()
+	a.resetTokens[token] = &resetToken{
+		Email:     email,
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+	a.saveSessionsLocked()
+
+	// Log the reset token to server log (no email infrastructure)
+	// In production, this should be sent via email to the admin
+	fmt.Printf("[ANUBIS PASSWORD RESET] Reset token for %s: %s (expires in 1 hour)\n", email, token)
+
+	return token, nil
+}
+
+// ConfirmPasswordReset validates a reset token and sets a new password.
+// All existing sessions are invalidated on success.
+func (a *LocalAuthenticator) ConfirmPasswordReset(token, newPassword string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	rt, ok := a.resetTokens[token]
+	if !ok {
+		return errors.New("invalid reset token")
+	}
+	if time.Now().After(rt.ExpiresAt) {
+		delete(a.resetTokens, token)
+		return errors.New("reset token expired")
+	}
+
+	// Validate new password policy
+	if err := validatePassword(newPassword); err != nil {
+		return fmt.Errorf("new password does not meet policy: %w", err)
+	}
+
+	// Hash and set new password
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcryptCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash new password: %w", err)
+	}
+	a.adminPasswordHash = string(newHash)
+
+	// Delete used reset token
+	delete(a.resetTokens, token)
+
+	// Invalidate all existing sessions (force re-login)
+	a.tokens = make(map[string]*session)
+	a.saveSessionsLocked()
+
+	return nil
 }

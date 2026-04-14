@@ -225,6 +225,21 @@ func (l *LDAPAuthenticator) Shutdown() {
 	close(l.stopCh)
 }
 
+// ChangePassword delegates to local authenticator (HIGH-04)
+func (l *LDAPAuthenticator) ChangePassword(token, currentPassword, newPassword string) error {
+	return l.local.ChangePassword(token, currentPassword, newPassword)
+}
+
+// RequestPasswordReset delegates to local authenticator (HIGH-04)
+func (l *LDAPAuthenticator) RequestPasswordReset(email string) (string, error) {
+	return l.local.RequestPasswordReset(email)
+}
+
+// ConfirmPasswordReset delegates to local authenticator (HIGH-04)
+func (l *LDAPAuthenticator) ConfirmPasswordReset(token, newPassword string) error {
+	return l.local.ConfirmPasswordReset(token, newPassword)
+}
+
 // GetUsers returns all LDAP users
 func (l *LDAPAuthenticator) GetUsers() []*api.User {
 	l.mu.RLock()

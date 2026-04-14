@@ -737,6 +737,21 @@ func (o *OIDCAuthenticator) Shutdown() {
 	close(o.stopCh)
 }
 
+// ChangePassword delegates to local authenticator (HIGH-04)
+func (o *OIDCAuthenticator) ChangePassword(token, currentPassword, newPassword string) error {
+	return o.local.ChangePassword(token, currentPassword, newPassword)
+}
+
+// RequestPasswordReset delegates to local authenticator (HIGH-04)
+func (o *OIDCAuthenticator) RequestPasswordReset(email string) (string, error) {
+	return o.local.RequestPasswordReset(email)
+}
+
+// ConfirmPasswordReset delegates to local authenticator (HIGH-04)
+func (o *OIDCAuthenticator) ConfirmPasswordReset(token, newPassword string) error {
+	return o.local.ConfirmPasswordReset(token, newPassword)
+}
+
 // GetUsers returns all OIDC users
 func (o *OIDCAuthenticator) GetUsers() []*api.User {
 	o.mu.RLock()

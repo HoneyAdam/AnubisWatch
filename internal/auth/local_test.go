@@ -549,3 +549,291 @@ func TestLocalAuthenticator_SaveSessions_WriteError(t *testing.T) {
 	// saveSessions should handle write error gracefully (no panic)
 	auth.saveSessions()
 }
+
+// TestLocalAuthenticator_ChangePassword tests the password change flow
+func TestLocalAuthenticator_ChangePassword(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	// Login to get a valid token
+	user, token, err := auth.Login("admin@test.com", "TestPass1234!")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+
+	// Change password
+	err = auth.ChangePassword(token, "TestPass1234!", "NewPass5678!")
+	if err != nil {
+		t.Fatalf("ChangePassword failed: %v", err)
+	}
+
+	// Old token should be invalidated
+	_, err = auth.Authenticate(token)
+	if err == nil {
+		t.Fatal("Old token should be invalidated after password change")
+	}
+
+	// Old password should no longer work
+	_, _, err = auth.Login("admin@test.com", "TestPass1234!")
+	if err == nil {
+		t.Fatal("Old password should no longer work")
+	}
+
+	// New password should work
+	newUser, newToken, err := auth.Login("admin@test.com", "NewPass5678!")
+	if err != nil {
+		t.Fatalf("Login with new password failed: %v", err)
+	}
+	if newUser.Email != user.Email {
+		t.Errorf("Expected email %s, got %s", user.Email, newUser.Email)
+	}
+	if newToken == "" {
+		t.Fatal("New token should not be empty")
+	}
+}
+
+// TestLocalAuthenticator_ChangePassword_WrongCurrentPassword tests with incorrect current password
+func TestLocalAuthenticator_ChangePassword_WrongCurrentPassword(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	user, token, err := auth.Login("admin@test.com", "TestPass1234!")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+
+	err = auth.ChangePassword(token, "WrongPassword1!", "NewPass5678!")
+	if err == nil {
+		t.Fatal("Expected error for wrong current password")
+	}
+
+	// Original password should still work
+	_, _, err = auth.Login(user.Email, "TestPass1234!")
+	if err != nil {
+		t.Fatalf("Original password should still work: %v", err)
+	}
+}
+
+// TestLocalAuthenticator_ChangePassword_InvalidToken tests with invalid token
+func TestLocalAuthenticator_ChangePassword_InvalidToken(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	err := auth.ChangePassword("invalid-token", "TestPass1234!", "NewPass5678!")
+	if err == nil {
+		t.Fatal("Expected error for invalid token")
+	}
+}
+
+// TestLocalAuthenticator_ChangePassword_WeakNewPassword tests password policy
+func TestLocalAuthenticator_ChangePassword_WeakNewPassword(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	_, token, err := auth.Login("admin@test.com", "TestPass1234!")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+
+	// Too short
+	err = auth.ChangePassword(token, "TestPass1234!", "Short1!")
+	if err == nil {
+		t.Fatal("Expected error for short password")
+	}
+
+	// Missing character classes
+	err = auth.ChangePassword(token, "TestPass1234!", "alllowercase1")
+	if err == nil {
+		t.Fatal("Expected error for password missing character classes")
+	}
+}
+
+// TestLocalAuthenticator_RequestPasswordReset tests requesting a reset token
+func TestLocalAuthenticator_RequestPasswordReset(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	token, err := auth.RequestPasswordReset("admin@test.com")
+	if err != nil {
+		t.Fatalf("RequestPasswordReset failed: %v", err)
+	}
+	if token == "" {
+		t.Fatal("Expected a reset token")
+	}
+}
+
+// TestLocalAuthenticator_RequestPasswordReset_WrongEmail tests with unknown email
+func TestLocalAuthenticator_RequestPasswordReset_WrongEmail(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	// Should not error (prevents email enumeration)
+	token, err := auth.RequestPasswordReset("unknown@test.com")
+	if err != nil {
+		t.Fatalf("RequestPasswordReset should not error for unknown email: %v", err)
+	}
+	if token != "" {
+		t.Fatal("Expected empty token for unknown email")
+	}
+}
+
+// TestLocalAuthenticator_ConfirmPasswordReset tests the full reset flow
+func TestLocalAuthenticator_ConfirmPasswordReset(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	// Login first
+	_, oldToken, err := auth.Login("admin@test.com", "TestPass1234!")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+
+	// Request reset
+	resetToken, err := auth.RequestPasswordReset("admin@test.com")
+	if err != nil {
+		t.Fatalf("RequestPasswordReset failed: %v", err)
+	}
+
+	// Confirm reset with new password
+	err = auth.ConfirmPasswordReset(resetToken, "ResetPass9999!")
+	if err != nil {
+		t.Fatalf("ConfirmPasswordReset failed: %v", err)
+	}
+
+	// Old session should be invalidated
+	_, err = auth.Authenticate(oldToken)
+	if err == nil {
+		t.Fatal("Old session should be invalidated after password reset")
+	}
+
+	// New password should work
+	_, _, err = auth.Login("admin@test.com", "ResetPass9999!")
+	if err != nil {
+		t.Fatalf("Login with new password failed: %v", err)
+	}
+}
+
+// TestLocalAuthenticator_ConfirmPasswordReset_InvalidToken tests with invalid reset token
+func TestLocalAuthenticator_ConfirmPasswordReset_InvalidToken(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	err := auth.ConfirmPasswordReset("invalid-reset-token", "NewPass5678!")
+	if err == nil {
+		t.Fatal("Expected error for invalid reset token")
+	}
+}
+
+// TestLocalAuthenticator_ConfirmPasswordReset_ExpiredToken tests with expired reset token
+func TestLocalAuthenticator_ConfirmPasswordReset_ExpiredToken(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	// Manually inject an expired reset token
+	token := "expired-reset-token"
+	auth.mu.Lock()
+	auth.resetTokens[token] = &resetToken{
+		Email:     "admin@test.com",
+		ExpiresAt: time.Now().Add(-1 * time.Hour),
+	}
+	auth.mu.Unlock()
+
+	err := auth.ConfirmPasswordReset(token, "NewPass5678!")
+	if err == nil {
+		t.Fatal("Expected error for expired reset token")
+	}
+}
+
+// TestLocalAuthenticator_ConfirmPasswordReset_WeakPassword tests password policy on reset
+func TestLocalAuthenticator_ConfirmPasswordReset_WeakPassword(t *testing.T) {
+	auth := NewLocalAuthenticator("", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	resetToken, err := auth.RequestPasswordReset("admin@test.com")
+	if err != nil {
+		t.Fatalf("RequestPasswordReset failed: %v", err)
+	}
+
+	err = auth.ConfirmPasswordReset(resetToken, "weak")
+	if err == nil {
+		t.Fatal("Expected error for weak password")
+	}
+
+	// Original password should still work
+	_, _, err = auth.Login("admin@test.com", "TestPass1234!")
+	if err != nil {
+		t.Fatalf("Original password should still work: %v", err)
+	}
+}
+
+// TestLocalAuthenticator_ResetTokenPersistence tests that reset tokens survive serialization
+func TestLocalAuthenticator_ResetTokenPersistence(t *testing.T) {
+	tmpFile := t.TempDir() + "/sessions.json"
+
+	// Create authenticator with persistence
+	auth1 := NewLocalAuthenticator(tmpFile, "admin@test.com", "TestPass1234!")
+	resetToken, err := auth1.RequestPasswordReset("admin@test.com")
+	if err != nil {
+		t.Fatalf("RequestPasswordReset failed: %v", err)
+	}
+	auth1.Shutdown()
+
+	// Create new authenticator (simulates restart)
+	auth2 := NewLocalAuthenticator(tmpFile, "admin@test.com", "TestPass1234!")
+	defer auth2.Shutdown()
+
+	// Reset token should still be valid
+	err = auth2.ConfirmPasswordReset(resetToken, "AfterRestart1!")
+	if err != nil {
+		t.Fatalf("ConfirmPasswordReset after restart failed: %v", err)
+	}
+}
+
+// TestLocalAuthenticator_ChangePassword_SessionPersistence tests that sessions file is updated
+func TestLocalAuthenticator_ChangePassword_SessionPersistence(t *testing.T) {
+	tmpFile := t.TempDir() + "/sessions.json"
+
+	auth := NewLocalAuthenticator(tmpFile, "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	_, token, err := auth.Login("admin@test.com", "TestPass1234!")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+
+	err = auth.ChangePassword(token, "TestPass1234!", "PersistPass1!")
+	if err != nil {
+		t.Fatalf("ChangePassword failed: %v", err)
+	}
+
+	// Verify sessions file was updated (tokens should be empty)
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to read sessions file: %v", err)
+	}
+	var sessionData struct {
+		Tokens map[string]interface{} `json:"tokens"`
+	}
+	if err := json.Unmarshal(data, &sessionData); err != nil {
+		t.Fatalf("Failed to parse sessions file: %v", err)
+	}
+	if len(sessionData.Tokens) != 0 {
+		t.Fatal("Sessions should be empty after password change")
+	}
+}
+
+// TestHashPassword tests the exported HashPassword helper
+func TestHashPassword(t *testing.T) {
+	hash, err := HashPassword("TestPass1234!")
+	if err != nil {
+		t.Fatalf("HashPassword failed: %v", err)
+	}
+	if hash == "" {
+		t.Fatal("Hash should not be empty")
+	}
+
+	_, err = HashPassword("")
+	if err == nil {
+		t.Fatal("Expected error for empty password")
+	}
+}
