@@ -504,24 +504,41 @@ func (m *Manager) verifyChecksum(backup *Backup) error {
 }
 
 func (m *Manager) writeBackupFile(backup *Backup, path string, opts Options) error {
-	file, err := os.Create(path)
+	// Write to a temp file first for atomic backup creation
+	// This prevents corrupted backups if the process is interrupted
+	tmpPath := path + ".tmp"
+	file, err := os.Create(tmpPath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 
 	var writer io.Writer = file
-
-	// Add compression if enabled
+	var gzipWriter *gzip.Writer
 	if opts.Compress {
-		gzipWriter := gzip.NewWriter(file)
-		defer gzipWriter.Close()
+		gzipWriter = gzip.NewWriter(file)
 		writer = gzipWriter
 	}
 
 	encoder := json.NewEncoder(writer)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(backup)
+	err = encoder.Encode(backup)
+
+	// Close gzip writer first (flush remaining data), then file
+	if gzipWriter != nil {
+		if closeErr := gzipWriter.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}
+	if closeErr := file.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(tmpPath) // Clean up temp file
+		return err
+	}
+
+	// Atomic rename - replaces the file if it already exists
+	return os.Rename(tmpPath, path)
 }
 
 func (m *Manager) readBackupFile(path string) (*Backup, error) {
