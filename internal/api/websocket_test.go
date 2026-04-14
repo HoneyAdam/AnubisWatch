@@ -387,8 +387,8 @@ func TestWebSocketServer_removeClient_WithRooms(t *testing.T) {
 	defer httpServer.Close()
 
 	// Connect a WebSocket client
-	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "?workspace=test&user_id=user1&token=valid-token"
-	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "?workspace=test&user_id=user1"
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Authorization": []string{"Bearer valid-token"}})
 	if err != nil {
 		t.Fatalf("Failed to connect WebSocket: %v", err)
 	}
@@ -494,8 +494,8 @@ func TestWebSocketServer_broadcastToRoom_FullBuffer(t *testing.T) {
 	defer httpServer.Close()
 
 	// Connect a WebSocket client
-	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "?workspace=test&user_id=user1&token=valid-token"
-	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "?workspace=test&user_id=user1"
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Authorization": []string{"Bearer valid-token"}})
 	if err != nil {
 		t.Fatalf("Failed to connect WebSocket: %v", err)
 	}

@@ -106,19 +106,27 @@ func (s *WebSocketServer) Stop() {
 
 // HandleConnection handles new WebSocket connections
 func (s *WebSocketServer) HandleConnection(w http.ResponseWriter, r *http.Request) {
-	// Extract token from query param or Authorization header
-	token := r.URL.Query().Get("token")
-	if token == "" {
-		// Try Authorization header
-		authHeader := r.Header.Get("Authorization")
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			token = strings.TrimPrefix(authHeader, "Bearer ")
-		}
+	// Extract token from Authorization header only
+	// SECURITY: Reject query parameter tokens to prevent token leakage in access logs,
+	// browser history, and Referer headers. (HIGH-03 fix)
+	if r.URL.Query().Get("token") != "" {
+		s.logger.Warn("WebSocket connection rejected: token via query parameter is not allowed",
+			"remote_addr", r.RemoteAddr)
+		http.Error(w, "Unauthorized: token must be provided via Authorization header, not query parameter", http.StatusUnauthorized)
+		return
 	}
+
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		s.logger.Warn("WebSocket connection rejected: missing Bearer token", "remote_addr", r.RemoteAddr)
+		http.Error(w, "Unauthorized: missing Bearer token in Authorization header", http.StatusUnauthorized)
+		return
+	}
+	token := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Validate token
 	if token == "" {
-		s.logger.Warn("WebSocket connection rejected: missing token", "remote_addr", r.RemoteAddr)
+		s.logger.Warn("WebSocket connection rejected: empty token", "remote_addr", r.RemoteAddr)
 		http.Error(w, "Unauthorized: missing token", http.StatusUnauthorized)
 		return
 	}
