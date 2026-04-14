@@ -121,7 +121,7 @@ func TestOIDCAuthenticator_OIDCCallback_InvalidState(t *testing.T) {
 	defer auth.Shutdown()
 
 	// Test callback with invalid state (no matching state was generated)
-	_, _, err := auth.OIDCCallback("test-code", "invalid-state", "invalid-nonce")
+	_, _, err := auth.OIDCCallback("test-code", "invalid.state.here", "invalid-nonce")
 	if err == nil {
 		t.Error("Expected error for invalid state")
 	}
@@ -149,7 +149,7 @@ func TestOIDCAuthenticator_OIDCCallback_InvalidNonce(t *testing.T) {
 	auth.mu.Unlock()
 
 	// Test callback with wrong nonce (CSRF attack simulation)
-	_, _, err := auth.OIDCCallback("test-code", state, "wrong-nonce")
+	_, _, err := auth.OIDCCallback("test-code", auth.signState(state), "wrong-nonce")
 	if err == nil {
 		t.Error("Expected error for invalid nonce (possible CSRF attack)")
 	}
@@ -504,14 +504,15 @@ func TestOIDCAuthenticator_OIDCCallback_StateExpiration(t *testing.T) {
 	defer auth.Shutdown()
 
 	// Manually add an expired state
+	expiredState := "expired-state"
 	auth.mu.Lock()
-	auth.state["expired-state"] = &oidcState{
+	auth.state[expiredState] = &oidcState{
 		Nonce:     "test-nonce",
 		ExpiresAt: time.Now().Add(-1 * time.Hour), // Expired 1 hour ago
 	}
 	auth.mu.Unlock()
 
-	_, _, err := auth.OIDCCallback("test-code", "expired-state", "test-nonce")
+	_, _, err := auth.OIDCCallback("test-code", auth.signState(expiredState), "test-nonce")
 	if err == nil {
 		t.Error("Expected error for expired state")
 	}
@@ -1164,7 +1165,7 @@ func TestOIDCAuthenticator_OIDCCallback_Success(t *testing.T) {
 	}
 	auth.mu.Unlock()
 
-	user, token, err := auth.OIDCCallback("test-code", state, nonce)
+	user, token, err := auth.OIDCCallback("test-code", auth.signState(state), nonce)
 	if err != nil {
 		t.Fatalf("OIDCCallback failed: %v", err)
 	}
@@ -1243,7 +1244,7 @@ func TestOIDCAuthenticator_OIDCCallback_EmptyEmail(t *testing.T) {
 	}
 	auth.mu.Unlock()
 
-	_, _, err = auth.OIDCCallback("test-code", state, nonce)
+	_, _, err = auth.OIDCCallback("test-code", auth.signState(state), nonce)
 	if err == nil {
 		t.Error("Expected error for empty email in OIDC response")
 	}
@@ -1316,7 +1317,7 @@ func TestOIDCAuthenticator_OIDCCallback_GetUserInfoError(t *testing.T) {
 	auth.mu.Unlock()
 
 	// Callback should still succeed because ID token has email
-	user, token, err := auth.OIDCCallback("test-code", state, nonce)
+	user, token, err := auth.OIDCCallback("test-code", auth.signState(state), nonce)
 	if err != nil {
 		t.Fatalf("OIDCCallback failed: %v", err)
 	}

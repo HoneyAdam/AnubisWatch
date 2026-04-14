@@ -4,6 +4,8 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
@@ -24,13 +26,14 @@ import (
 
 // OIDCAuthenticator implements OIDC authentication with local fallback
 type OIDCAuthenticator struct {
-	mu     sync.RWMutex
-	config core.OIDCAuth
-	local  *LocalAuthenticator
-	state  map[string]*oidcState // CSRF state tracking
-	users  map[string]*api.User  // email -> user
-	tokens map[string]*session   // token -> session
-	stopCh chan struct{}
+	mu        sync.RWMutex
+	config    core.OIDCAuth
+	local     *LocalAuthenticator
+	state     map[string]*oidcState // CSRF state tracking
+	users     map[string]*api.User  // email -> user
+	tokens    map[string]*session   // token -> session
+	stopCh    chan struct{}
+	stateHMAC []byte // HMAC key for signing state (cluster-compatible)
 
 	// JWK cache
 	jwksMu      sync.RWMutex
@@ -102,6 +105,11 @@ type userInfoResponse struct {
 // NewOIDCAuthenticator creates a new OIDC authenticator with local fallback
 func NewOIDCAuthenticator(cfg core.OIDCAuth, localPath, adminEmail, adminPassword string) *OIDCAuthenticator {
 	localAuth := NewLocalAuthenticator(localPath, adminEmail, adminPassword)
+	// Generate random HMAC key for state signing (cluster-compatible)
+	stateHMAC := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, stateHMAC); err != nil {
+		panic(fmt.Sprintf("failed to generate state HMAC key: %v", err))
+	}
 	return &OIDCAuthenticator{
 		config:  cfg,
 		local:   localAuth,
@@ -109,8 +117,36 @@ func NewOIDCAuthenticator(cfg core.OIDCAuth, localPath, adminEmail, adminPasswor
 		users:   make(map[string]*api.User),
 		tokens:  make(map[string]*session),
 		stopCh:  make(chan struct{}),
+		stateHMAC: stateHMAC,
 		jwksTTL: 24 * time.Hour, // Cache JWKs for 24 hours
 	}
+}
+
+// signState creates an HMAC-signed state token for cluster compatibility.
+// Format: state.hmac_hex(state)
+func (o *OIDCAuthenticator) signState(state string) string {
+	mac := hmac.New(sha256.New, o.stateHMAC)
+	mac.Write([]byte(state))
+	return fmt.Sprintf("%s.%x", state, mac.Sum(nil))
+}
+
+// verifyState checks that the state parameter has a valid HMAC signature.
+// Returns the raw state (without the HMAC suffix) or an error.
+func (o *OIDCAuthenticator) verifyState(signedState string) (string, error) {
+	parts := strings.SplitN(signedState, ".", 2)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid state format: missing HMAC signature")
+	}
+	rawState, expectedMAC := parts[0], parts[1]
+
+	mac := hmac.New(sha256.New, o.stateHMAC)
+	mac.Write([]byte(rawState))
+	actualMAC := fmt.Sprintf("%x", mac.Sum(nil))
+
+	if !hmac.Equal([]byte(actualMAC), []byte(expectedMAC)) {
+		return "", fmt.Errorf("invalid state signature")
+	}
+	return rawState, nil
 }
 
 // OIDCLoginURL returns the OIDC authorization URL for redirect
@@ -133,40 +169,50 @@ func (o *OIDCAuthenticator) OIDCLoginURL() (string, string, string, error) {
 	}
 	o.mu.Unlock()
 
+	// Sign state for cluster compatibility
+	signedState := o.signState(state)
+
 	// Build authorization URL
 	redirectURL := cfg.AuthURL + "?" +
 		"response_type=code" +
 		"&client_id=" + o.config.ClientID +
 		"&redirect_uri=" + o.config.RedirectURL +
 		"&scope=openid+profile+email" +
-		"&state=" + state
+		"&state=" + url.QueryEscape(signedState)
 
-	return redirectURL, state, nonce, nil
+	return redirectURL, signedState, nonce, nil
 }
 
 // OIDCCallback handles the OIDC callback
 func (o *OIDCAuthenticator) OIDCCallback(code, state, nonce string) (*api.User, string, error) {
+	// Verify HMAC signature on state (cluster-compatible)
+	rawState, err := o.verifyState(state)
+	if err != nil {
+		slog.Warn("OIDC callback state HMAC verification failed", "error", err)
+		return nil, "", fmt.Errorf("invalid state: %w", err)
+	}
+
 	// Verify state (CSRF protection)
 	o.mu.Lock()
-	csrfState, exists := o.state[state]
+	csrfState, exists := o.state[rawState]
 	if !exists {
 		o.mu.Unlock()
 		return nil, "", fmt.Errorf("invalid state")
 	}
 	if time.Now().After(csrfState.ExpiresAt) {
-		delete(o.state, state)
+		delete(o.state, rawState)
 		o.mu.Unlock()
 		return nil, "", fmt.Errorf("state expired")
 	}
 	// Verify nonce matches (binds callback to original session)
 	expectedNonce := csrfState.Nonce
 	if csrfState.Nonce != nonce {
-		delete(o.state, state)
+		delete(o.state, rawState)
 		o.mu.Unlock()
-		slog.Warn("OIDC callback nonce mismatch - possible CSRF attack", "state", state)
+		slog.Warn("OIDC callback nonce mismatch - possible CSRF attack", "state", rawState)
 		return nil, "", fmt.Errorf("invalid nonce: possible CSRF attack")
 	}
-	delete(o.state, state)
+	delete(o.state, rawState)
 	o.mu.Unlock()
 
 	// Exchange code for token
