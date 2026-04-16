@@ -67,6 +67,18 @@ persistence:
   accessMode: ReadWriteOnce
   size: 10Gi
 
+statefulSet:
+  replicas: 3
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+
+service:
+  type: ClusterIP
+  httpPort: 8080
+  grpcPort: 9090
+  clusterPort: 7946
+
 config:
   server:
     port: 8080
