@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"crypto/tls"
 	"os"
 	"os/signal"
 	"path"
@@ -476,12 +477,25 @@ func BuildServerDependencies(opts ServerOptions) (*ServerDependencies, error) {
 	var grpcServer *grpcapi.Server
 	if cfg.Server.GRPCPort > 0 {
 		grpcStore := &grpcStorageAdapter{inner: restStore}
+		// Build TLS config for gRPC server from server TLS config
+		var grpcTLSConfig *tls.Config
+		if cfg.Server.TLS.Enabled && cfg.Server.TLS.Cert != "" && cfg.Server.TLS.Key != "" {
+			cert, err := tls.LoadX509KeyPair(cfg.Server.TLS.Cert, cfg.Server.TLS.Key)
+			if err == nil {
+				grpcTLSConfig = &tls.Config{
+					Certificates: []tls.Certificate{cert},
+					MinVersion:   tls.VersionTLS12,
+				}
+			}
+		}
+
 		grpcServer = grpcapi.NewServer(
 			fmt.Sprintf(":%d", cfg.Server.GRPCPort),
 			grpcStore,
 			&grpcProbeAdapter{engine: probeEngine},
 			authenticator,
 			logger,
+			grpcTLSConfig,
 		)
 	}
 

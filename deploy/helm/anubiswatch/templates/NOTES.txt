@@ -1,0 +1,34 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }}
+  $ helm get all {{ .Release.Name }}
+
+{{- if .Values.ingress.enabled }}
+Access the application at:
+  {{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+  {{- end }}
+{{- else if contains "NodePort" .Values.service.type }}
+Get the application URL by running:
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "anubiswatch.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.service.type }}
+Get the application URL by running:
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+        Watch the status with: 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "anubiswatch.fullname" . }}'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "anubiswatch.fullname" . }} --template "{{ "{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}" }}")
+  echo http://$SERVICE_IP:{{ .Values.service.httpPort }}
+{{- else if contains "ClusterIP" .Values.service.type }}
+Access the application using port-forward:
+  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "anubiswatch.fullname" . }} 8080:{{ .Values.service.httpPort }}
+  echo "Visit http://127.0.0.1:8080 to use your application"
+{{- end }}
+
+Default login:
+  Email: {{ .Values.config.auth.admin_email }}
+  Password: {{ .Values.secrets.adminPassword }}

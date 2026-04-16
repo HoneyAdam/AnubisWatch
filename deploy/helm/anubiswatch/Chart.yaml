@@ -1,17 +1,19 @@
 apiVersion: v2
 name: anubiswatch
-description: AnubisWatch - Zero-dependency uptime monitoring platform
+description: A Helm chart for AnubisWatch - Zero-dependency uptime monitoring
 type: application
-version: 1.0.0
-appVersion: "3.0.0"
+version: 0.1.2
+appVersion: "v0.1.2"
+home: https://github.com/AnubisWatch/anubiswatch
+sources:
+  - https://github.com/AnubisWatch/anubiswatch
+maintainers:
+  - name: AnubisWatch Team
+    email: team@anubiswatch.local
 keywords:
   - monitoring
   - uptime
-  - raft
-  - egyptian
-home: https://anubis.watch
-sources:
-  - https://github.com/AnubisWatch/AnubisWatch
-maintainers:
-  - name: AnubisWatch Team
-    email: team@anubis.watch
+  - healthcheck
+  - alerting
+annotations:
+  category: Monitoring

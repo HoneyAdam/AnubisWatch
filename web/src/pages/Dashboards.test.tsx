@@ -77,7 +77,7 @@ describe('Dashboards', () => {
   it('deletes a dashboard after confirm', async () => {
     const dashboards = [{ id: 'dash-1', name: 'Test Dashboard', widgets: [], refresh_sec: 0 }]
     mockUseDashboards.mockReturnValue({ dashboards, loading: false, deleteDashboard: mockDeleteDashboard })
-    ;(globalThis as any).confirm = vi.fn(() => true)
+    ;(globalThis as unknown as { confirm: () => boolean }).confirm = vi.fn(() => true)
     mockDeleteDashboard.mockResolvedValue(undefined)
 
     render(
@@ -96,7 +96,7 @@ describe('Dashboards', () => {
   it('cancels delete when user declines confirm', async () => {
     const dashboards = [{ id: 'dash-1', name: 'Test Dashboard', widgets: [], refresh_sec: 0 }]
     mockUseDashboards.mockReturnValue({ dashboards, loading: false, deleteDashboard: mockDeleteDashboard })
-    ;(globalThis as any).confirm = vi.fn(() => false)
+    ;(globalThis as unknown as { confirm: () => boolean }).confirm = vi.fn(() => false)
 
     render(
       <MemoryRouter>

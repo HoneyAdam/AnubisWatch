@@ -25,26 +25,28 @@ func newTestLogger() *slog.Logger {
 
 // mockStorage implements Storage interface for testing
 type mockStorage struct {
-	souls       map[string]*core.Soul
-	judgments   map[string]*core.Judgment
-	channels    map[string]*core.AlertChannel
-	rules       map[string]*core.AlertRule
-	workspaces  map[string]*core.Workspace
-	journeys    map[string]*core.JourneyConfig
-	dashboards  map[string]*core.CustomDashboard
-	windows     map[string]*core.MaintenanceWindow
+	souls             map[string]*core.Soul
+	judgments         map[string]*core.Judgment
+	channels          map[string]*core.AlertChannel
+	rules             map[string]*core.AlertRule
+	workspaces        map[string]*core.Workspace
+	journeys          map[string]*core.JourneyConfig
+	dashboards        map[string]*core.CustomDashboard
+	windows           map[string]*core.MaintenanceWindow
+	listDashboardsErr error
+	listSoulsErr      error
 }
 
 func newMockStorage() *mockStorage {
 	return &mockStorage{
-		souls:       make(map[string]*core.Soul),
-		judgments:   make(map[string]*core.Judgment),
-		channels:    make(map[string]*core.AlertChannel),
-		rules:       make(map[string]*core.AlertRule),
-		workspaces:  make(map[string]*core.Workspace),
-		journeys:    make(map[string]*core.JourneyConfig),
-		dashboards:  make(map[string]*core.CustomDashboard),
-		windows:     make(map[string]*core.MaintenanceWindow),
+		souls:      make(map[string]*core.Soul),
+		judgments:  make(map[string]*core.Judgment),
+		channels:   make(map[string]*core.AlertChannel),
+		rules:      make(map[string]*core.AlertRule),
+		workspaces: make(map[string]*core.Workspace),
+		journeys:   make(map[string]*core.JourneyConfig),
+		dashboards: make(map[string]*core.CustomDashboard),
+		windows:    make(map[string]*core.MaintenanceWindow),
 	}
 }
 
@@ -55,6 +57,9 @@ func (m *mockStorage) GetSoulNoCtx(id string) (*core.Soul, error) {
 	return nil, fmt.Errorf("soul not found")
 }
 func (m *mockStorage) ListSoulsNoCtx(ws string, offset, limit int) ([]*core.Soul, error) {
+	if m.listSoulsErr != nil {
+		return nil, m.listSoulsErr
+	}
 	souls := make([]*core.Soul, 0, len(m.souls))
 	for _, s := range m.souls {
 		souls = append(souls, s)
@@ -295,7 +300,7 @@ func (m *mockStorage) RegisterRule(rule *core.AlertRule) error {
 }
 func (m *mockStorage) AcknowledgeIncident(incidentID, userID, workspace string) error { return nil }
 func (m *mockStorage) ResolveIncident(incidentID, userID, workspace string) error     { return nil }
-func (m *mockStorage) ListActiveIncidents() []*core.Incident               { return nil }
+func (m *mockStorage) ListActiveIncidents() []*core.Incident                          { return nil }
 func (m *mockStorage) GetWorkspaceNoCtx(id string) (*core.Workspace, error) {
 	if w, ok := m.workspaces[id]; ok {
 		return w, nil
@@ -345,6 +350,9 @@ func (m *mockStorage) GetDashboardNoCtx(id string) (*core.CustomDashboard, error
 	return nil, fmt.Errorf("dashboard not found")
 }
 func (m *mockStorage) ListDashboardsNoCtx() ([]*core.CustomDashboard, error) {
+	if m.listDashboardsErr != nil {
+		return nil, m.listDashboardsErr
+	}
 	result := make([]*core.CustomDashboard, 0, len(m.dashboards))
 	for _, d := range m.dashboards {
 		result = append(result, d)
@@ -498,9 +506,11 @@ func (a *mockAlertManager) DeleteRule(id string) error {
 func (a *mockAlertManager) DeleteRuleWithWorkspace(id string, workspace string) error {
 	return a.DeleteRule(id)
 }
-func (a *mockAlertManager) AcknowledgeIncident(incidentID, userID, workspace string) error { return nil }
-func (a *mockAlertManager) ResolveIncident(incidentID, userID, workspace string) error     { return nil }
-func (a *mockAlertManager) ListActiveIncidents() []*core.Incident               { return nil }
+func (a *mockAlertManager) AcknowledgeIncident(incidentID, userID, workspace string) error {
+	return nil
+}
+func (a *mockAlertManager) ResolveIncident(incidentID, userID, workspace string) error { return nil }
+func (a *mockAlertManager) ListActiveIncidents() []*core.Incident                      { return nil }
 
 // failingAlertManager is an AlertManager that always returns errors
 type failingAlertManager struct{}
@@ -526,7 +536,7 @@ func (a *failingAlertManager) DeleteChannel(id string) error { return fmt.Errorf
 func (a *failingAlertManager) DeleteChannelWithWorkspace(id string, workspace string) error {
 	return fmt.Errorf("alert error")
 }
-func (a *failingAlertManager) DeleteRule(id string) error    { return fmt.Errorf("alert error") }
+func (a *failingAlertManager) DeleteRule(id string) error { return fmt.Errorf("alert error") }
 func (a *failingAlertManager) DeleteRuleWithWorkspace(id string, workspace string) error {
 	return fmt.Errorf("alert error")
 }
@@ -537,8 +547,10 @@ func (a *failingAlertManager) ResolveIncident(incidentID, userID, workspace stri
 	return fmt.Errorf("alert error")
 }
 func (a *failingAlertManager) ListActiveIncidents() []*core.Incident { return nil }
-func (a *failingAlertManager) ListChannelsByWorkspace(workspace string) []*core.AlertChannel { return nil }
-func (a *failingAlertManager) ListRulesByWorkspace(workspace string) []*core.AlertRule       { return nil }
+func (a *failingAlertManager) ListChannelsByWorkspace(workspace string) []*core.AlertChannel {
+	return nil
+}
+func (a *failingAlertManager) ListRulesByWorkspace(workspace string) []*core.AlertRule { return nil }
 
 // mockAuthenticator implements Authenticator interface
 type mockAuthenticator struct{}
@@ -709,11 +721,11 @@ func TestHandleListSouls(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/souls", server.requireAuth(server.handleListSouls))
@@ -796,11 +808,11 @@ func TestHandleGetSoul_NotFound(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/souls/:id", server.requireAuth(server.handleGetSoul))
@@ -825,11 +837,11 @@ func TestHandleDeleteSoul(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("DELETE", "/api/v1/souls/:id", server.requireAuth(server.handleDeleteSoul))
@@ -853,12 +865,12 @@ func TestHandleListChannels(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   &mockAlertManager{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      &mockAlertManager{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/channels", server.requireAuth(server.handleListChannels))
@@ -882,12 +894,12 @@ func TestHandleListRules(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   &mockAlertManager{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      &mockAlertManager{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/rules", server.requireAuth(server.handleListRules))
@@ -911,12 +923,12 @@ func TestHandleListWorkspaces(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   &mockAlertManager{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      &mockAlertManager{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/workspaces", server.requireAuth(server.handleListWorkspaces))
@@ -1050,11 +1062,11 @@ func TestHandleGetSoul_Success(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/souls/:id", server.requireAuth(server.handleGetSoul))
@@ -1078,11 +1090,11 @@ func TestHandleUpdateSoul(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("PUT", "/api/v1/souls/:id", server.requireAuth(server.handleUpdateSoul))
@@ -1116,12 +1128,12 @@ func TestHandleForceCheck(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		probe:   probe,
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		probe:      probe,
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/souls/:id/check", server.requireAuth(server.handleForceCheck))
@@ -1143,11 +1155,11 @@ func TestHandleStats(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/stats", server.requireAuth(server.handleStats))
@@ -1170,12 +1182,12 @@ func TestHandleCreateChannel(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   alert,
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      alert,
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/channels", server.requireAuth(server.handleCreateChannel))
@@ -1207,12 +1219,12 @@ func TestHandleCreateRule(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   alert,
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      alert,
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/rules", server.requireAuth(server.handleCreateRule))
@@ -1247,12 +1259,12 @@ func TestHandleAcknowledgeIncident(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   alert,
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      alert,
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/incidents/:id/ack", server.requireAuth(server.handleAcknowledgeIncident))
@@ -1275,12 +1287,12 @@ func TestHandleResolveIncident(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   alert,
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      alert,
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/incidents/:id/resolve", server.requireAuth(server.handleResolveIncident))
@@ -1302,11 +1314,11 @@ func TestHandleClusterStatus(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/cluster/status", server.requireAuth(server.handleClusterStatus))
@@ -1328,11 +1340,11 @@ func TestHandleCreateStatusPage(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/status-pages", server.requireAuth(server.handleCreateStatusPage))
@@ -1362,11 +1374,11 @@ func TestHandleUpdateStatusPage(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("PUT", "/api/v1/status-pages/:id", server.requireAuth(server.handleUpdateStatusPage))
@@ -1397,11 +1409,11 @@ func TestHandleDeleteStatusPage(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("DELETE", "/api/v1/status-pages/:id", server.requireAuth(server.handleDeleteStatusPage))
@@ -1422,11 +1434,11 @@ func TestHandleDeleteStatusPage_StorageError(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   &failingMockStorage{},
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      &failingMockStorage{},
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("DELETE", "/api/v1/status-pages/:id", server.requireAuth(server.handleDeleteStatusPage))
@@ -1448,11 +1460,11 @@ func TestHandleListStatusPages(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/status-pages", server.requireAuth(server.handleListStatusPages))
@@ -1474,11 +1486,11 @@ func TestHandleGetStatusPage(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/status-pages/:id", server.requireAuth(server.handleGetStatusPage))
@@ -1501,11 +1513,11 @@ func TestLoggingMiddleware(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	handlerCalled := false
@@ -1542,11 +1554,11 @@ func TestCORSMiddleware(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	testHandler := func(ctx *Context) error {
@@ -1585,11 +1597,11 @@ func TestCORSMiddleware_Preflight(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	testHandler := func(ctx *Context) error {
@@ -1623,11 +1635,11 @@ func TestRecoveryMiddleware(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	// Handler that panics
@@ -1784,11 +1796,11 @@ func TestHandleReady(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/ready", server.handleReady)
@@ -1816,11 +1828,11 @@ func TestHandleLogout(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    auth,
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       auth,
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/auth/logout", server.handleLogout)
@@ -1875,12 +1887,12 @@ func TestHandleStatsOverview(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   alert,
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      alert,
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/stats/overview", server.requireAuth(server.handleStatsOverview))
@@ -1902,11 +1914,11 @@ func TestHandleClusterPeers(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/cluster/peers", server.requireAuth(server.handleClusterPeers))
@@ -1928,12 +1940,12 @@ func TestHandleListIncidents(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
-		alert:   &mockAlertManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+		alert:      &mockAlertManager{},
 	}
 
 	router.Handle("GET", "/api/v1/incidents", server.requireAuth(server.handleListIncidents))
@@ -1955,11 +1967,11 @@ func TestHandleTestChannel(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/channels/:id/test", server.requireAuth(server.handleTestChannel))
@@ -1981,11 +1993,11 @@ func TestHandleListAllJudgments(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/judgments", server.requireAuth(server.handleListAllJudgments))
@@ -2007,11 +2019,11 @@ func TestHandleGetJudgment(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/judgments/:id", server.requireAuth(server.handleGetJudgment))
@@ -2245,12 +2257,12 @@ func TestHandleGetChannel(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		alert:   &mockAlertManager{},
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		alert:      &mockAlertManager{},
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/channels/:id", server.requireAuth(server.handleGetChannel))
@@ -2275,12 +2287,12 @@ func TestHandleUpdateChannel(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   alert,
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      alert,
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("PUT", "/api/v1/channels/:id", server.requireAuth(server.handleUpdateChannel))
@@ -2313,12 +2325,12 @@ func TestHandleDeleteChannel(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   alert,
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      alert,
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("DELETE", "/api/v1/channels/:id", server.requireAuth(server.handleDeleteChannel))
@@ -2342,12 +2354,12 @@ func TestHandleGetRule(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		alert:   &mockAlertManager{},
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		alert:      &mockAlertManager{},
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/rules/:id", server.requireAuth(server.handleGetRule))
@@ -2372,12 +2384,12 @@ func TestHandleUpdateRule(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   alert,
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      alert,
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("PUT", "/api/v1/rules/:id", server.requireAuth(server.handleUpdateRule))
@@ -2409,12 +2421,12 @@ func TestHandleDeleteRule(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		alert:   alert,
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		alert:      alert,
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("DELETE", "/api/v1/rules/:id", server.requireAuth(server.handleDeleteRule))
@@ -2437,11 +2449,11 @@ func TestHandleCreateWorkspace(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/workspaces", server.requireAuth(server.handleCreateWorkspace))
@@ -2472,11 +2484,11 @@ func TestHandleGetWorkspace(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/workspaces/:id", server.requireAuth(server.handleGetWorkspace))
@@ -2500,11 +2512,11 @@ func TestHandleUpdateWorkspace(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("PUT", "/api/v1/workspaces/:id", server.requireAuth(server.handleUpdateWorkspace))
@@ -2534,11 +2546,11 @@ func TestHandleDeleteWorkspace(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("DELETE", "/api/v1/workspaces/:id", server.requireAuth(server.handleDeleteWorkspace))
@@ -2562,11 +2574,11 @@ func TestHandleListJudgments(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("GET", "/api/v1/souls/:id/judgments", server.requireAuth(server.handleListJudgments))
@@ -3894,11 +3906,11 @@ func TestHandleCreateSoul_InvalidJSON(t *testing.T) {
 	server := &RESTServer{
 		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
-		store:   storage,
-		router:  router,
-		auth:    &mockAuthenticator{},
-		logger:  newTestLogger(),
-		cluster: &mockClusterManager{},
+		store:      storage,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
 	}
 
 	router.Handle("POST", "/api/v1/souls", server.requireAuth(server.handleCreateSoul))
@@ -4160,7 +4172,7 @@ func TestHandleGetWorkspace_NotFound(t *testing.T) {
 func TestHandleUpdateWorkspace_StorageError(t *testing.T) {
 	router := &Router{routes: make(map[string]map[string]Handler)}
 	server := &RESTServer{
-		config: core.ServerConfig{Host: "localhost", Port: 8080},
+		config:     core.ServerConfig{Host: "localhost", Port: 8080},
 		store:      &failingMockStorage{},
 		authConfig: core.AuthConfig{Enabled: core.BoolPtr(true)},
 		router:     router,
@@ -4683,11 +4695,11 @@ func TestHandleUpdateMaintenanceWindow_InvalidTypes(t *testing.T) {
 	server := newTestServerWithStorage(store)
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"name":        123,
-		"soul_ids":    "not-an-array",
-		"tags":        456,
-		"start_time":  true,
-		"enabled":     "not-a-bool",
+		"name":       123,
+		"soul_ids":   "not-an-array",
+		"tags":       456,
+		"start_time": true,
+		"enabled":    "not-a-bool",
 	})
 	rec := httptest.NewRecorder()
 	ctx := &Context{
@@ -4933,4 +4945,634 @@ func TestHandleConfirmPasswordReset_InvalidToken(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected status 400, got %d: %s", w.Code, w.Body.String())
 	}
+}
+
+func TestHandleLogin_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticator{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/auth/login", server.handleLogin)
+
+	body := bytes.NewBufferString(`{invalid json}`)
+	req := httptest.NewRequest("POST", "/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestHandleLogin_InvalidCredentials_ViaRouter(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticator{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/auth/login", server.handleLogin)
+
+	body := bytes.NewBufferString(`{"email":"wrong@example.com","password":"wrong"}`)
+	req := httptest.NewRequest("POST", "/auth/login", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", w.Code)
+	}
+}
+
+func TestHandleLogout_FailingAuthenticator(t *testing.T) {
+	storage := newMockStorage()
+	auth := &failingMockAuthenticator{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:      storage,
+		router:     router,
+		auth:       auth,
+		authConfig: authEnabled(),
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/auth/logout", server.requireAuth(server.handleLogout))
+
+	req := httptest.NewRequest("POST", "/auth/logout", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	// Logout error returns 500
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleConfirmPasswordReset_WeakPassword(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticatorWithWeakPassword{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/api/v1/auth/reset-password/confirm", server.handleConfirmPasswordReset)
+
+	body := bytes.NewBufferString(`{"token":"valid-reset-token","new_password":"weak"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/reset-password/confirm", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleConfirmPasswordReset_GenericError(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticatorWithGenericError{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/api/v1/auth/reset-password/confirm", server.handleConfirmPasswordReset)
+
+	body := bytes.NewBufferString(`{"token":"valid-reset-token","new_password":"NewTestPass1234!"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/reset-password/confirm", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleRequestPasswordReset_GenericError(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticatorWithGenericError{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/api/v1/auth/reset-password", server.handleRequestPasswordReset)
+
+	body := bytes.NewBufferString(`{"email":"test@example.com"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/reset-password", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleRequestPasswordReset_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticator{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:   storage,
+		router:  router,
+		auth:    auth,
+		logger:  newTestLogger(),
+		cluster: &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/api/v1/auth/reset-password", server.handleRequestPasswordReset)
+
+	body := bytes.NewBufferString(`{invalid}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/reset-password", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestHandleChangePassword_PolicyError(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticatorWithWeakPassword{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:      storage,
+		router:     router,
+		auth:       auth,
+		authConfig: authEnabled(),
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+	}
+
+	router.Handle("PUT", "/api/v1/auth/change-password", server.requireAuth(server.handleChangePassword))
+
+	body := bytes.NewBufferString(`{"current_password":"TestPass1234!","new_password":"weak"}`)
+	req := httptest.NewRequest("PUT", "/api/v1/auth/change-password", body)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleChangePassword_GenericError(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticatorWithGenericError{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:      storage,
+		router:     router,
+		auth:       auth,
+		authConfig: authEnabled(),
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+	}
+
+	router.Handle("PUT", "/api/v1/auth/change-password", server.requireAuth(server.handleChangePassword))
+
+	body := bytes.NewBufferString(`{"current_password":"TestPass1234!","new_password":"NewTestPass1234!"}`)
+	req := httptest.NewRequest("PUT", "/api/v1/auth/change-password", body)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleChangePassword_InvalidJSON(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticator{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:      storage,
+		router:     router,
+		auth:       auth,
+		authConfig: authEnabled(),
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+	}
+
+	router.Handle("PUT", "/api/v1/auth/change-password", server.requireAuth(server.handleChangePassword))
+
+	body := bytes.NewBufferString(`{invalid}`)
+	req := httptest.NewRequest("PUT", "/api/v1/auth/change-password", body)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestRequireRole_InsufficientPermissions(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticatorWithViewerRole{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:      storage,
+		router:     router,
+		auth:       auth,
+		authConfig: authEnabled(),
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+	}
+
+	handler := func(ctx *Context) error {
+		return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	}
+	router.Handle("DELETE", "/api/v1/souls/:id", server.requireRole(handler, "souls:*"))
+
+	req := httptest.NewRequest("DELETE", "/api/v1/souls/soul-1", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRequireRole_MissingRole(t *testing.T) {
+	storage := newMockStorage()
+	auth := &mockAuthenticatorNoRole{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:      storage,
+		router:     router,
+		auth:       auth,
+		authConfig: authEnabled(),
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+	}
+
+	handler := func(ctx *Context) error {
+		return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	}
+	router.Handle("DELETE", "/api/v1/souls/:id", server.requireRole(handler, "souls:*"))
+
+	req := httptest.NewRequest("DELETE", "/api/v1/souls/soul-1", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleCreateMaintenanceWindow_StorageError(t *testing.T) {
+	storage := &failingMockStorage{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:      storage,
+		authConfig: authEnabled(),
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+	}
+
+	router.Handle("POST", "/api/v1/maintenance", server.requireAuth(server.handleCreateMaintenanceWindow))
+
+	body := bytes.NewBufferString(`{"name":"Test Window","start_time":"2026-01-01T00:00:00Z","end_time":"2026-01-01T01:00:00Z"}`)
+	req := httptest.NewRequest("POST", "/api/v1/maintenance", body)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	// Failing storage on SaveMaintenanceWindow -> 500
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleDeleteMaintenanceWindow_StorageError(t *testing.T) {
+	storage := &failingDeleteStorage{}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+
+	server := &RESTServer{
+		store:      storage,
+		authConfig: authEnabled(),
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+		cluster:    &mockClusterManager{},
+	}
+
+	router.Handle("DELETE", "/api/v1/maintenance/:id", server.requireAuth(server.handleDeleteMaintenanceWindow))
+
+	req := httptest.NewRequest("DELETE", "/api/v1/maintenance/mw-1", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	// Failing storage on GetMaintenanceWindowNoCtx (IDOR check) -> 404
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestGetAllowedOrigins_Config tests that config file settings take priority
+func TestGetAllowedOrigins_Config(t *testing.T) {
+	server := &RESTServer{
+		config: core.ServerConfig{
+			AllowedOrigins: []string{"https://myapp.example.com"},
+		},
+	}
+	origins := server.getAllowedOrigins()
+	if len(origins) != 1 || origins[0] != "https://myapp.example.com" {
+		t.Errorf("Expected config origins, got: %v", origins)
+	}
+}
+
+// TestGetAllowedOrigins_EnvVar tests environment variable fallback
+func TestGetAllowedOrigins_EnvVar(t *testing.T) {
+	os.Setenv("ANUBIS_CORS_ORIGINS", "https://env1.example.com,https://env2.example.com")
+	defer os.Unsetenv("ANUBIS_CORS_ORIGINS")
+
+	server := &RESTServer{
+		config: core.ServerConfig{}, // No config origins
+	}
+	origins := server.getAllowedOrigins()
+	if len(origins) != 2 {
+		t.Errorf("Expected 2 origins from env, got: %v", origins)
+	}
+}
+
+// TestGetAllowedOrigins_Default tests localhost defaults
+func TestGetAllowedOrigins_Default(t *testing.T) {
+	// Make sure env var is not set
+	os.Unsetenv("ANUBIS_CORS_ORIGINS")
+
+	server := &RESTServer{
+		config: core.ServerConfig{},
+	}
+	origins := server.getAllowedOrigins()
+	if len(origins) < 4 {
+		t.Errorf("Expected at least 4 default origins, got %d: %v", len(origins), origins)
+	}
+	found := false
+	for _, o := range origins {
+		if o == "http://localhost:3000" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Expected localhost:3000 in defaults, got: %v", origins)
+	}
+}
+
+// TestHandleGetChannel_IDOR tests cross-workspace channel access is blocked
+func TestHandleGetChannel_IDOR(t *testing.T) {
+	storage := newMockStorage()
+	alert := &mockAlertManager{
+		channels: map[string]*core.AlertChannel{
+			"ch-1": {ID: "ch-1", Name: "Test", Type: core.ChannelWebHook, WorkspaceID: "other-workspace"},
+		},
+	}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:     core.ServerConfig{Host: "localhost", Port: 8080},
+		store:      storage,
+		alert:      alert,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+	}
+
+	router.Handle("GET", "/api/v1/channels/:id", server.requireAuth(server.handleGetChannel))
+
+	req := httptest.NewRequest("GET", "/api/v1/channels/ch-1", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected status 403 for cross-workspace, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandleGetRule_IDOR tests cross-workspace rule access is blocked
+func TestHandleGetRule_IDOR(t *testing.T) {
+	storage := newMockStorage()
+	alert := &mockAlertManager{
+		rules: map[string]*core.AlertRule{
+			"rule-1": {ID: "rule-1", Name: "Test", WorkspaceID: "other-workspace"},
+		},
+	}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:     core.ServerConfig{Host: "localhost", Port: 8080},
+		store:      storage,
+		alert:      alert,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+	}
+
+	router.Handle("GET", "/api/v1/rules/:id", server.requireAuth(server.handleGetRule))
+
+	req := httptest.NewRequest("GET", "/api/v1/rules/rule-1", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected status 403 for cross-workspace, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandleGetChannel_AlertManager tests channel retrieval via alert manager
+func TestHandleGetChannel_AlertManager(t *testing.T) {
+	storage := newMockStorage()
+	alert := &mockAlertManager{
+		channels: map[string]*core.AlertChannel{
+			"ch-1": {ID: "ch-1", Name: "Test Channel", Type: core.ChannelWebHook, WorkspaceID: "default"},
+		},
+	}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:     core.ServerConfig{Host: "localhost", Port: 8080},
+		store:      storage,
+		alert:      alert,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+	}
+
+	router.Handle("GET", "/api/v1/channels/:id", server.requireAuth(server.handleGetChannel))
+
+	req := httptest.NewRequest("GET", "/api/v1/channels/ch-1", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandleGetRule_AlertManager tests rule retrieval via alert manager
+func TestHandleGetRule_AlertManager(t *testing.T) {
+	storage := newMockStorage()
+	alert := &mockAlertManager{
+		rules: map[string]*core.AlertRule{
+			"rule-1": {ID: "rule-1", Name: "Test Rule", WorkspaceID: "default"},
+		},
+	}
+	router := &Router{routes: make(map[string]map[string]Handler)}
+	server := &RESTServer{
+		config:     core.ServerConfig{Host: "localhost", Port: 8080},
+		store:      storage,
+		alert:      alert,
+		router:     router,
+		auth:       &mockAuthenticator{},
+		logger:     newTestLogger(),
+	}
+
+	router.Handle("GET", "/api/v1/rules/:id", server.requireAuth(server.handleGetRule))
+
+	req := httptest.NewRequest("GET", "/api/v1/rules/rule-1", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// mockAuthenticatorWithWeakPassword returns a policy error on password change/reset
+type mockAuthenticatorWithWeakPassword struct{ mockAuthenticator }
+
+func (a *mockAuthenticatorWithWeakPassword) ChangePassword(token, currentPassword, newPassword string) error {
+	return errors.New("new password does not meet policy: password must be at least 12 characters")
+}
+
+func (a *mockAuthenticatorWithWeakPassword) ConfirmPasswordReset(token, newPassword string) error {
+	if token == "valid-reset-token" {
+		return errors.New("new password does not meet policy: password must be at least 12 characters")
+	}
+	return errors.New("invalid reset token")
+}
+
+// mockAuthenticatorWithGenericError returns a non-categorized error
+type mockAuthenticatorWithGenericError struct{ mockAuthenticator }
+
+func (a *mockAuthenticatorWithGenericError) ChangePassword(token, currentPassword, newPassword string) error {
+	return fmt.Errorf("database connection failed")
+}
+
+func (a *mockAuthenticatorWithGenericError) RequestPasswordReset(email string) (string, error) {
+	return "", fmt.Errorf("database connection failed")
+}
+
+func (a *mockAuthenticatorWithGenericError) ConfirmPasswordReset(token, newPassword string) error {
+	return fmt.Errorf("database connection failed")
+}
+
+// mockAuthenticatorWithViewerRole returns a viewer role user
+type mockAuthenticatorWithViewerRole struct{ mockAuthenticator }
+
+func (a *mockAuthenticatorWithViewerRole) Authenticate(token string) (*User, error) {
+	if token == "valid-token" {
+		return &User{ID: "user-1", Email: "test@example.com", Role: "viewer", Workspace: "default"}, nil
+	}
+	return nil, http.ErrNoCookie
+}
+
+// mockAuthenticatorNoRole returns a user with no role
+type mockAuthenticatorNoRole struct{ mockAuthenticator }
+
+func (a *mockAuthenticatorNoRole) Authenticate(token string) (*User, error) {
+	if token == "valid-token" {
+		return &User{ID: "user-1", Email: "test@example.com", Role: "", Workspace: "default"}, nil
+	}
+	return nil, http.ErrNoCookie
+}
+
+// failingDeleteStorage returns success for Get but fails on Delete
+type failingDeleteStorage struct {
+	failingMockStorage
+}
+
+func (m *failingDeleteStorage) GetMaintenanceWindowNoCtx(id string) (*core.MaintenanceWindow, error) {
+	return &core.MaintenanceWindow{
+		ID:        id,
+		Name:      "Test Window",
+		StartTime: time.Now(),
+		EndTime:   time.Now().Add(time.Hour),
+	}, nil
 }

@@ -538,9 +538,9 @@ func TestStatusNumeric(t *testing.T) {
 // TestComputeUptimeRatio tests computeUptimeRatio
 func TestComputeUptimeRatio(t *testing.T) {
 	tests := []struct {
-		name       string
-		judgments  []*core.Judgment
-		want       float64
+		name      string
+		judgments []*core.Judgment
+		want      float64
 	}{
 		{
 			name:      "empty",

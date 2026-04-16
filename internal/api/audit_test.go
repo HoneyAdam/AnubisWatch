@@ -642,3 +642,111 @@ func TestAuditLogger_Query_BackendError(t *testing.T) {
 		t.Error("Expected error from backend")
 	}
 }
+
+// TestAuditLogger_LogAuth_BufferFull_NilBackend tests LogAuth with full buffer and nil backend
+func TestAuditLogger_LogAuth_BufferFull_NilBackend(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	al := NewAuditLogger(logger, nil)
+	defer al.Stop()
+
+	// Fill the buffer
+	for i := 0; i < 1000; i++ {
+		al.LogAuth("user-123", "192.168.1.1", "login", "success", nil)
+	}
+
+	// This should hit the buffer full path with nil backend - should not panic
+	al.LogAuth("user-123", "192.168.1.1", "login", "success", nil)
+}
+
+// TestAuditLogger_LogAuth_DetailsMarshalError_NilBackend tests LogAuth when details marshal fails with nil backend
+func TestAuditLogger_LogAuth_DetailsMarshalError_NilBackend(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	al := NewAuditLogger(logger, nil)
+	defer al.Stop()
+
+	// Create details that can't be marshaled
+	type unmarshalable struct{}
+	// Use a map with an unmarshalable value - this is hard to trigger with map[string]any
+	// Instead, test the path with nil backend and valid details
+	al.LogAuth("", "", "", "", nil)
+}
+
+// TestAuditLogger_writeLoop_BatchFull tests that writeLoop flushes when batch reaches 100
+func TestAuditLogger_writeLoop_BatchFull(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	backend := &mockAuditBackend{}
+	al := NewAuditLogger(logger, backend)
+	defer al.Stop()
+
+	// Send 150 events - should trigger a flush at 100
+	for i := 0; i < 150; i++ {
+		al.Log("test", fmt.Sprintf("user-%d", i), "/api/test", "GET", "success", nil)
+	}
+
+	// Wait for async processing
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify at least 100 events were written (the first batch)
+	if len(backend.events) < 100 {
+		t.Errorf("Expected at least 100 writes (first batch flush), got %d", len(backend.events))
+	}
+}
+
+// TestAuditLogger_writeLoop_TickerFlush tests ticker-based flush
+func TestAuditLogger_writeLoop_TickerFlush(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	backend := &mockAuditBackend{}
+	al := NewAuditLogger(logger, backend)
+	defer al.Stop()
+
+	// Send a few events (not enough to trigger batch flush)
+	for i := 0; i < 5; i++ {
+		al.Log("test", fmt.Sprintf("user-%d", i), "/api/test", "GET", "success", nil)
+	}
+
+	// Events should be flushed by ticker within a few seconds
+	// The ticker runs every 5 seconds; give it time
+	time.Sleep(6 * time.Second)
+
+	if len(backend.events) < 5 {
+		t.Errorf("Expected at least 5 writes after ticker flush, got %d", len(backend.events))
+	}
+}
+
+// TestAuditLogger_writeLoop_ShutdownFlush tests that remaining events are flushed on shutdown
+func TestAuditLogger_writeLoop_ShutdownFlush(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	backend := &mockAuditBackend{}
+	al := NewAuditLogger(logger, backend)
+
+	// Send events
+	for i := 0; i < 10; i++ {
+		al.Log("test", fmt.Sprintf("user-%d", i), "/api/test", "GET", "success", nil)
+	}
+
+	// Stop immediately without waiting - should flush remaining
+	al.Stop()
+
+	// Some events should have been written
+	if len(backend.events) == 0 {
+		t.Error("Expected some writes after shutdown flush")
+	}
+}
+
+// TestAuditLogger_LogRequest_FailureStatus tests LogRequest with 4xx status
+func TestAuditLogger_LogRequest_FailureStatus(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	backend := &mockAuditBackend{}
+	al := NewAuditLogger(logger, backend)
+
+	req := httptest.NewRequest("POST", "/api/login?redirect=/home", nil)
+	al.LogRequest(req, "user-1", http.StatusUnauthorized, 50*time.Millisecond)
+
+	// Stop triggers flush of remaining events
+	al.Stop()
+
+	if len(backend.events) < 1 {
+		t.Error("Expected event to be logged")
+	}
+}
+

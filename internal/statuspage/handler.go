@@ -529,6 +529,10 @@ func (h *Handler) renderStatusPage(page *core.StatusPage, data *core.StatusPageD
 	}
 	uptimeHTML += "</div></div>"
 
+	// Sanitize custom CSS: strip anything that could break out of the <style> block
+	// or inject CSSexpression/behaviors/urls that could lead to script execution
+	sanitizedCSS := sanitizeCSS(theme.CustomCSS)
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -751,7 +755,7 @@ func (h *Handler) renderStatusPage(page *core.StatusPage, data *core.StatusPageD
 		html.EscapeString(page.Name),
 		theme.PrimaryColor, theme.BackgroundColor, theme.TextColor, theme.AccentColor,
 		theme.FontFamily,
-		theme.CustomCSS,
+		sanitizedCSS,
 		html.EscapeString(page.Name), html.EscapeString(page.Description),
 		data.Status.Status, statusClass, html.EscapeString(data.Status.Title), html.EscapeString(data.Status.Description),
 		incidentsHTML,
@@ -1003,7 +1007,7 @@ func (h *Handler) WidgetHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=60")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("X-Frame-Options", "ALLOWALL")
+	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 
 	if showDetails {
 		soulRows := ""
@@ -1174,4 +1178,59 @@ func (h *Handler) Router() http.Handler {
 	}
 
 	return mux
+}
+
+// sanitizeCSS removes dangerous patterns from user-supplied CSS that could be
+// used for XSS attacks within a <style> block, including:
+// - Breaking out of the style block (</style>)
+// - Expression() / behaviors (IE)
+// - javascript: / data: URLs in background/image properties
+// - @import with absolute URLs (could bypass CSP)
+// It returns a safe subset of CSS or empty string if the input is unsafe.
+func sanitizeCSS(css string) string {
+	if css == "" {
+		return ""
+	}
+	// Block closing style tag (case-insensitive via bytes, no regex needed)
+	if strings.Contains(strings.ToLower(css), "</style") {
+		return ""
+	}
+	// Block expression(), behavior(), -moz-binding (IE/old Firefox XSS vectors)
+	dangerous := []string{
+		"expression(", "behavior(", "-moz-binding",
+		"javascript:", "data:", "vbscript:",
+		"url(\"javascript:", "url('javascript:", "url(javascript:",
+		"url(\"data:", "url('data:", "url(data:",
+		"@import", // prevents bypassing CSP via absolute URL
+	}
+	lower := strings.ToLower(css)
+	for _, pattern := range dangerous {
+		if strings.Contains(lower, pattern) {
+			return ""
+		}
+	}
+	return css
+}
+
+// sanitizeStyleAttr returns a safe value for inline style="" attributes.
+// It only allows a restricted set of CSS properties (color, background, etc.)
+// and rejects any url(), expression(), or behavioral properties.
+func sanitizeStyleAttr(style string) string {
+	if style == "" {
+		return ""
+	}
+	// Remove anything that could contain dangerous functions or URLs
+	dangerous := []string{
+		"url(", "expression(", "behavior(", "-moz-binding",
+		"javascript:", "data:", "vbscript:",
+		"background-image:", "list-style-image:", "border-image:",
+		"@import", "filter:", "behavior:",
+	}
+	lower := strings.ToLower(style)
+	for _, pattern := range dangerous {
+		if strings.Contains(lower, pattern) {
+			return ""
+		}
+	}
+	return style
 }

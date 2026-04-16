@@ -3,9 +3,11 @@ package probe
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,8 @@ import (
 func init() {
 	// Allow private IPs in tests (for localhost test servers)
 	os.Setenv("ANUBIS_SSRF_ALLOW_PRIVATE", "1")
+	// Reset the DefaultValidator so it picks up the env var
+	DefaultValidator = NewSSRFValidator()
 }
 
 func TestTLSChecker_Validate_MissingTarget(t *testing.T) {
@@ -926,5 +930,183 @@ func TestTLSChecker_Judge_CipherForbidden(t *testing.T) {
 		}
 	} else {
 		t.Logf("Test server certificate failed verification (expected): %s", judgment.Message)
+	}
+}
+
+// TestTLSChecker_Judge_DiagnoseTLSFailure tests the diagnoseTLSFailure path
+func TestTLSChecker_Judge_DiagnoseTLSFailure(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	host := ts.URL[8:]
+
+	checker := NewTLSChecker()
+
+	soul := &core.Soul{
+		ID:      "test-tls-diagnose",
+		Name:    "Test TLS Diagnose",
+		Type:    core.CheckTLS,
+		Target:  host,
+		Enabled: true,
+		Weight:  core.Duration{Duration: 60 * time.Second},
+		TLS: &core.TLSConfig{
+			ExpiryWarnDays:     30,
+			ExpiryCriticalDays: 7,
+			MinProtocol:        "TLS1.2",
+			ForbiddenCiphers:   []string{"NULL"},
+		},
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	ctx := context.Background()
+	judgment, err := checker.Judge(ctx, soul)
+
+	if err != nil {
+		t.Fatalf("Judge failed: %v", err)
+	}
+
+	if judgment.Status != core.SoulDead {
+		t.Errorf("Expected status Dead for self-signed cert, got %s", judgment.Status)
+	}
+
+	if judgment.TLSInfo == nil {
+		t.Error("Expected TLSInfo to be populated from diagnostic mode")
+	}
+
+	if judgment.Message == "" {
+		t.Error("Expected error message in judgment")
+	}
+}
+
+// TestExtractTLSCertsOnly_Empty tests extractTLSCertsOnly with empty cert list
+func TestExtractTLSCertsOnly_Empty(t *testing.T) {
+	result := extractTLSCertsOnly([]*x509.Certificate{})
+	if result != nil {
+		t.Error("Expected nil for empty certificate list")
+	}
+}
+
+// TestExtractTLSCertsOnly_SingleCert tests with a real certificate
+func TestExtractTLSCertsOnly_SingleCert(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	conn, err := tls.Dial("tcp", ts.URL[8:], &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Skipf("Cannot create TLS connection: %v", err)
+	}
+	defer conn.Close()
+
+	state := conn.ConnectionState()
+	if len(state.PeerCertificates) == 0 {
+		t.Skip("No peer certificates")
+	}
+
+	result := extractTLSCertsOnly(state.PeerCertificates)
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+
+	// httptest certs may have empty CommonName but should have SANs
+	if result.Issuer == "" && result.Subject == "" && len(result.SANs) == 0 {
+		t.Error("Expected at least one of issuer, subject, or SANs to be set")
+	}
+	if result.ChainLength != len(state.PeerCertificates) {
+		t.Errorf("Expected chain length %d, got %d", len(state.PeerCertificates), result.ChainLength)
+	}
+	if result.KeyType == "" {
+		t.Error("Expected key type to be set")
+	}
+	if result.NotAfter.IsZero() {
+		t.Error("Expected NotAfter to be set")
+	}
+}
+
+// TestTLSChecker_Judge_TargetWithHTTPS_StripScheme tests stripping https:// prefix
+func TestTLSChecker_Judge_TargetWithHTTPS_StripScheme(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	host := ts.URL[8:]
+
+	checker := NewTLSChecker()
+
+	soul := &core.Soul{
+		ID:      "test-tls-scheme",
+		Name:    "Test TLS Scheme",
+		Type:    core.CheckTLS,
+		Target:  "https://" + host,
+		Enabled: true,
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	err := checker.Validate(soul)
+	if err != nil {
+		t.Fatalf("Validate failed: %v", err)
+	}
+
+	if strings.HasPrefix(soul.Target, "https://") {
+		t.Errorf("Expected https:// prefix to be stripped, got %s", soul.Target)
+	}
+}
+
+// TestTLSChecker_Judge_TargetWithHTTP_StripScheme tests stripping http:// prefix
+func TestTLSChecker_Judge_TargetWithHTTP_StripScheme(t *testing.T) {
+	checker := NewTLSChecker()
+
+	soul := &core.Soul{
+		ID:      "test-tls-http",
+		Name:    "Test TLS HTTP Scheme",
+		Type:    core.CheckTLS,
+		Target:  "http://example.com:443",
+		Enabled: true,
+		Timeout: core.Duration{Duration: 5 * time.Second},
+	}
+
+	err := checker.Validate(soul)
+	if err != nil {
+		t.Fatalf("Validate failed: %v", err)
+	}
+
+	if strings.HasPrefix(soul.Target, "http://") {
+		t.Errorf("Expected http:// prefix to be stripped, got %s", soul.Target)
+	}
+}
+
+// TestTLSChecker_Validate_SSRFBlocked tests SSRF protection in TLS Validate
+func TestTLSChecker_Validate_SSRFBlocked(t *testing.T) {
+	oldValidator := DefaultValidator
+	DefaultValidator = &SSRFValidator{AllowPrivate: false}
+	defer func() { DefaultValidator = oldValidator }()
+
+	checker := NewTLSChecker()
+
+	soul := &core.Soul{
+		ID:     "test-tls-ssrf",
+		Name:   "Test TLS SSRF",
+		Type:   core.CheckTLS,
+		Target: "169.254.169.254:443",
+	}
+
+	err := checker.Validate(soul)
+	if err == nil {
+		t.Error("Expected SSRF validation error for blocked IP")
+	}
+	if !strings.Contains(err.Error(), "SSRF") {
+		t.Errorf("Expected SSRF error message, got: %v", err)
+	}
+}
+
+// TestMatchesSAN_EmptyExpected tests matchesSAN with empty expected string
+func TestMatchesSAN_EmptyExpected(t *testing.T) {
+	result := matchesSAN("example.com", "")
+	if result {
+		t.Error("Expected false for empty expected string")
 	}
 }

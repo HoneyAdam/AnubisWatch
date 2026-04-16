@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: anubiswatch
+  namespace: anubiswatch
+  labels:
+    app.kubernetes.io/name: anubiswatch
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - anubiswatch.example.com
+      secretName: anubiswatch-tls
+  rules:
+    - host: anubiswatch.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: anubiswatch
+                port:
+                  number: 8080

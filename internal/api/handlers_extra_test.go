@@ -43,6 +43,25 @@ func TestHandleListJourneys(t *testing.T) {
 	}
 }
 
+// TestHandleListJourneys_StorageError tests handleListJourneys with storage error
+func TestHandleListJourneys_StorageError(t *testing.T) {
+	store := &failingMockStorage{}
+	server := newTestServerWithStorage(store)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request: httptest.NewRequest("GET", "/api/v1/journeys", nil),
+		Response: rec,
+		Workspace: "default",
+	}
+
+	err := server.handleListJourneys(ctx)
+	// Handler returns nil error but sets non-OK status via ctx.Error
+	if err == nil && rec.Code == http.StatusOK {
+		t.Error("Expected error or non-OK status for storage failure")
+	}
+}
+
 // TestHandleCreateJourney tests handleCreateJourney
 func TestHandleCreateJourney(t *testing.T) {
 	store := newMockStorage()
@@ -171,6 +190,51 @@ func TestHandleUpdateJourney_InvalidData(t *testing.T) {
 	}
 }
 
+// failingMockStorageWrapper wraps mockStorage but fails SaveJourneyNoCtx
+type failingMockStorageWrapper struct {
+	*mockStorage
+}
+
+func (m *failingMockStorageWrapper) SaveJourneyNoCtx(j *core.JourneyConfig) error {
+	return fmt.Errorf("storage error")
+}
+
+// TestHandleUpdateJourney_SaveError tests handleUpdateJourney with save error
+func TestHandleUpdateJourney_SaveError(t *testing.T) {
+	store := newMockStorage()
+	// Create the journey first for IDOR check
+	store.SaveJourneyNoCtx(&core.JourneyConfig{
+		ID: "journey-1",
+		Name: "Test Journey",
+		WorkspaceID: "default",
+	})
+
+	// Override SaveJourneyNoCtx to return error using a wrapper
+	failingStore := &failingMockStorageWrapper{mockStorage: store}
+	server := newTestServerWithStorage(failingStore)
+
+	updated := core.JourneyConfig{
+		Name: "Updated Name",
+		Steps: []core.JourneyStep{
+			{Name: "Updated Step", Target: "http://updated.com"},
+		},
+	}
+	body, _ := json.Marshal(updated)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request: httptest.NewRequest("PUT", "/api/v1/journeys/journey-1", bytes.NewReader(body)),
+		Response: rec,
+		Params: map[string]string{"id": "journey-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleUpdateJourney(ctx)
+	if err == nil && rec.Code == http.StatusOK {
+		t.Error("Expected error or non-OK status for save failure")
+	}
+}
+
 // TestHandleDeleteJourney tests handleDeleteJourney
 func TestHandleDeleteJourney(t *testing.T) {
 	store := newMockStorage()
@@ -192,6 +256,41 @@ func TestHandleDeleteJourney(t *testing.T) {
 
 	// Just verify it doesn't panic
 	_ = server.handleDeleteJourney(ctx)
+}
+
+// TestHandleDeleteJourney_SaveError tests handleDeleteJourney with delete error
+func TestHandleDeleteJourney_SaveError(t *testing.T) {
+	store := newMockStorage()
+	store.SaveJourneyNoCtx(&core.JourneyConfig{
+		ID: "journey-1",
+		Name: "Test Journey",
+		WorkspaceID: "default",
+	})
+
+	failingStore := &failingDeleteWrapper{mockStorage: store}
+	server := newTestServerWithStorage(failingStore)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request: httptest.NewRequest("DELETE", "/api/v1/journeys/journey-1", nil),
+		Response: rec,
+		Params: map[string]string{"id": "journey-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleDeleteJourney(ctx)
+	if err == nil && rec.Code == http.StatusNoContent {
+		t.Error("Expected error or non-204 status for delete failure")
+	}
+}
+
+// failingDeleteWrapper wraps mockStorage but fails DeleteJourneyNoCtx
+type failingDeleteWrapper struct {
+	*mockStorage
+}
+
+func (m *failingDeleteWrapper) DeleteJourneyNoCtx(id string) error {
+	return fmt.Errorf("storage error")
 }
 
 // TestHandleGetJourney tests handleGetJourney
@@ -2500,6 +2599,36 @@ func TestQuerySouls_List(t *testing.T) {
 	}
 }
 
+func TestQuerySouls_Error(t *testing.T) {
+	store := newMockStorage()
+	store.listSoulsErr = fmt.Errorf("storage error")
+	server := newTestServerWithJourney(store, nil)
+
+	_, err := server.querySouls(core.WidgetQuery{Metric: "count"}, "default")
+	if err == nil {
+		t.Fatal("Expected error from querySouls")
+	}
+}
+
+func TestQuerySouls_DefaultMetric(t *testing.T) {
+	store := newMockStorage()
+	store.SaveSoul(nil, &core.Soul{ID: "soul-1", Name: "Test Soul"})
+	server := newTestServerWithJourney(store, nil)
+
+	result, err := server.querySouls(core.WidgetQuery{Metric: "uptime"}, "default")
+	if err != nil {
+		t.Fatalf("querySouls failed: %v", err)
+	}
+
+	m, ok := result.(map[string]int)
+	if !ok {
+		t.Fatalf("expected map[string]int, got %T", result)
+	}
+	if m["count"] != 1 {
+		t.Errorf("Expected count 1, got %d", m["count"])
+	}
+}
+
 func TestQueryJudgments(t *testing.T) {
 	store := newMockStorage()
 	server := newTestServerWithJourney(store, nil)
@@ -2550,7 +2679,8 @@ func TestQueryAlerts(t *testing.T) {
 
 func TestQueryJudgments_WithSoulID(t *testing.T) {
 	store := newMockStorage()
-	now := time.Now()
+	// Use timestamps within the same hour to ensure single bucket
+	now := time.Now().Truncate(time.Hour)
 	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j1", SoulID: "soul-1", Status: core.SoulAlive, Duration: 100 * time.Millisecond, Timestamp: now.Add(-5 * time.Minute)})
 	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j2", SoulID: "soul-1", Status: core.SoulDead, Duration: 200 * time.Millisecond, Timestamp: now.Add(-3 * time.Minute)})
 	store.SaveJudgment(context.Background(), &core.Judgment{ID: "j3", SoulID: "soul-1", Status: core.SoulAlive, Duration: 300 * time.Millisecond, Timestamp: now.Add(-1 * time.Minute)})
@@ -2666,5 +2796,126 @@ func TestQueryStats_WithJudgments(t *testing.T) {
 	}
 	if m["uptime"] != 33.33333333333333 {
 		t.Errorf("Expected uptime 33.33, got %v", m["uptime"])
+	}
+}
+
+func TestHandleGetDashboard_IDOR(t *testing.T) {
+	store := newMockStorage()
+	store.SaveDashboardNoCtx(&core.CustomDashboard{ID: "dash-1", Name: "Test", WorkspaceID: "other-workspace"})
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/api/v1/dashboards/dash-1", nil),
+		Response: rec,
+		Params:   map[string]string{"id": "dash-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleGetDashboard(ctx)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("Expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+}
+
+func TestHandleUpdateDashboard_NotFound(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("PUT", "/api/v1/dashboards/nonexistent", bytes.NewReader([]byte("{}"))),
+		Response:  rec,
+		Params:    map[string]string{"id": "nonexistent"},
+		Workspace: "default",
+	}
+
+	err := server.handleUpdateDashboard(ctx)
+	if err == nil && rec.Code != http.StatusNotFound {
+		t.Errorf("Expected not found, got status %d", rec.Code)
+	}
+}
+
+func TestHandleUpdateDashboard_IDOR(t *testing.T) {
+	store := newMockStorage()
+	store.SaveDashboardNoCtx(&core.CustomDashboard{ID: "dash-1", Name: "Test", WorkspaceID: "other-workspace"})
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:   httptest.NewRequest("PUT", "/api/v1/dashboards/dash-1", bytes.NewReader([]byte("{}"))),
+		Response:  rec,
+		Params:    map[string]string{"id": "dash-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleUpdateDashboard(ctx)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("Expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+}
+
+func TestHandleDeleteDashboard_NotFound(t *testing.T) {
+	store := newMockStorage()
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("DELETE", "/api/v1/dashboards/nonexistent", nil),
+		Response: rec,
+		Params:   map[string]string{"id": "nonexistent"},
+	}
+
+	err := server.handleDeleteDashboard(ctx)
+	if err == nil && rec.Code != http.StatusNotFound {
+		t.Errorf("Expected not found, got status %d", rec.Code)
+	}
+}
+
+func TestHandleDeleteDashboard_IDOR(t *testing.T) {
+	store := newMockStorage()
+	store.SaveDashboardNoCtx(&core.CustomDashboard{ID: "dash-1", Name: "Test", WorkspaceID: "other-workspace"})
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("DELETE", "/api/v1/dashboards/dash-1", nil),
+		Response: rec,
+		Params:   map[string]string{"id": "dash-1"},
+		Workspace: "default",
+	}
+
+	err := server.handleDeleteDashboard(ctx)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("Expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+}
+
+func TestHandleListDashboards_StoreError(t *testing.T) {
+	store := newMockStorage()
+	store.listDashboardsErr = fmt.Errorf("store error")
+	server := newTestServerWithJourney(store, nil)
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/api/v1/dashboards", nil),
+		Response: rec,
+	}
+
+	err := server.handleListDashboards(ctx)
+	if err != nil {
+		t.Errorf("Unexpected error return: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, rec.Code)
 	}
 }

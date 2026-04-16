@@ -16,7 +16,7 @@ const mockSetToken = vi.fn()
 const mockPost = vi.fn()
 vi.mock('../api/client', () => ({
   api: {
-    post: (...args: any[]) => mockPost(...args),
+    post: (...args: unknown[]) => mockPost(...args as [string, unknown?]),
     setToken: (token: string) => mockSetToken(token),
   },
 }))

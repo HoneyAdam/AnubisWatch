@@ -2,8 +2,10 @@ package alert
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -2982,5 +2984,589 @@ func TestVerdictsBySeverity(t *testing.T) {
 	}
 	if count, ok := stats.VerdictsBySeverity[string(core.SeverityCritical)]; !ok || count != 1 {
 		t.Errorf("Expected 1 critical verdict, got %v", stats.VerdictsBySeverity)
+	}
+}
+
+func TestManager_DeleteChannelWithWorkspace(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// Add a channel with workspace
+	ch := &core.AlertChannel{
+		ID:          "ch-ws1",
+		Name:        "ws-channel",
+		Type:        core.ChannelWebHook,
+		Enabled:     true,
+		WorkspaceID: "workspace-a",
+		Config:      map[string]interface{}{"url": "http://example.com/hook"},
+	}
+	if err := manager.RegisterChannel(ch); err != nil {
+		t.Fatalf("RegisterChannel failed: %v", err)
+	}
+
+	// Should succeed when workspace matches
+	err := manager.DeleteChannelWithWorkspace("ch-ws1", "workspace-a")
+	if err != nil {
+		t.Errorf("Expected no error for matching workspace, got: %v", err)
+	}
+
+	// Verify channel was deleted
+	_, err = manager.GetChannel("ch-ws1")
+	if err == nil {
+		t.Error("Expected channel to be deleted")
+	}
+}
+
+func TestManager_DeleteChannelWithWorkspace_NotFound(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	err := manager.DeleteChannelWithWorkspace("nonexistent", "workspace-a")
+	if err == nil {
+		t.Error("Expected error for non-existent channel")
+	}
+	if !strings.Contains(err.Error(), "channel not found") {
+		t.Errorf("Expected 'channel not found' error, got: %v", err)
+	}
+}
+
+func TestManager_DeleteChannelWithWorkspace_WrongWorkspace(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	ch := &core.AlertChannel{
+		ID:          "ch-ws2",
+		Name:        "ws-channel",
+		Type:        core.ChannelWebHook,
+		Enabled:     true,
+		WorkspaceID: "workspace-a",
+		Config:      map[string]interface{}{"url": "http://example.com/hook"},
+	}
+	if err := manager.RegisterChannel(ch); err != nil {
+		t.Fatalf("RegisterChannel failed: %v", err)
+	}
+
+	// Should fail when workspace doesn't match
+	err := manager.DeleteChannelWithWorkspace("ch-ws2", "workspace-b")
+	if err == nil {
+		t.Error("Expected error for wrong workspace")
+	}
+	if !strings.Contains(err.Error(), "does not belong to workspace") {
+		t.Errorf("Expected workspace mismatch error, got: %v", err)
+	}
+}
+
+func TestManager_DeleteChannelWithWorkspace_NoWorkspaceChannel(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// Channel without workspace
+	ch := &core.AlertChannel{
+		ID:      "ch-nows",
+		Name:    "no-ws-channel",
+		Type:    core.ChannelWebHook,
+		Enabled: true,
+		Config:  map[string]interface{}{"url": "http://example.com/hook"},
+	}
+	if err := manager.RegisterChannel(ch); err != nil {
+		t.Fatalf("RegisterChannel failed: %v", err)
+	}
+
+	// Should succeed for any workspace when channel has no workspace
+	err := manager.DeleteChannelWithWorkspace("ch-nows", "any-workspace")
+	if err != nil {
+		t.Errorf("Expected no error for channel without workspace, got: %v", err)
+	}
+}
+
+func TestManager_DeleteRuleWithWorkspace(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{
+		ID:          "rule-ws1",
+		Name:        "ws-rule",
+		Channels:    []string{},
+		WorkspaceID: "workspace-a",
+	}
+	if err := manager.RegisterRule(rule); err != nil {
+		t.Fatalf("RegisterRule failed: %v", err)
+	}
+
+	// Should succeed when workspace matches
+	err := manager.DeleteRuleWithWorkspace("rule-ws1", "workspace-a")
+	if err != nil {
+		t.Errorf("Expected no error for matching workspace, got: %v", err)
+	}
+
+	// Verify rule was deleted
+	_, err = manager.GetRule("rule-ws1")
+	if err == nil {
+		t.Error("Expected rule to be deleted")
+	}
+}
+
+func TestManager_DeleteRuleWithWorkspace_NotFound(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	err := manager.DeleteRuleWithWorkspace("nonexistent", "workspace-a")
+	if err == nil {
+		t.Error("Expected error for non-existent rule")
+	}
+	if !strings.Contains(err.Error(), "rule not found") {
+		t.Errorf("Expected 'rule not found' error, got: %v", err)
+	}
+}
+
+func TestManager_DeleteRuleWithWorkspace_WrongWorkspace(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{
+		ID:          "rule-ws2",
+		Name:        "ws-rule",
+		Channels:    []string{},
+		WorkspaceID: "workspace-a",
+	}
+	if err := manager.RegisterRule(rule); err != nil {
+		t.Fatalf("RegisterRule failed: %v", err)
+	}
+
+	err := manager.DeleteRuleWithWorkspace("rule-ws2", "workspace-b")
+	if err == nil {
+		t.Error("Expected error for wrong workspace")
+	}
+	if !strings.Contains(err.Error(), "does not belong to workspace") {
+		t.Errorf("Expected workspace mismatch error, got: %v", err)
+	}
+}
+
+func TestManager_DeleteRuleWithWorkspace_NoWorkspaceRule(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	rule := &core.AlertRule{
+		ID:         "rule-nows",
+		Name:       "no-ws-rule",
+		Channels:   []string{},
+	}
+	if err := manager.RegisterRule(rule); err != nil {
+		t.Fatalf("RegisterRule failed: %v", err)
+	}
+
+	err := manager.DeleteRuleWithWorkspace("rule-nows", "any-workspace")
+	if err != nil {
+		t.Errorf("Expected no error for rule without workspace, got: %v", err)
+	}
+}
+
+func TestManager_ListChannelsByWorkspace(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// Channels with different workspaces
+	ch1 := &core.AlertChannel{
+		ID:      "ch1",
+		Name:    "default-channel",
+		Type:    core.ChannelWebHook,
+		Enabled: true,
+		Config:  map[string]interface{}{"url": "http://example.com/1"},
+	}
+	ch2 := &core.AlertChannel{
+		ID:          "ch2",
+		Name:        "ws-a-channel",
+		Type:        core.ChannelWebHook,
+		Enabled:     true,
+		WorkspaceID: "workspace-a",
+		Config:      map[string]interface{}{"url": "http://example.com/2"},
+	}
+	ch3 := &core.AlertChannel{
+		ID:          "ch3",
+		Name:        "ws-b-channel",
+		Type:        core.ChannelWebHook,
+		Enabled:     true,
+		WorkspaceID: "workspace-b",
+		Config:      map[string]interface{}{"url": "http://example.com/3"},
+	}
+	if err := manager.RegisterChannel(ch1); err != nil {
+		t.Fatalf("RegisterChannel ch1: %v", err)
+	}
+	if err := manager.RegisterChannel(ch2); err != nil {
+		t.Fatalf("RegisterChannel ch2: %v", err)
+	}
+	if err := manager.RegisterChannel(ch3); err != nil {
+		t.Fatalf("RegisterChannel ch3: %v", err)
+	}
+
+	// Workspace-a should get ch1 (no workspace) + ch2
+	channels := manager.ListChannelsByWorkspace("workspace-a")
+	if len(channels) != 2 {
+		t.Errorf("Expected 2 channels for workspace-a, got %d", len(channels))
+	}
+
+	// Workspace-b should get ch1 (no workspace) + ch3
+	channels = manager.ListChannelsByWorkspace("workspace-b")
+	if len(channels) != 2 {
+		t.Errorf("Expected 2 channels for workspace-b, got %d", len(channels))
+	}
+
+	// Unknown workspace should only get ch1 (no workspace)
+	channels = manager.ListChannelsByWorkspace("unknown")
+	if len(channels) != 1 {
+		t.Errorf("Expected 1 channel for unknown workspace, got %d", len(channels))
+	}
+}
+
+func TestManager_ListRulesByWorkspace(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	r1 := &core.AlertRule{
+		ID:         "rule1",
+		Name:       "default-rule",
+		Channels:   []string{},
+		Conditions: []core.AlertCondition{{Type: "status_for", Status: "dead"}},
+	}
+	r2 := &core.AlertRule{
+		ID:          "rule2",
+		Name:        "ws-a-rule",
+		Channels:    []string{},
+		WorkspaceID: "workspace-a",
+		Conditions:  []core.AlertCondition{{Type: "status_for", Status: "dead"}},
+	}
+	if err := manager.RegisterRule(r1); err != nil {
+		t.Fatalf("RegisterRule r1: %v", err)
+	}
+	if err := manager.RegisterRule(r2); err != nil {
+		t.Fatalf("RegisterRule r2: %v", err)
+	}
+
+	// Workspace-a should get r1 + r2
+	rules := manager.ListRulesByWorkspace("workspace-a")
+	if len(rules) != 2 {
+		t.Errorf("Expected 2 rules for workspace-a, got %d", len(rules))
+	}
+
+	// Unknown workspace should only get r1
+	rules = manager.ListRulesByWorkspace("unknown")
+	if len(rules) != 1 {
+		t.Errorf("Expected 1 rule for unknown workspace, got %d", len(rules))
+	}
+}
+
+func TestManager_CompareFloatValue_AllOperators(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	tests := []struct {
+		name     string
+		actual   float64
+		op       string
+		expected float64
+		want     bool
+	}{
+		{"gt-symbol", 10, ">", 5, true},
+		{"gt-word", 10, "gt", 5, true},
+		{"gt-word-false", 3, "gt", 5, false},
+		{"lt-symbol", 3, "<", 5, true},
+		{"lt-word", 3, "lt", 5, true},
+		{"ge-symbol", 5, ">=", 5, true},
+		{"ge-word", 5, "ge", 5, true},
+		{"le-symbol", 5, "<=", 5, true},
+		{"le-word", 5, "le", 5, true},
+		{"eq-symbol", 5, "==", 5, true},
+		{"eq-word", 5, "eq", 5, true},
+		{"eq-false", 4, "==", 5, false},
+		{"ne-symbol", 5, "!=", 5, false},
+		{"ne-word", 5, "ne", 5, false},
+		{"ne-true", 4, "!=", 5, true},
+		{"default", 10, "unknown", 5, true},
+		{"default-false", 3, "unknown", 5, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := manager.compareFloatValue(tt.actual, tt.op, tt.expected)
+			if got != tt.want {
+				t.Errorf("compareFloatValue(%v, %q, %v) = %v, want %v",
+					tt.actual, tt.op, tt.expected, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestManager_EvaluateCondition_Threshold(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// Threshold: latency > 1000ms
+	cond := core.AlertCondition{
+		Type:     "threshold",
+		Metric:   "latency",
+		Operator: ">",
+		Value:    1000.0,
+	}
+
+	// Duration exceeds threshold
+	judgment := &core.Judgment{
+		Duration: 1500 * time.Millisecond,
+		Status:   core.SoulDead,
+	}
+	if !manager.evaluateCondition(cond, core.SoulAlive, judgment) {
+		t.Error("Expected threshold condition to be triggered")
+	}
+
+	// Duration below threshold
+	judgment = &core.Judgment{
+		Duration: 500 * time.Millisecond,
+		Status:   core.SoulAlive,
+	}
+	if manager.evaluateCondition(cond, core.SoulAlive, judgment) {
+		t.Error("Expected threshold condition to NOT be triggered")
+	}
+
+	// Status code threshold
+	cond2 := core.AlertCondition{
+		Type:     "threshold",
+		Metric:   "status_code",
+		Operator: ">=",
+		Value:    500.0,
+	}
+	judgment = &core.Judgment{
+		StatusCode: 503,
+		Duration:   100 * time.Millisecond,
+	}
+	if !manager.evaluateCondition(cond2, core.SoulAlive, judgment) {
+		t.Error("Expected status code threshold to be triggered")
+	}
+
+	// Default metric (unknown metric falls back to duration)
+	cond3 := core.AlertCondition{
+		Type:     "threshold",
+		Metric:   "unknown_metric",
+		Operator: ">",
+		Value:    99999.0,
+	}
+	judgment = &core.Judgment{
+		Duration: 100 * time.Millisecond,
+	}
+	if manager.evaluateCondition(cond3, core.SoulAlive, judgment) {
+		t.Error("Expected unknown metric with high threshold to NOT be triggered")
+	}
+}
+
+func TestManager_EvaluateCondition_DefaultType(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// Unknown condition type returns false
+	cond := core.AlertCondition{Type: "unknown_type"}
+	judgment := &core.Judgment{Status: core.SoulDead}
+	if manager.evaluateCondition(cond, core.SoulAlive, judgment) {
+		t.Error("Expected unknown condition type to return false")
+	}
+}
+
+func TestSqrtApprox(t *testing.T) {
+	tests := []struct {
+		input    float64
+		expected float64
+	}{
+		{-1, 0},
+		{0, 0},
+		{1, 1},
+		{4, 2},
+		{9, 3},
+		{100, 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("sqrt(%v)", tt.input), func(t *testing.T) {
+			result := sqrtApprox(tt.input)
+			// Allow small floating point error
+			diff := result - tt.expected
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff > 0.1 {
+				t.Errorf("sqrtApprox(%v) = %v, want ~%v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCheckCompound_Majority(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// Compound condition: majority of 3 sub-conditions, 2 needed
+	cond := core.AlertCondition{
+		Logic: "majority",
+		SubConditions: []core.AlertCondition{
+			{Type: "status_for", Status: "dead"},
+			{Type: "status_for", Status: "dead"},
+			{Type: "status_for", Status: "alive"}, // won't match
+		},
+	}
+	judgment := &core.Judgment{Status: core.SoulDead}
+
+	// Should trigger when majority (2/3) matches
+	triggered := manager.checkCompound(cond, core.SoulAlive, judgment)
+	if !triggered {
+		t.Error("Expected majority to trigger (2/3 match)")
+	}
+
+	// With only 1 out of 3 matching, should not trigger
+	cond2 := core.AlertCondition{
+		Logic: "majority",
+		SubConditions: []core.AlertCondition{
+			{Type: "status_for", Status: "dead"},
+			{Type: "status_for", Status: "alive"},
+			{Type: "status_for", Status: "alive"},
+		},
+	}
+	triggered = manager.checkCompound(cond2, core.SoulAlive, judgment)
+	if triggered {
+		t.Error("Expected majority to NOT trigger (1/3 match)")
+	}
+}
+
+func TestCheckCompound_AND(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// All must match
+	cond := core.AlertCondition{
+		Logic: "and",
+		SubConditions: []core.AlertCondition{
+			{Type: "status_for", Status: "dead"},
+			{Type: "degraded"}, // won't match since status is dead not degraded
+		},
+	}
+	judgment := &core.Judgment{Status: core.SoulDead}
+
+	triggered := manager.checkCompound(cond, core.SoulAlive, judgment)
+	if triggered {
+		t.Error("Expected AND to NOT trigger (not all match)")
+	}
+
+	// All match
+	cond2 := core.AlertCondition{
+		Logic: "and",
+		SubConditions: []core.AlertCondition{
+			{Type: "status_for", Status: "dead"},
+			{Type: "failure_rate"}, // dead triggers failure_rate
+		},
+	}
+	triggered = manager.checkCompound(cond2, core.SoulAlive, judgment)
+	if !triggered {
+		t.Error("Expected AND to trigger (all match)")
+	}
+}
+
+func TestCheckCompound_OR(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	cond := core.AlertCondition{
+		Logic: "or",
+		SubConditions: []core.AlertCondition{
+			{Type: "status_for", Status: "alive"}, // won't match
+			{Type: "status_for", Status: "dead"},  // will match
+		},
+	}
+	judgment := &core.Judgment{Status: core.SoulDead}
+
+	triggered := manager.checkCompound(cond, core.SoulAlive, judgment)
+	if !triggered {
+		t.Error("Expected OR to trigger (at least one matches)")
+	}
+}
+
+func TestCheckCompound_NoSubConditions(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	cond := core.AlertCondition{Logic: "and", SubConditions: []core.AlertCondition{}}
+	judgment := &core.Judgment{Status: core.SoulDead}
+
+	triggered := manager.checkCompound(cond, core.SoulAlive, judgment)
+	if triggered {
+		t.Error("Expected empty sub-conditions to return false")
+	}
+}
+
+func TestCheckCompound_DefaultLogic(t *testing.T) {
+	storage := &mockAlertStorage{
+		channels: make(map[string]*core.AlertChannel),
+		rules:    make(map[string]*core.AlertRule),
+	}
+	manager := NewManager(storage, newTestLogger())
+
+	// Empty logic defaults to "and"
+	cond := core.AlertCondition{
+		Logic: "",
+		SubConditions: []core.AlertCondition{
+			{Type: "status_for", Status: "dead"},
+			{Type: "status_for", Status: "dead"},
+		},
+	}
+	judgment := &core.Judgment{Status: core.SoulDead}
+
+	triggered := manager.checkCompound(cond, core.SoulAlive, judgment)
+	if !triggered {
+		t.Error("Expected default logic (AND) to trigger when all match")
 	}
 }

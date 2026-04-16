@@ -368,6 +368,42 @@ func TestManager_Leader_WithNilNode(t *testing.T) {
 	}
 }
 
+// TestManager_GetDiscoveredPeers_NilDiscovery tests GetDiscoveredPeers when discovery is nil
+func TestManager_GetDiscoveredPeers_NilDiscovery(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	cfg := newTestRaftConfig()
+	manager, err := NewManager(core.NecropolisConfig{Raft: cfg}, db, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	// discovery is nil by default
+	peers := manager.GetDiscoveredPeers()
+	if peers != nil {
+		t.Errorf("Expected nil when discovery is nil, got %v", peers)
+	}
+}
+
+// TestManager_Stop_NotStarted tests Stop when manager was never started
+func TestManager_Stop_NotStarted(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	cfg := newTestRaftConfig()
+	manager, err := NewManager(core.NecropolisConfig{Raft: cfg}, db, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	ctx := context.Background()
+	err = manager.Stop(ctx)
+	if err != nil {
+		t.Errorf("Stop should succeed even when not started: %v", err)
+	}
+}
+
 // TestManager_GetStatus_WithRunningNode tests GetStatus when node is running
 func TestManager_GetStatus_WithRunningNode(t *testing.T) {
 	db := newTestDB(t)

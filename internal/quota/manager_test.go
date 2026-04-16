@@ -214,3 +214,134 @@ func TestDecrementNonExistent(t *testing.T) {
 	m.DecrementAlertChannel("nonexistent")
 	m.DecrementTeamMember("nonexistent")
 }
+
+// TestCheckSoulLimit_NoUsage tests that nil usage allows adding souls
+func TestCheckSoulLimit_NoUsage(t *testing.T) {
+	m := NewManager(core.QuotaConfig{})
+	m.SetQuota("ws1", core.QuotaConfig{MaxSouls: 10})
+	// No usage counts set - should allow
+
+	if err := m.CheckSoulLimit("ws1"); err != nil {
+		t.Errorf("Expected no error with nil usage, got %v", err)
+	}
+}
+
+// TestCheckAlertChannelLimit_Within tests alert channel within quota
+func TestCheckAlertChannelLimit_Within(t *testing.T) {
+	m := NewManager(core.QuotaConfig{})
+	m.SetQuota("ws1", core.QuotaConfig{MaxAlertChannels: 5})
+	m.counts["ws1"] = &UsageCounts{AlertChannels: 3}
+
+	if err := m.CheckAlertChannelLimit("ws1"); err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+}
+
+// TestCheckAlertChannelLimit_NoUsage tests nil usage path
+func TestCheckAlertChannelLimit_NoUsage(t *testing.T) {
+	m := NewManager(core.QuotaConfig{})
+	m.SetQuota("ws1", core.QuotaConfig{MaxAlertChannels: 5})
+
+	if err := m.CheckAlertChannelLimit("ws1"); err != nil {
+		t.Errorf("Expected no error with nil usage, got %v", err)
+	}
+}
+
+// TestCheckAlertChannelLimit_Unlimited tests zero limit (unlimited)
+func TestCheckAlertChannelLimit_Unlimited(t *testing.T) {
+	m := NewManager(core.QuotaConfig{})
+	m.counts["ws1"] = &UsageCounts{AlertChannels: 100}
+
+	if err := m.CheckAlertChannelLimit("ws1"); err != nil {
+		t.Errorf("Expected no error with unlimited quota, got %v", err)
+	}
+}
+
+// TestCheckTeamMemberLimit_Within tests team member within quota
+func TestCheckTeamMemberLimit_Within(t *testing.T) {
+	m := NewManager(core.QuotaConfig{})
+	m.SetQuota("ws1", core.QuotaConfig{MaxTeamMembers: 20})
+	m.counts["ws1"] = &UsageCounts{TeamMembers: 5}
+
+	if err := m.CheckTeamMemberLimit("ws1"); err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+}
+
+// TestCheckTeamMemberLimit_NoUsage tests nil usage path
+func TestCheckTeamMemberLimit_NoUsage(t *testing.T) {
+	m := NewManager(core.QuotaConfig{})
+	m.SetQuota("ws1", core.QuotaConfig{MaxTeamMembers: 10})
+
+	if err := m.CheckTeamMemberLimit("ws1"); err != nil {
+		t.Errorf("Expected no error with nil usage, got %v", err)
+	}
+}
+
+// TestCheckTeamMemberLimit_Unlimited tests zero limit
+func TestCheckTeamMemberLimit_Unlimited(t *testing.T) {
+	m := NewManager(core.QuotaConfig{})
+	m.counts["ws1"] = &UsageCounts{TeamMembers: 100}
+
+	if err := m.CheckTeamMemberLimit("ws1"); err != nil {
+		t.Errorf("Expected no error with unlimited quota, got %v", err)
+	}
+}
+
+// TestCheckJourneyLimit_NoUsage tests nil usage path
+func TestCheckJourneyLimit_NoUsage(t *testing.T) {
+	m := NewManager(core.QuotaConfig{})
+	m.SetQuota("ws1", core.QuotaConfig{MaxJourneys: 5})
+
+	if err := m.CheckJourneyLimit("ws1"); err != nil {
+		t.Errorf("Expected no error with nil usage, got %v", err)
+	}
+}
+
+// TestGetQuota_ExplicitQuota tests fetching a workspace with explicit quota
+func TestGetQuota_ExplicitQuota(t *testing.T) {
+	m := NewManager(core.QuotaConfig{MaxSouls: 50})
+	m.SetQuota("ws1", core.QuotaConfig{MaxSouls: 100, MaxJourneys: 10})
+
+	quota := m.GetQuota("ws1")
+	if quota.MaxSouls != 100 {
+		t.Errorf("Expected MaxSouls=100, got %d", quota.MaxSouls)
+	}
+	if quota.MaxJourneys != 10 {
+		t.Errorf("Expected MaxJourneys=10, got %d", quota.MaxJourneys)
+	}
+}
+
+// TestGetUsage_PopulatedWorkspace tests GetUsage with existing counts
+func TestGetUsage_PopulatedWorkspace(t *testing.T) {
+	m := NewManager(core.QuotaConfig{})
+	m.counts["ws1"] = &UsageCounts{Souls: 7, Journeys: 3, AlertChannels: 2, TeamMembers: 5}
+
+	usage := m.GetUsage("ws1")
+	if usage.Souls != 7 || usage.Journeys != 3 || usage.AlertChannels != 2 || usage.TeamMembers != 5 {
+		t.Errorf("Expected full usage counts, got %+v", usage)
+	}
+}
+
+// TestStats_UnknownWorkspace tests Stats for unknown workspace
+func TestStats_UnknownWorkspace(t *testing.T) {
+	m := NewManager(core.QuotaConfig{MaxSouls: 50})
+
+	stats := m.Stats("unknown-ws")
+	quota := stats["quota"].(map[string]interface{})
+	// Stats uses m.quotas directly (not GetQuota), so unknown workspace gets zero values
+	if quota["max_souls"] != 0 {
+		t.Errorf("Expected max_souls=0 for unknown workspace, got %v", quota["max_souls"])
+	}
+	usage := stats["usage"].(map[string]interface{})
+	if usage["souls"] != 0 {
+		t.Errorf("Expected souls=0, got %v", usage["souls"])
+	}
+}
+
+// TestDecrementTeamMember_NonExistent tests decrement team member for workspace with no counts
+func TestDecrementTeamMember_NonExistent(t *testing.T) {
+	m := NewManager(core.QuotaConfig{})
+	m.DecrementTeamMember("nonexistent")
+	// Should not panic
+}

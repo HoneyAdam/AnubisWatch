@@ -2,13 +2,18 @@ import '@testing-library/jest-dom'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
+// Extend global for TypeScript
+declare global {
+  var ResizeObserver: typeof ResizeObserver
+}
+
 // Mock ResizeObserver for Recharts ResponsiveContainer
 class ResizeObserverMock {
   observe() {}
   unobserve() {}
   disconnect() {}
 }
-global.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver
+globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver
 
 // Mock getBoundingClientRect for SVG container sizing
 Element.prototype.getBoundingClientRect = vi.fn(() => ({

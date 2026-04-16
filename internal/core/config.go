@@ -254,8 +254,8 @@ func (c *Config) setDefaults() {
 	if c.Auth.Type == "" {
 		c.Auth.Type = "local"
 	}
-	// Auto-enable auth only if the user did not explicitly set enabled=false
-	// and credentials are configured.
+	// Auto-enable auth when credentials/issuer is configured (user can still set
+	// enabled=false explicitly to disable). This makes the product secure by default.
 	if c.Auth.Enabled == nil {
 		enabled := false
 		if c.Auth.Type == "local" && c.Auth.Local.AdminEmail != "" && c.Auth.Local.AdminPassword != "" {

@@ -703,7 +703,7 @@ func TestServer_Start_GRPCServerError(t *testing.T) {
 
 	// Override gRPC server with invalid address to force start error
 	grpcStore := &grpcStorageAdapter{inner: &restStorageAdapter{store: deps.Store}}
-	deps.GRPCServer = grpcapi.NewServer("invalid://:abc", grpcStore, &mockGRPCProbe{}, &mockAuthenticator{}, logger)
+	deps.GRPCServer = grpcapi.NewServer("invalid://:abc", grpcStore, &mockGRPCProbe{}, &mockAuthenticator{}, logger, nil)
 	// Avoid REST server port conflicts with other tests
 	deps.RESTServer = nil
 

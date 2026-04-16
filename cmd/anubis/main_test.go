@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -3591,8 +3592,8 @@ func TestHttpPost_InvalidURL(t *testing.T) {
 
 // TestHttpGet_NetworkError tests httpGet with network error
 func TestHttpGet_NetworkError(t *testing.T) {
-	// Use an invalid port that's unlikely to be open
-	_, err := httpGet("http://127.0.0.1:1/test", "token")
+	// Use port 65535 which is unlikely to be open
+	_, err := httpGet("http://127.0.0.1:65535/test", "token")
 	if err == nil {
 		t.Error("Expected network error")
 	}
@@ -3600,7 +3601,7 @@ func TestHttpGet_NetworkError(t *testing.T) {
 
 // TestHttpPost_NetworkError tests httpPost with network error
 func TestHttpPost_NetworkError(t *testing.T) {
-	_, err := httpPost("http://127.0.0.1:1/test", "application/json", []byte(`{}`), "token")
+	_, err := httpPost("http://127.0.0.1:65535/test", "application/json", []byte(`{}`), "token")
 	if err == nil {
 		t.Error("Expected network error")
 	}
@@ -4760,4 +4761,223 @@ func TestMain_InitExistingConfig(t *testing.T) {
 	if !strings.Contains(string(output), "already exists") {
 		t.Errorf("Expected already exists error, got: %s", string(output))
 	}
+}
+
+// --- Unique helper function tests not covered elsewhere ---
+
+func TestGetDefaultDataDir_Windows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Skipping non-Windows test")
+	}
+
+	// Test with APPDATA set
+	os.Setenv("APPDATA", `C:\Users\Test\AppData\Roaming`)
+	os.Unsetenv("LOCALAPPDATA")
+	dir := getDefaultDataDir()
+	expected := `C:\Users\Test\AppData\Roaming\AnubisWatch`
+	if dir != expected {
+		t.Errorf("With APPDATA: expected %q, got %q", expected, dir)
+	}
+	os.Unsetenv("APPDATA")
+
+	// Test with LOCALAPPDATA fallback
+	os.Setenv("LOCALAPPDATA", `C:\Users\Test\AppData\Local`)
+	dir = getDefaultDataDir()
+	expected = `C:\Users\Test\AppData\Local\AnubisWatch`
+	if dir != expected {
+		t.Errorf("With LOCALAPPDATA: expected %q, got %q", expected, dir)
+	}
+	os.Unsetenv("LOCALAPPDATA")
+
+	// Test with neither set - falls back to hardcoded path
+	dir = getDefaultDataDir()
+	if !strings.Contains(dir, "AnubisWatch") {
+		t.Errorf("Expected AnubisWatch in fallback path, got %q", dir)
+	}
+}
+
+func TestAskInt_ValidInput(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("42\n"))
+	result := askInt(reader, "Enter number", 10)
+	if result != 42 {
+		t.Errorf("Expected 42, got %d", result)
+	}
+}
+
+func TestAskInt_InvalidInput(t *testing.T) {
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	reader := bufio.NewReader(strings.NewReader("not-a-number\n"))
+	result := askInt(reader, "Enter number", 99)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if result != 99 {
+		t.Errorf("Expected default 99, got %d", result)
+	}
+	if !strings.Contains(output, "Invalid number") {
+		t.Errorf("Expected 'Invalid number' message, got: %s", output)
+	}
+}
+
+func TestAskInt_EmptyInput(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("\n"))
+	result := askInt(reader, "Enter number", 50)
+	if result != 50 {
+		t.Errorf("Expected default 50, got %d", result)
+	}
+}
+
+func TestAskString_EmptyInput(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("\n"))
+	result := askString(reader, "Enter name", "default-val")
+	if result != "default-val" {
+		t.Errorf("Expected 'default-val', got %q", result)
+	}
+}
+
+func TestAskString_ValidInput(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("hello world\n"))
+	result := askString(reader, "Enter name", "default-val")
+	if result != "hello world" {
+		t.Errorf("Expected 'hello world', got %q", result)
+	}
+}
+
+func TestAskString_EmptyDefault(t *testing.T) {
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	reader := bufio.NewReader(strings.NewReader("input\n"))
+	result := askString(reader, "Enter value", "")
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if result != "input" {
+		t.Errorf("Expected 'input', got %q", result)
+	}
+	if strings.Contains(output, "[") {
+		t.Errorf("Expected no brackets in prompt for empty default, got: %s", output)
+	}
+}
+
+func TestAskBool_Affirmative(t *testing.T) {
+	tests := []struct {
+		input string
+		name  string
+	}{
+		{"y\n", "y"},
+		{"yes\n", "yes"},
+		{"Y\n", "Y uppercase"},
+		{"YES\n", "YES uppercase"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := bufio.NewReader(strings.NewReader(tt.input))
+			result := askBool(reader, "Confirm", false)
+			if !result {
+				t.Errorf("Expected true for input %q", tt.input)
+			}
+		})
+	}
+}
+
+func TestAskBool_Negative(t *testing.T) {
+	tests := []struct {
+		input string
+		name  string
+	}{
+		{"n\n", "n"},
+		{"no\n", "no"},
+		{"N\n", "N uppercase"},
+		{"NO\n", "NO uppercase"},
+		{"maybe\n", "other"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := bufio.NewReader(strings.NewReader(tt.input))
+			result := askBool(reader, "Confirm", false)
+			if result {
+				t.Errorf("Expected false for input %q", tt.input)
+			}
+		})
+	}
+}
+
+func TestAskBool_DefaultTrue(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("\n"))
+	result := askBool(reader, "Confirm", true)
+	if !result {
+		t.Error("Expected true (default) for empty input")
+	}
+}
+
+func TestAskBool_DefaultFalse(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("\n"))
+	result := askBool(reader, "Confirm", false)
+	if result {
+		t.Error("Expected false (default) for empty input")
+	}
+}
+
+func TestAskChoice_MatchFirstChar(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("d\n"))
+	result := askChoice(reader, "Choose", []string{"dark", "light", "auto"}, "dark")
+	if result != "dark" {
+		t.Errorf("Expected 'dark', got %q", result)
+	}
+}
+
+func TestAskChoice_MatchFull(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("light\n"))
+	result := askChoice(reader, "Choose", []string{"dark", "light", "auto"}, "dark")
+	if result != "light" {
+		t.Errorf("Expected 'light', got %q", result)
+	}
+}
+
+func TestAskChoice_NoMatch(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("xyz\n"))
+	result := askChoice(reader, "Choose", []string{"dark", "light", "auto"}, "dark")
+	if result != "dark" {
+		t.Errorf("Expected default 'dark', got %q", result)
+	}
+}
+
+func TestAskChoice_EmptyInput(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("\n"))
+	result := askChoice(reader, "Choose", []string{"dark", "light", "auto"}, "auto")
+	if result != "auto" {
+		t.Errorf("Expected default 'auto', got %q", result)
+	}
+}
+
+func TestGetUserConfigPath_LocalAppDataFallback(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Skipping non-Windows test")
+	}
+
+	os.Unsetenv("APPDATA")
+	os.Setenv("LOCALAPPDATA", `C:\Users\Test\AppData\Local`)
+	path := getUserConfigPath()
+	expected := `C:\Users\Test\AppData\Local\AnubisWatch\anubis.json`
+	if path != expected {
+		t.Errorf("Expected %q, got %q", expected, path)
+	}
+	os.Unsetenv("LOCALAPPDATA")
 }

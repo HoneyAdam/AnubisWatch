@@ -850,6 +850,8 @@ func (s *RESTServer) handleUpdateSoul(ctx *Context) error {
 
 	soul.ID = id
 	soul.WorkspaceID = ctx.Workspace
+	// Preserve server-managed fields to prevent mass assignment
+	soul.CreatedAt = existing.CreatedAt
 	soul.UpdatedAt = time.Now()
 
 	if err := s.store.SaveSoul(ctx.Request.Context(), &soul); err != nil {

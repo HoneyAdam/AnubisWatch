@@ -2,14 +2,67 @@ package cluster
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 	"github.com/AnubisWatch/anubiswatch/internal/raft"
 	"github.com/AnubisWatch/anubiswatch/internal/storage"
 )
+
+// buildTLSPeerConfig builds a tls.Config for peer-to-peer TLS from Raft config.
+// If no TLS cert/key are configured, it returns nil (plaintext fallback with a warning).
+// If RequireClientCert is set, mutual TLS (mTLS) is enabled for peer verification.
+func buildTLSPeerConfig(cfg *core.TLSPeerConfig) (*tls.Config, error) {
+	if cfg == nil || cfg.CertFile == "" || cfg.KeyFile == "" {
+		return nil, nil
+	}
+
+	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load peer TLS certificate: %w", err)
+	}
+
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+		},
+	}
+
+	// Optionally verify peer certificates with a custom CA
+	if cfg.CAFile != "" {
+		caBytes, err := os.ReadFile(cfg.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read TLS CA file: %w", err)
+		}
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(caBytes) {
+			return nil, fmt.Errorf("failed to parse TLS CA certificates")
+		}
+		tlsCfg.RootCAs = caPool
+
+		if cfg.VerifyPeers {
+			tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+			tlsCfg.ClientCAs = caPool
+		} else if cfg.RequireClientCert {
+			tlsCfg.ClientAuth = tls.RequireAnyClientCert
+		}
+	} else if cfg.RequireClientCert || cfg.VerifyPeers {
+		// No CA provided but mTLS required — require client certs without verification
+		tlsCfg.ClientAuth = tls.RequireAnyClientCert
+	}
+
+	return tlsCfg, nil
+}
 
 // Manager handles cluster coordination
 type Manager struct {
@@ -65,8 +118,19 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	m.logger.Info("starting Raft node", "node_id", m.config.NodeID, "bind_addr", m.config.BindAddr)
 
-	// Create TCP transport
-	transport, err := raft.NewTCPTransport(m.config.BindAddr, m.config.AdvertiseAddr, nil, m.logger)
+	// Build TLS config for peer-to-peer communication (nil if TLS not configured)
+	tlsCfg, err := buildTLSPeerConfig(m.config.TLS)
+	if err != nil {
+		return fmt.Errorf("failed to build TLS config: %w", err)
+	}
+	if tlsCfg != nil {
+		m.logger.Info("Raft peer TLS enabled", "min_version", "TLS 1.2", "verify_peers", m.config.TLS.VerifyPeers)
+	} else if m.necroConfig.ClusterSecret != "" {
+		m.logger.Warn("Raft inter-node auth uses only pre-shared key (no TLS); specify tls.cert_file to enable mTLS")
+	}
+
+	// Create TCP transport with optional TLS
+	transport, err := raft.NewTCPTransport(m.config.BindAddr, m.config.AdvertiseAddr, tlsCfg, m.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create transport: %w", err)
 	}

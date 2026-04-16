@@ -3,9 +3,12 @@ package alert
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -1748,33 +1751,74 @@ func TestNtfyDispatcher_Send_ErrorStatus(t *testing.T) {
 }
 
 // TestWebHookDispatcher_Send_HttpError tests WebHook Send with server error
-func TestWebHookDispatcher_Send_HttpError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer server.Close()
+// TestNtfyDispatcher_Validate_ConfigCases tests additional NtfyDispatcher.Validate config scenarios
+func TestNtfyDispatcher_Validate_ConfigCases(t *testing.T) {
+	d := &NtfyDispatcher{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 
-	dispatcher := &WebHookDispatcher{
-		logger: newTestLogger(),
-	}
-
-	event := &core.AlertEvent{
-		SoulName:  "Test Soul",
-		Status:    core.SoulDead,
-		Severity:  core.SeverityCritical,
-		Message:   "Test alert",
-		Timestamp: time.Now().UTC(),
-	}
-
-	channel := &core.AlertChannel{
-		Type: core.ChannelWebHook,
-		Config: map[string]interface{}{
-			"url": server.URL,
+	tests := []struct {
+		name    string
+		config  map[string]any
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "empty config",
+			config:  map[string]any{},
+			wantErr: true,
+			errMsg:  "topic is required",
+		},
+		{
+			name:    "topic only",
+			config:  map[string]any{"topic": "my-topic"},
+			wantErr: false,
+		},
+		{
+			name:    "topic and server",
+			config:  map[string]any{"topic": "my-topic", "server": "http://127.0.0.1:8080"},
+			wantErr: false,
+		},
+		{
+			name:    "server without topic",
+			config:  map[string]any{"server": "http://127.0.0.1:8080"},
+			wantErr: true,
+			errMsg:  "topic is required",
+		},
+		{
+			name:    "empty topic",
+			config:  map[string]any{"topic": ""},
+			wantErr: false,
+		},
+		{
+			name:    "non-string server",
+			config:  map[string]any{"topic": "my-topic", "server": 123},
+			wantErr: false,
 		},
 	}
 
-	err := dispatcher.Send(context.Background(), event, channel)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := d.Validate(tt.config)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Expected error containing %q, got %v", tt.errMsg, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, got %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestNtfyDispatcher_Validate_ServerUnresolvable tests that unresolvable hostnames fail validation
+func TestNtfyDispatcher_Validate_ServerUnresolvable(t *testing.T) {
+	d := &NtfyDispatcher{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+
+	err := d.Validate(map[string]any{"topic": "my-topic", "server": "http://this-host-does-not-exist-xyz123.invalid"})
 	if err == nil {
-		t.Error("Expected error for 500 response")
+		t.Error("Expected error for unresolvable hostname")
 	}
 }

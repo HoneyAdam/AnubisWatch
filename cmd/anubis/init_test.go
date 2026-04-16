@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -156,6 +157,71 @@ func TestGetDefaultDataDir_Default(t *testing.T) {
 	// Verify it's a valid path format
 	if dir == "." || dir == "" {
 		t.Error("Expected a specific data directory path")
+	}
+}
+
+// TestGetDefaultDataDir_WindowsAppData tests getDefaultDataDir with APPDATA set
+func TestGetDefaultDataDir_WindowsAppData(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific test")
+	}
+
+	// Save original APPDATA
+	origAppData := os.Getenv("APPDATA")
+	defer func() {
+		if origAppData != "" {
+			os.Setenv("APPDATA", origAppData)
+		} else {
+			os.Unsetenv("APPDATA")
+		}
+	}()
+
+	// Set APPDATA to temp dir
+	tmpDir := t.TempDir()
+	os.Setenv("APPDATA", tmpDir)
+
+	dir := getDefaultDataDir()
+
+	// Should use APPDATA + AnubisWatch
+	expected := filepath.Join(tmpDir, "AnubisWatch")
+	if dir != expected {
+		t.Errorf("Expected %s, got %s", expected, dir)
+	}
+}
+
+// TestGetDefaultDataDir_WindowsFallback tests getDefaultDataDir with LOCALAPPDATA fallback
+func TestGetDefaultDataDir_WindowsFallback(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific test")
+	}
+
+	// Save original env vars
+	origAppData := os.Getenv("APPDATA")
+	origLocalAppData := os.Getenv("LOCALAPPDATA")
+	defer func() {
+		if origAppData != "" {
+			os.Setenv("APPDATA", origAppData)
+		} else {
+			os.Unsetenv("APPDATA")
+		}
+		if origLocalAppData != "" {
+			os.Setenv("LOCALAPPDATA", origLocalAppData)
+		} else {
+			os.Unsetenv("LOCALAPPDATA")
+		}
+	}()
+
+	// Clear APPDATA, set LOCALAPPDATA
+	os.Unsetenv("APPDATA")
+	tmpDir := t.TempDir()
+	os.Setenv("LOCALAPPDATA", tmpDir)
+
+	dir := getDefaultDataDir()
+
+	// Should use LOCALAPPDATA + AnubisWatch
+	expected := filepath.Join(tmpDir, "AnubisWatch")
+	if dir != expected {
+		t.Errorf("Expected %s, got %s", expected, dir)
 	}
 }
 

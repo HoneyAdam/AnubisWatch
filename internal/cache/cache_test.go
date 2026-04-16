@@ -535,3 +535,55 @@ func TestTypedCache_StructType(t *testing.T) {
 		t.Errorf("Expected {test, 123}, got %v", val)
 	}
 }
+
+// TestCacheStartStopCleanup tests StartCleanup and StopCleanup lifecycle
+func TestCacheStartStopCleanup(t *testing.T) {
+	c := New(100, time.Hour)
+
+	// Start the cleanup goroutine
+	c.StartCleanup()
+
+	// Stop should not block or panic
+	c.StopCleanup()
+}
+
+// TestCacheStopCleanup_NilStopCh tests StopCleanup when stopCh is nil
+func TestCacheStopCleanup_NilStopCh(t *testing.T) {
+	c := New(100, time.Hour)
+
+	// StopCleanup without StartCleanup — should not panic
+	c.StopCleanup()
+}
+
+// TestCacheStartCleanupCleansExpired tests that the cleanup ticker eventually removes expired items
+func TestCacheStartCleanupCleansExpired(t *testing.T) {
+	c := New(100, time.Minute)
+
+	// Override the cleanup ticker by directly calling cleanup
+	c.Set("key1", "value1", 1*time.Millisecond)
+	c.Set("key2", "value2", time.Hour)
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Manually trigger cleanup to verify the path works
+	c.cleanup()
+
+	if c.Exists("key1") {
+		t.Error("Expected key1 to be cleaned up")
+	}
+	if !c.Exists("key2") {
+		t.Error("Expected key2 to still exist")
+	}
+}
+
+// TestCacheEvictOldest_EmptyList tests evictOldest when lruList is empty
+func TestCacheEvictOldest_EmptyList(t *testing.T) {
+	c := New(100, time.Minute)
+
+	// Should not panic on empty list
+	c.evictOldest()
+
+	if c.Size() != 0 {
+		t.Error("Expected empty cache to remain empty")
+	}
+}

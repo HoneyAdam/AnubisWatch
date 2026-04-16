@@ -161,14 +161,14 @@ func (l *LDAPAuthenticator) buildUserDN(email string) string {
 	if strings.Contains(email, "@") {
 		// Extract username part for constructing DN
 		username := strings.Split(email, "@")[0]
-		// If BindDN pattern uses {{mail}}, return email as-is (for AD UPN bind)
+		// If BindDN pattern uses {{mail}}, escape DN special chars and substitute
 		if strings.Contains(l.cfg.BindDN, "{{mail}}") {
-			return strings.ReplaceAll(l.cfg.BindDN, "{{mail}}", email)
+			return strings.ReplaceAll(l.cfg.BindDN, "{{mail}}", ldap.EscapeDN(email))
 		}
-		// Try to construct DN from base DN
-		return fmt.Sprintf("CN=%s,%s", username, l.cfg.BaseDN)
+		// Escape username for DN construction
+		return fmt.Sprintf("CN=%s,%s", ldap.EscapeDN(username), l.cfg.BaseDN)
 	}
-	// Direct DN
+	// Direct DN - return as-is (already a valid DN)
 	return email
 }
 

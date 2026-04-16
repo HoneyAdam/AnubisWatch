@@ -2193,6 +2193,20 @@ func TestTimeSeriesStore_StartCompaction(t *testing.T) {
 
 	// Give it a moment to start
 	time.Sleep(time.Millisecond * 10)
+
+	// Stop the compaction goroutine
+	ts.StopCompaction()
+}
+
+func TestTimeSeriesStore_StopCompaction_NilStopCh(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	config := core.TimeSeriesConfig{}
+	ts := NewTimeSeriesStore(db, config, newTestLogger())
+
+	// StopCompaction without StartCompaction — should not panic
+	ts.StopCompaction()
 }
 
 func TestTimeSeriesStore_runCompaction(t *testing.T) {
@@ -7676,5 +7690,145 @@ func TestCobaltDBSnapshotStore_Open_NotFound(t *testing.T) {
 	_, err := store.Open("nonexistent")
 	if err == nil {
 		t.Fatal("Expected error when no snapshot exists")
+	}
+}
+
+// TestCobaltDB_MaintenanceWindowCRUD tests save, get, list, delete maintenance windows
+func TestCobaltDB_MaintenanceWindowCRUD(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Save a maintenance window
+	w := &core.MaintenanceWindow{
+		Name:      "Weekly Maintenance",
+		StartTime: time.Now(),
+		EndTime:   time.Now().Add(2 * time.Hour),
+	}
+	err := db.SaveMaintenanceWindow(w)
+	if err != nil {
+		t.Fatalf("SaveMaintenanceWindow failed: %v", err)
+	}
+	if w.ID == "" {
+		t.Fatal("Expected ID to be generated")
+	}
+
+	// Get the maintenance window
+	got, err := db.GetMaintenanceWindow(w.ID)
+	if err != nil {
+		t.Fatalf("GetMaintenanceWindow failed: %v", err)
+	}
+	if got.Name != w.Name {
+		t.Errorf("Expected name %q, got %q", w.Name, got.Name)
+	}
+
+	// List maintenance windows
+	list, err := db.ListMaintenanceWindows()
+	if err != nil {
+		t.Fatalf("ListMaintenanceWindows failed: %v", err)
+	}
+	if len(list) != 1 {
+		t.Errorf("Expected 1 window, got %d", len(list))
+	}
+
+	// Delete the maintenance window
+	err = db.DeleteMaintenanceWindow(w.ID)
+	if err != nil {
+		t.Fatalf("DeleteMaintenanceWindow failed: %v", err)
+	}
+
+	// Verify it's gone
+	_, err = db.GetMaintenanceWindow(w.ID)
+	if err == nil {
+		t.Error("Expected error after deletion")
+	}
+}
+
+// TestCobaltDB_MaintenanceWindow_NotFound tests get/delete non-existent
+func TestCobaltDB_MaintenanceWindow_NotFound(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	_, err := db.GetMaintenanceWindow("nonexistent")
+	if err == nil {
+		t.Error("Expected error for non-existent maintenance window")
+	}
+
+	// Delete of non-existent key is a no-op (doesn't error)
+	err = db.DeleteMaintenanceWindow("nonexistent")
+	if err != nil {
+		t.Errorf("Delete of non-existent key should not error: %v", err)
+	}
+}
+
+// TestCobaltDB_MaintenanceWindow_EmptyList tests list with no data
+func TestCobaltDB_MaintenanceWindow_EmptyList(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	list, err := db.ListMaintenanceWindows()
+	if err != nil {
+		t.Fatalf("ListMaintenanceWindows failed: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("Expected 0 windows, got %d", len(list))
+	}
+}
+
+// TestCobaltDB_MaintenanceWindow_CorruptData tests loading corrupt data
+func TestCobaltDB_MaintenanceWindow_CorruptData(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Write corrupt data directly to the key
+	key := "default/maintenance/corrupt-1"
+	if err := db.Put(key, []byte("not valid json")); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	// List should skip corrupt entries without error
+	list, err := db.ListMaintenanceWindows()
+	if err != nil {
+		t.Fatalf("ListMaintenanceWindows failed: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("Expected 0 valid windows, got %d", len(list))
+	}
+
+	// Get should fail on corrupt data
+	_, err = db.GetMaintenanceWindow("corrupt-1")
+	if err == nil {
+		t.Error("Expected error when loading corrupt maintenance window data")
+	}
+}
+
+// TestWAL_Truncate tests truncating the WAL file
+func TestWAL_Truncate(t *testing.T) {
+	if os.PathSeparator == '\\' {
+		t.Skip("WAL Truncate fails on Windows due to file locking")
+	}
+	dir := t.TempDir()
+	cfg := core.StorageConfig{Path: dir}
+	db, err := NewEngine(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("failed to create test DB: %v", err)
+	}
+	defer db.Close()
+
+	// Write some data to the WAL
+	_ = db.Put("test-key", []byte("test-value"))
+
+	// Truncate the WAL
+	err = db.wal.Truncate()
+	if err != nil {
+		t.Fatalf("WAL Truncate failed: %v", err)
+	}
+
+	// Verify the data is still in memory after WAL truncate
+	val, err := db.Get("test-key")
+	if err != nil {
+		t.Fatalf("Get after WAL truncate failed: %v", err)
+	}
+	if string(val) != "test-value" {
+		t.Errorf("Expected test-value, got %s", val)
 	}
 }

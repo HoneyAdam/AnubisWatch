@@ -62,6 +62,15 @@ type RestoreStorage interface {
 }
 
 // Backup represents a complete system backup
+//
+// NOTE: Backup scope does NOT include the following:
+//   - secrets.enc (encrypted webhook/API keys — must be backed up separately)
+//   - WAL files and raw data files (not needed for restore)
+//   - Dashboard assets (rebuilt from source on restore)
+//
+// After restoring from backup, you must re-configure:
+//   - Alert channel credentials that reference external APIs
+//   - OIDC client secrets (stored in config file)
 type Backup struct {
 	Version    string         `json:"version"`
 	CreatedAt  time.Time      `json:"created_at"`

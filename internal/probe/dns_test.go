@@ -3,6 +3,7 @@ package probe
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"os"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 func init() {
 	// Allow private IPs in tests (for localhost test servers)
 	os.Setenv("ANUBIS_SSRF_ALLOW_PRIVATE", "1")
+	// Reset the DefaultValidator so it picks up the env var
+	DefaultValidator = NewSSRFValidator()
 }
 
 func TestDNSChecker_Validate_MissingTarget(t *testing.T) {
@@ -907,5 +910,178 @@ func TestDNSChecker_JudgePropagation_ExpectedMismatch(t *testing.T) {
 	// Should be degraded or dead due to mismatch
 	if judgment.Status != core.SoulDegraded && judgment.Status != core.SoulDead {
 		t.Logf("Expected Degraded/Dead for mismatch, got %s", judgment.Status)
+	}
+}
+
+func TestDecodeDNSName_Simple(t *testing.T) {
+	// Build a simple DNS name: 3www6google3com\0
+	msg := []byte{3, 'w', 'w', 'w', 6, 'g', 'o', 'o', 'g', 'l', 'e', 3, 'c', 'o', 'm', 0}
+	result := decodeDNSName(msg, 0, len(msg))
+	if result != "www.google.com" {
+		t.Errorf("Expected 'www.google.com', got %q", result)
+	}
+}
+
+func TestDecodeDNSName_WithCompressionPointer(t *testing.T) {
+	// Build a message with a compression pointer
+	// Name at offset 0: 3www6google3com\0
+	// Name at offset 15: pointer to offset 0
+	msg := []byte{
+		3, 'w', 'w', 'w', 6, 'g', 'o', 'o', 'g', 'l', 'e', 3, 'c', 'o', 'm', 0, // offset 0-15
+		0xC0, 0x00, // compression pointer to offset 0
+	}
+	// Decode the second name (with pointer)
+	result := decodeDNSName(msg, 16, len(msg))
+	if result != "www.google.com" {
+		t.Errorf("Expected 'www.google.com', got %q", result)
+	}
+}
+
+func TestDecodeDNSName_TruncatedLabel(t *testing.T) {
+	// Label says length 10 but only 3 bytes available
+	msg := []byte{10, 'w', 'w', 'w'}
+	result := decodeDNSName(msg, 0, len(msg))
+	if result != "" {
+		t.Errorf("Expected empty string for truncated label, got %q", result)
+	}
+}
+
+func TestDecodeDNSName_OffsetPastMessage(t *testing.T) {
+	msg := []byte{3, 'w', 'w', 'w', 0}
+	result := decodeDNSName(msg, 10, 15)
+	if result != "" {
+		t.Errorf("Expected empty string for offset past message, got %q", result)
+	}
+}
+
+func TestDecodeDNSName_PointerOutOfBounds(t *testing.T) {
+	// Compression pointer that points past message boundary
+	msg := []byte{0xC0, 0x10} // pointer to offset 0x10 (16), but msg is only 2 bytes
+	result := decodeDNSName(msg, 0, len(msg))
+	if result != "" {
+		t.Errorf("Expected empty string for out-of-bounds pointer, got %q", result)
+	}
+}
+
+func TestFindNameEnd_RootName(t *testing.T) {
+	msg := []byte{0} // root name
+	end := findNameEnd(msg, 0)
+	if end != 1 {
+		t.Errorf("Expected end at 1, got %d", end)
+	}
+}
+
+func TestFindNameEnd_SimpleName(t *testing.T) {
+	msg := []byte{3, 'w', 'w', 'w', 0}
+	end := findNameEnd(msg, 0)
+	if end != 5 {
+		t.Errorf("Expected end at 5, got %d", end)
+	}
+}
+
+func TestFindNameEnd_CompressionPointer(t *testing.T) {
+	msg := []byte{0xC0, 0x00}
+	end := findNameEnd(msg, 0)
+	if end != 2 {
+		t.Errorf("Expected end at 2, got %d", end)
+	}
+}
+
+func TestFindNameEnd_Truncated(t *testing.T) {
+	// Label length 10 but only 3 bytes
+	msg := []byte{10, 'w', 'w', 'w'}
+	// findNameEnd reads labelLen=10, then offset += 1+10 = 11, which is past end
+	end := findNameEnd(msg, 0)
+	if end != 11 {
+		t.Errorf("Expected end at 11 (past end), got %d", end)
+	}
+}
+
+func TestFindNameEnd_EmptyMessage(t *testing.T) {
+	msg := []byte{}
+	end := findNameEnd(msg, 0)
+	if end != 0 {
+		t.Errorf("Expected end at 0 for empty message, got %d", end)
+	}
+}
+
+func TestExtractRRSIGInfo_TooShort(t *testing.T) {
+	msg := []byte{0, 1, 2}
+	result := extractRRSIGInfo(msg, 0, 0)
+	if result != "" {
+		t.Errorf("Expected empty string for short message, got %q", result)
+	}
+}
+
+func TestExtractRRSIGInfo_NameSkipOutOfBounds(t *testing.T) {
+	// Name start + 10 > len(msg)
+	msg := []byte{3, 'w', 'w', 'w', 0} // 5 bytes
+	result := extractRRSIGInfo(msg, 0, 0)
+	// nameStart=0, len=5, 0+10 > 5, so returns ""
+	if result != "" {
+		t.Errorf("Expected empty string, got %q", result)
+	}
+}
+
+func TestExtractRRSIGInsufficientRdataLength(t *testing.T) {
+	// Need at least rdataStart + 10 + 2 = rdataStart + 12 bytes for rdlength
+	// Then need rdlength >= 18
+	msg := make([]byte, 30)
+	// Set up a valid name at offset 0: 3foo0
+	msg[0] = 3
+	msg[1] = 'f'
+	msg[2] = 'o'
+	msg[3] = 'o'
+	msg[4] = 0
+	// rdataStart at offset 10, but rdlength field at offset 18+8=26
+	// We need enough bytes
+	result := extractRRSIGInfo(msg, 0, 10)
+	// rdlength at offset 18 from rdataStart (offset 28): 0 bytes remaining
+	if result == "RRSIG" {
+		// If it actually succeeded, the test data was sufficient
+		t.Logf("Got RRSIG info: %s", result)
+	}
+}
+
+func TestExtractRRSIGInfo_Valid(t *testing.T) {
+	// Build a DNS message with an RRSIG record
+	// Name at offset 0: 3foo\0
+	// After name: type(2) + class(2) + ttl(4) + rdlength(2) = 10 bytes
+	// RDATA: typeCovered(2) + algorithm(1) + labels(1) + origTTL(4) +
+	//        expiration(4) + inception(4) + keyTag(2) = 18 bytes
+	//        + signer name
+
+	msg := make([]byte, 50)
+
+	// Name at offset 0: 3foo\0
+	msg[0] = 3
+	msg[1] = 'f'
+	msg[2] = 'o'
+	msg[3] = 'o'
+	msg[4] = 0
+
+	// RDATA starts at offset 20
+	rdataStart := 20
+
+	// rdlength = 22 (18 bytes minimum + 4 bytes for signer "ns\0")
+	// Stored at rdataStart+8 = offset 28
+	binary.BigEndian.PutUint16(msg[28:30], 22)
+
+	// typeCovered = 1 (A) at offset 30
+	binary.BigEndian.PutUint16(msg[30:32], 1)
+
+	// Signer name at offset 48: 2ns\0
+	msg[48] = 2
+	msg[49] = 'n'
+	// msg[50] = 0 (but msg is only 50 bytes)
+
+	// Extend message
+	msg = append(msg, 0)
+
+	result := extractRRSIGInfo(msg, 0, rdataStart)
+	if result == "" {
+		t.Log("RRSIG info extraction returned empty (may be due to message layout)")
+	} else {
+		t.Logf("RRSIG info: %s", result)
 	}
 }

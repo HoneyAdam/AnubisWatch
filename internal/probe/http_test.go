@@ -785,3 +785,68 @@ func TestMatchesType_AllTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestTransportCacheStats_NoHits(t *testing.T) {
+	checker := NewHTTPChecker()
+	hits, misses, ratio := checker.TransportCacheStats()
+	if hits != 0 || misses != 0 || ratio != 0 {
+		t.Errorf("Expected zero stats, got hits=%d, misses=%d, ratio=%f", hits, misses, ratio)
+	}
+}
+
+func TestTransportCacheStats_WithHits(t *testing.T) {
+	checker := NewHTTPChecker()
+	checker.cacheMu.Lock()
+	checker.cacheHits = 3
+	checker.cacheMisses = 7
+	checker.cacheMu.Unlock()
+
+	hits, misses, ratio := checker.TransportCacheStats()
+	if hits != 3 {
+		t.Errorf("Expected 3 hits, got %d", hits)
+	}
+	if misses != 7 {
+		t.Errorf("Expected 7 misses, got %d", misses)
+	}
+	if ratio != 0.3 {
+		t.Errorf("Expected ratio 0.3, got %f", ratio)
+	}
+}
+
+func TestTransportCacheStats_OnlyHits(t *testing.T) {
+	checker := NewHTTPChecker()
+	checker.cacheMu.Lock()
+	checker.cacheHits = 5
+	checker.cacheMisses = 0
+	checker.cacheMu.Unlock()
+
+	hits, misses, ratio := checker.TransportCacheStats()
+	if hits != 5 {
+		t.Errorf("Expected 5 hits, got %d", hits)
+	}
+	if misses != 0 {
+		t.Errorf("Expected 0 misses, got %d", misses)
+	}
+	if ratio != 1.0 {
+		t.Errorf("Expected ratio 1.0, got %f", ratio)
+	}
+}
+
+func TestTransportCacheStats_OnlyMisses(t *testing.T) {
+	checker := NewHTTPChecker()
+	checker.cacheMu.Lock()
+	checker.cacheHits = 0
+	checker.cacheMisses = 5
+	checker.cacheMu.Unlock()
+
+	hits, misses, ratio := checker.TransportCacheStats()
+	if hits != 0 {
+		t.Errorf("Expected 0 hits, got %d", hits)
+	}
+	if misses != 5 {
+		t.Errorf("Expected 5 misses, got %d", misses)
+	}
+	if ratio != 0 {
+		t.Errorf("Expected ratio 0.0, got %f", ratio)
+	}
+}

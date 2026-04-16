@@ -8,10 +8,10 @@ const mockDelete = vi.fn()
 
 vi.mock('../api/client', () => ({
   api: {
-    get: (...args: any[]) => mockGet(...args),
-    post: (...args: any[]) => mockPost(...args),
-    put: (...args: any[]) => mockPut(...args),
-    delete: (...args: any[]) => mockDelete(...args),
+    get: (...args: unknown[]) => mockGet(...args as [string]),
+    post: (...args: unknown[]) => mockPost(...args as [string, unknown?]),
+    put: (...args: unknown[]) => mockPut(...args as [string, unknown?]),
+    delete: (...args: unknown[]) => mockDelete(...args as [string]),
   },
 }))
 

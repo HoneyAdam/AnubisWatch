@@ -1,11 +1,72 @@
 package auth
 
 import (
-	"time"
 	"testing"
+	"time"
 
 	"github.com/AnubisWatch/anubiswatch/internal/core"
 )
+
+func TestExtractHostnameFromURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		expected string
+	}{
+		{"ldap with port", "ldap://ldap.example.com:389/dc=example", "ldap.example.com"},
+		{"ldaps with port", "ldaps://ldap.example.com:636/dc=example", "ldap.example.com"},
+		{"ldap no port", "ldap://ldap.example.com", "ldap.example.com"},
+		{"ldaps no port", "ldaps://ldap.example.com", "ldap.example.com"},
+		{"localhost", "ldap://localhost:389", "localhost"},
+		{"ip address", "ldap://10.0.0.1:389", "10.0.0.1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractHostnameFromURL(tt.url)
+			if got != tt.expected {
+				t.Errorf("extractHostnameFromURL(%q) = %q, want %q", tt.url, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLDAPAuthenticator_DelegationMethods(t *testing.T) {
+	cfg := core.LDAPAuth{
+		URL:    "ldap://nonexistent.invalid",
+		BaseDN: "dc=example,dc=com",
+	}
+	auth := NewLDAPAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	// Login first to get a valid token
+	_, token, err := auth.Login("admin@test.com", "TestPass1234!")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+
+	// Test ChangePassword delegates to local
+	err = auth.ChangePassword(token, "TestPass1234!", "NewPass1234!!")
+	if err != nil {
+		t.Errorf("ChangePassword failed: %v", err)
+	}
+
+	// Test RequestPasswordReset delegates to local
+	resetToken, err := auth.RequestPasswordReset("admin@test.com")
+	if err != nil {
+		t.Errorf("RequestPasswordReset failed: %v", err)
+	}
+	if resetToken == "" {
+		t.Error("Expected non-empty reset token")
+	}
+
+	// Test ConfirmPasswordReset delegates to local
+	// Use the reset token we just got
+	err = auth.ConfirmPasswordReset(resetToken, "ResetPass1234!!")
+	if err != nil {
+		t.Errorf("ConfirmPasswordReset failed: %v", err)
+	}
+}
 
 func TestLDAPAuthenticator_NewLDAPAuthenticator(t *testing.T) {
 	cfg := core.LDAPAuth{

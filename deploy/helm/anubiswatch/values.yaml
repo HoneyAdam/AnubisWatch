@@ -1,8 +1,8 @@
-# Default values for AnubisWatch
-# This is a YAML-formatted file.
+# Default values for anubiswatch.
+replicaCount: 1
 
 image:
-  repository: anubiswatch/anubis
+  repository: ghcr.io/anubiswatch/anubiswatch
   pullPolicy: IfNotPresent
   tag: ""
 
@@ -10,97 +10,13 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# AnubisWatch configuration
-config:
-  # Data directory
-  dataDir: /data
-
-  # Log level: debug, info, warn, error
-  logLevel: info
-
-  # Server configuration
-  server:
-    bindAddr: 0.0.0.0:8080
-    tls:
-      enabled: false
-      certFile: ""
-      keyFile: ""
-
-  # Raft cluster configuration
-  raft:
-    enabled: true
-    bindAddr: 0.0.0.0:7946
-    advertiseAddr: ""
-    electionTimeout: 1s
-    heartbeatTimeout: 500ms
-
-  # Storage configuration
-  storage:
-    path: /data/anubis.db
-    retentionDays: 30
-
-  # Alert configuration
-  alerts:
-    enabled: true
-    smtp:
-      enabled: false
-      host: ""
-      port: 587
-      username: ""
-      password: ""
-      from: ""
-    webhook:
-      enabled: false
-      url: ""
-
-  # ACME/Let's Encrypt
-  acme:
-    enabled: false
-    email: ""
-    provider: letsencrypt
-
-# Service configuration
-service:
-  type: ClusterIP
-  httpPort: 8080
-  raftPort: 7946
-
-# Ingress configuration
-ingress:
-  enabled: false
-  className: ""
+serviceAccount:
+  create: true
   annotations: {}
-  hosts:
-    - host: anubiswatch.local
-      paths:
-        - path: /
-          pathType: Prefix
-  tls: []
+  name: ""
 
-# Resources
-resources:
-  limits:
-    cpu: 1000m
-    memory: 1Gi
-  requests:
-    cpu: 250m
-    memory: 256Mi
+podAnnotations: {}
 
-# StatefulSet configuration
-statefulSet:
-  replicas: 3
-  podManagementPolicy: Parallel
-  updateStrategy:
-    type: RollingUpdate
-
-# Persistence
-persistence:
-  enabled: true
-  storageClass: ""
-  accessMode: ReadWriteOnce
-  size: 10Gi
-
-# Pod security context
 podSecurityContext:
   fsGroup: 1000
 
@@ -112,22 +28,81 @@ securityContext:
   runAsNonRoot: true
   runAsUser: 1000
 
-# Node selector
+service:
+  type: ClusterIP
+  httpPort: 8080
+  grpcPort: 9090
+  clusterPort: 7946
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: anubiswatch.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+
+config:
+  server:
+    port: 8080
+    tls: false
+    dashboard_enabled: true
+    cors_origins: ["*"]
+
+  auth:
+    type: local
+    admin_email: admin@anubiswatch.local
+    session_ttl: 24h
+
+  storage:
+    data_dir: /data
+    encryption_enabled: false
+
+  probe:
+    max_concurrent: 100
+    queue_size: 1000
+    timeout_multiplier: 1.5
+    default_interval: 60s
+
+  raft:
+    enabled: false
+
+  logging:
+    level: info
+    format: json
+
+secrets:
+  adminPassword: "admin"
+  encryptionKey: ""
+  clusterSecret: ""
+
 nodeSelector: {}
 
 tolerations: []
 
 affinity: {}
-
-# Monitoring
-monitoring:
-  enabled: false
-  serviceMonitor:
-    enabled: false
-    interval: 30s
-    scrapeTimeout: 10s
-
-# Pod disruption budget
-pdb:
-  enabled: true
-  minAvailable: 2

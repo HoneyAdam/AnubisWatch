@@ -12,6 +12,8 @@ import (
 func init() {
 	// Allow private IPs in tests (for localhost test servers)
 	os.Setenv("ANUBIS_SSRF_ALLOW_PRIVATE", "1")
+	// Reset the DefaultValidator so it picks up the env var
+	DefaultValidator = NewSSRFValidator()
 }
 
 func TestICMPChecker_Validate_MissingTarget(t *testing.T) {

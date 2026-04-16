@@ -473,3 +473,105 @@ func TestHandleStatusPageHTML_WithVariousStatuses(t *testing.T) {
 		t.Error("Expected 'Failing Soul' in HTML")
 	}
 }
+
+// TestHandleStatusPage_WithDeadSouls tests major_outage status
+func TestHandleStatusPage_WithDeadSouls(t *testing.T) {
+	store := newMockStorage()
+	store.SaveSoul(nil, &core.Soul{
+		ID:   "soul-dead",
+		Name: "Dead Soul",
+		Type: core.CheckHTTP,
+	})
+
+	// Use a timestamp slightly in the past to ensure it falls within the handler's time window
+	judgmentTime := time.Now().Add(-1 * time.Second)
+	store.SaveJudgment(nil, &core.Judgment{
+		ID:        "judgment-dead",
+		SoulID:    "soul-dead",
+		Status:    core.SoulDead,
+		Duration:  500 * time.Millisecond,
+		Timestamp: judgmentTime,
+	})
+
+	server := &RESTServer{
+		store:  store,
+		router: &Router{routes: make(map[string]map[string]Handler)},
+		logger: newTestLogger(),
+	}
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/status", nil),
+		Response: rec,
+	}
+
+	err := server.handleStatusPage(ctx)
+	if err != nil {
+		t.Fatalf("handleStatusPage failed: %v", err)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "major_outage") {
+		t.Errorf("Expected 'major_outage' in response, got: %s", body)
+	}
+}
+
+// TestHandleStatusPage_MixedStatuses tests degraded + operational
+func TestHandleStatusPage_MixedStatuses(t *testing.T) {
+	store := newMockStorage()
+
+	store.SaveSoul(nil, &core.Soul{ID: "soul-ok", Name: "OK Soul", Type: core.CheckHTTP})
+	store.SaveSoul(nil, &core.Soul{ID: "soul-degraded", Name: "Degraded Soul", Type: core.CheckTCP})
+
+	judgmentTime := time.Now().Add(-1 * time.Second)
+	store.SaveJudgment(nil, &core.Judgment{ID: "j-ok", SoulID: "soul-ok", Status: core.SoulAlive, Timestamp: judgmentTime})
+	store.SaveJudgment(nil, &core.Judgment{ID: "j-degraded", SoulID: "soul-degraded", Status: core.SoulDegraded, Timestamp: judgmentTime})
+
+	server := &RESTServer{
+		store:  store,
+		router: &Router{routes: make(map[string]map[string]Handler)},
+		logger: newTestLogger(),
+	}
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/status", nil),
+		Response: rec,
+	}
+
+	err := server.handleStatusPage(ctx)
+	if err != nil {
+		t.Fatalf("handleStatusPage failed: %v", err)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "degraded_performance") {
+		t.Errorf("Expected 'degraded_performance' in response, got: %s", body)
+	}
+}
+
+// TestHandleStatusPageHTML_StorageError tests HTML handler when store fails
+func TestHandleStatusPageHTML_StorageError(t *testing.T) {
+	store := &failingMockStorage{}
+
+	server := &RESTServer{
+		store:  store,
+		router: &Router{routes: make(map[string]map[string]Handler)},
+		logger: newTestLogger(),
+	}
+
+	rec := httptest.NewRecorder()
+	ctx := &Context{
+		Request:  httptest.NewRequest("GET", "/status-page", nil),
+		Response: rec,
+	}
+
+	err := server.handleStatusPageHTML(ctx)
+	if err != nil {
+		t.Fatalf("handleStatusPageHTML should not error: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
+	}
+}

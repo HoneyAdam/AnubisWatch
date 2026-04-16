@@ -44,7 +44,7 @@ type OIDCAuthenticator struct {
 
 type oidcState struct {
 	Email     string    `json:"email"`
-	Nonce     string    `json:"nonce"`     // CSRF protection: binds state to session
+	Nonce     string    `json:"nonce"` // CSRF protection: binds state to session
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
@@ -111,14 +111,14 @@ func NewOIDCAuthenticator(cfg core.OIDCAuth, localPath, adminEmail, adminPasswor
 		panic(fmt.Sprintf("failed to generate state HMAC key: %v", err))
 	}
 	return &OIDCAuthenticator{
-		config:  cfg,
-		local:   localAuth,
-		state:   make(map[string]*oidcState),
-		users:   make(map[string]*api.User),
-		tokens:  make(map[string]*session),
-		stopCh:  make(chan struct{}),
+		config:    cfg,
+		local:     localAuth,
+		state:     make(map[string]*oidcState),
+		users:     make(map[string]*api.User),
+		tokens:    make(map[string]*session),
+		stopCh:    make(chan struct{}),
 		stateHMAC: stateHMAC,
-		jwksTTL: 24 * time.Hour, // Cache JWKs for 24 hours
+		jwksTTL:   24 * time.Hour, // Cache JWKs for 24 hours
 	}
 }
 

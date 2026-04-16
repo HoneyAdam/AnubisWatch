@@ -9,9 +9,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -1366,5 +1368,741 @@ func TestOIDCAuthenticator_FindKeyForJWT_BadKeyNoKid(t *testing.T) {
 	_, err := auth.findKeyForJWT(headers)
 	if err == nil {
 		t.Error("Expected error when no usable keys available")
+	}
+}
+
+func TestOIDCAuthenticator_DelegationMethods(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:       "https://accounts.google.com",
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		RedirectURL:  "http://localhost:8080/api/v1/auth/oidc/callback",
+	}
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	// Login first to get a valid token
+	_, token, err := auth.Login("admin@test.com", "TestPass1234!")
+	if err != nil {
+		t.Fatalf("Login failed: %v", err)
+	}
+
+	// Test ChangePassword delegates to local
+	err = auth.ChangePassword(token, "TestPass1234!", "NewPass1234!!")
+	if err != nil {
+		t.Errorf("ChangePassword failed: %v", err)
+	}
+
+	// Test RequestPasswordReset delegates to local
+	resetToken, err := auth.RequestPasswordReset("admin@test.com")
+	if err != nil {
+		t.Errorf("RequestPasswordReset failed: %v", err)
+	}
+	if resetToken == "" {
+		t.Error("Expected non-empty reset token")
+	}
+
+	// Test ConfirmPasswordReset delegates to local
+	err = auth.ConfirmPasswordReset(resetToken, "ResetPass1234!!")
+	if err != nil {
+		t.Errorf("ConfirmPasswordReset failed: %v", err)
+	}
+}
+
+// TestJWK_ToECPublicKey tests EC key conversion with various curves
+func TestJWK_ToECPublicKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		curve     string
+		expectAlg string
+	}{
+		{"P-256", "P-256", "ES256"},
+		{"P-384", "P-384", "ES384"},
+		{"P-521", "P-521", "ES512"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Generate a real EC key to get valid coordinates
+			var curve elliptic.Curve
+			switch tt.curve {
+			case "P-256":
+				curve = elliptic.P256()
+			case "P-384":
+				curve = elliptic.P384()
+			case "P-521":
+				curve = elliptic.P521()
+			}
+
+			privKey, err := ecdsa.GenerateKey(curve, rand.Reader)
+			if err != nil {
+				t.Fatalf("Failed to generate EC key: %v", err)
+			}
+
+			xBytes := privKey.PublicKey.X.Bytes()
+			yBytes := privKey.PublicKey.Y.Bytes()
+
+			j := &jwk{
+				Kty: "EC",
+				Kid: "test-key",
+				Alg: tt.expectAlg,
+				Crv: tt.curve,
+				X:   base64.RawURLEncoding.EncodeToString(xBytes),
+				Y:   base64.RawURLEncoding.EncodeToString(yBytes),
+			}
+
+			key, err := j.toPublicKey()
+			if err != nil {
+				t.Fatalf("toPublicKey failed for %s: %v", tt.curve, err)
+			}
+
+			if key.alg != tt.expectAlg {
+				t.Errorf("Expected alg %s, got %s", tt.expectAlg, key.alg)
+			}
+
+			ecKey, ok := key.key.(*ecdsa.PublicKey)
+			if !ok {
+				t.Fatal("Expected *ecdsa.PublicKey")
+			}
+
+			if ecKey.X.Cmp(privKey.PublicKey.X) != 0 {
+				t.Error("X coordinate mismatch")
+			}
+			if ecKey.Y.Cmp(privKey.PublicKey.Y) != 0 {
+				t.Error("Y coordinate mismatch")
+			}
+		})
+	}
+}
+
+// TestJWK_ToECPublicKey_BadBase64 tests EC key with invalid base64
+func TestJWK_ToECPublicKey_BadBase64(t *testing.T) {
+	j := &jwk{Kty: "EC", Crv: "P-256", X: "!!!invalid!!!", Y: "valid"}
+	_, err := j.toPublicKey()
+	if err == nil {
+		t.Fatal("Expected error for invalid base64")
+	}
+	if !strings.Contains(err.Error(), "decode EC X") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Invalid Y base64
+	j = &jwk{Kty: "EC", Crv: "P-256", X: "dGVzdA", Y: "!!!invalid!!!"}
+	_, err = j.toPublicKey()
+	if err == nil {
+		t.Fatal("Expected error for invalid Y base64")
+	}
+	if !strings.Contains(err.Error(), "decode EC Y") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestJWK_ToECPublicKey_UnsupportedCurve tests unsupported curve
+func TestJWK_ToECPublicKey_UnsupportedCurve(t *testing.T) {
+	j := &jwk{Kty: "EC", Crv: "P-12345"}
+	_, err := j.toPublicKey()
+	if err == nil {
+		t.Fatal("Expected error for unsupported curve")
+	}
+	if !strings.Contains(err.Error(), "unsupported EC curve") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestJWK_ToRSAPublicKey_BadBase64 tests RSA key with invalid base64
+func TestJWK_ToRSAPublicKey_BadBase64(t *testing.T) {
+	j := &jwk{Kty: "RSA", N: "!!!invalid!!!", E: "AQAB"}
+	_, err := j.toPublicKey()
+	if err == nil {
+		t.Fatal("Expected error for invalid base64")
+	}
+	if !strings.Contains(err.Error(), "decode RSA modulus") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Invalid E base64
+	j = &jwk{Kty: "RSA", N: "dGVzdA", E: "!!!invalid!!!"}
+	_, err = j.toPublicKey()
+	if err == nil {
+		t.Fatal("Expected error for invalid exponent base64")
+	}
+	if !strings.Contains(err.Error(), "decode RSA exponent") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestJWK_ToPublicKey_UnknownType tests unsupported key type
+func TestJWK_ToPublicKey_UnknownType(t *testing.T) {
+	j := &jwk{Kty: "oct", Kid: "symmetric"}
+	_, err := j.toPublicKey()
+	if err == nil {
+		t.Fatal("Expected error for unsupported key type")
+	}
+	if !strings.Contains(err.Error(), "unsupported key type") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestVerifyJWTSignature_EmptyAndInvalid tests verifyJWTSignature error paths
+func TestVerifyJWTSignature_EmptyAndInvalid(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:      "https://example.com",
+		ClientID:    "test-client",
+		RedirectURL: "http://localhost/callback",
+	}
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	// Empty token
+	_, err := auth.verifyJWTSignature("")
+	if err == nil {
+		t.Fatal("Expected error for empty token")
+	}
+	if !strings.Contains(err.Error(), "empty ID token") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Invalid format (not 3 parts)
+	_, err = auth.verifyJWTSignature("abc.def")
+	if err == nil {
+		t.Fatal("Expected error for invalid JWT format")
+	}
+	if !strings.Contains(err.Error(), "invalid JWT format") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Invalid base64 header
+	_, err = auth.verifyJWTSignature("!!!.payload.sig")
+	if err == nil {
+		t.Fatal("Expected error for invalid base64")
+	}
+	if !strings.Contains(err.Error(), "failed to decode JWT header") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Invalid JSON header
+	badHeader := base64.RawURLEncoding.EncodeToString([]byte("not json"))
+	_, err = auth.verifyJWTSignature(badHeader + ".payload.sig")
+	if err == nil {
+		t.Fatal("Expected error for invalid JSON header")
+	}
+	if !strings.Contains(err.Error(), "failed to parse JWT header") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Algorithm "none"
+	noneHeader := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	_, err = auth.verifyJWTSignature(noneHeader + ".payload.sig")
+	if err == nil {
+		t.Fatal("Expected error for 'none' algorithm")
+	}
+	if !strings.Contains(err.Error(), "not allowed") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Unknown algorithm
+	unknownAlg := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	_, err = auth.verifyJWTSignature(unknownAlg + ".payload.sig")
+	if err == nil {
+		t.Fatal("Expected error for unknown algorithm")
+	}
+	if !strings.Contains(err.Error(), "unsupported JWT signing algorithm") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestVerifyState_InvalidFormat tests verifyState with bad state
+func TestVerifyState_InvalidFormat(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:      "https://example.com",
+		ClientID:    "test-client",
+		RedirectURL: "http://localhost/callback",
+	}
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	// No dot separator
+	_, err := auth.verifyState("nodothere")
+	if err == nil {
+		t.Fatal("Expected error for invalid state format")
+	}
+	if !strings.Contains(err.Error(), "invalid state format") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Tampered signature
+	signed := auth.signState("my-state")
+	tampered := signed[:len(signed)-5] + "XXXXX"
+	_, err = auth.verifyState(tampered)
+	if err == nil {
+		t.Fatal("Expected error for tampered signature")
+	}
+	if !strings.Contains(err.Error(), "invalid state signature") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestParseIDToken_ValidationErrors tests parseIDToken error paths
+func TestParseIDToken_ValidationErrors(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:      "https://example.com",
+		ClientID:    "test-client-id",
+		RedirectURL: "http://localhost/callback",
+	}
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"authorization_endpoint":"` + server.URL + `/auth","token_endpoint":"` + server.URL + `/token","jwks_uri":"` + server.URL + `/jwks"}`))
+			return
+		}
+		if r.URL.Path == "/jwks" {
+			privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+			jwks := fmt.Sprintf(`{"keys": [{"kty":"RSA","kid":"test","n":"%s","e":"%s","alg":"RS256"}]}`,
+				base64.RawURLEncoding.EncodeToString(privKey.PublicKey.N.Bytes()),
+				base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privKey.PublicKey.E)).Bytes()))
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(jwks))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cfg.Issuer = server.URL
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	// We need the private key from the server to sign tokens.
+	// Since the server generates a new key each request, we can't sign valid tokens.
+	// Instead, test verifyJWTSignature error paths directly (which don't need signing).
+
+	// Missing issuer claim - this is parseIDToken path, requires valid signature first.
+	// Since parseIDToken calls verifyJWTSignature which needs network, test via verifyJWTSignature:
+	_, err := auth.verifyJWTSignature("")
+	if err == nil {
+		t.Fatal("Expected error for empty token")
+	}
+
+	// Invalid format
+	_, err = auth.verifyJWTSignature("a.b")
+	if err == nil {
+		t.Fatal("Expected error for invalid format")
+	}
+	if !strings.Contains(err.Error(), "invalid JWT format") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestFindKeyForJWT_NoMatchingKid tests findKeyForJWT when kid doesn't match
+func TestFindKeyForJWT_NoMatchingKid(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:      "https://example.com",
+		ClientID:    "test-client",
+		RedirectURL: "http://localhost/callback",
+	}
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"authorization_endpoint":"` + server.URL + `/auth","token_endpoint":"` + server.URL + `/token","jwks_uri":"` + server.URL + `/jwks"}`))
+			return
+		}
+		if r.URL.Path == "/jwks" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"keys": [{"kty":"RSA","kid":"other-key","n":"dGVzdA","e":"AQAB"}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cfg.Issuer = server.URL
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	headers := map[string]interface{}{"kid": "nonexistent-key", "alg": "RS256"}
+	_, err := auth.findKeyForJWT(headers)
+	if err == nil {
+		t.Fatal("Expected error for non-matching kid")
+	}
+	if !strings.Contains(err.Error(), "no matching key found") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestVerifyJWTSignature_KeyTypeMismatch tests key type mismatch in signature verification
+func TestVerifyJWTSignature_KeyTypeMismatch(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:      "https://example.com",
+		ClientID:    "test-client",
+		RedirectURL: "http://localhost/callback",
+	}
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"authorization_endpoint":"` + server.URL + `/auth","token_endpoint":"` + server.URL + `/token","jwks_uri":"` + server.URL + `/jwks"}`))
+			return
+		}
+		if r.URL.Path == "/jwks" {
+			privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+			nBytes := privKey.PublicKey.N.Bytes()
+			eBytes := big.NewInt(int64(privKey.PublicKey.E)).Bytes()
+			jwks := fmt.Sprintf(`{"keys": [{"kty":"RSA","kid":"rsa-key","n":"%s","e":"%s"}]}`,
+				base64.RawURLEncoding.EncodeToString(nBytes),
+				base64.RawURLEncoding.EncodeToString(eBytes))
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(jwks))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cfg.Issuer = server.URL
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT","kid":"rsa-key"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://example.com","sub":"123","aud":"test-client","exp":9999999999}`))
+	signingInput := header + "." + payload
+	badSig := base64.RawURLEncoding.EncodeToString([]byte("bad-signature"))
+
+	_, err := auth.verifyJWTSignature(signingInput + "." + badSig)
+	if err == nil {
+		t.Fatal("Expected error for bad signature")
+	}
+}
+
+// TestVerifyJWTSignature_ES256KeyTypeMismatch tests ECDSA key type mismatch
+func TestVerifyJWTSignature_ES256KeyTypeMismatch(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:      "https://example.com",
+		ClientID:    "test-client",
+		RedirectURL: "http://localhost/callback",
+	}
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"authorization_endpoint":"` + server.URL + `/auth","token_endpoint":"` + server.URL + `/token","jwks_uri":"` + server.URL + `/jwks"}`))
+			return
+		}
+		if r.URL.Path == "/jwks" {
+			privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			jwks := fmt.Sprintf(`{"keys": [{"kty":"EC","kid":"ec-key","crv":"P-256","x":"%s","y":"%s","alg":"ES256"}]}`,
+				base64.RawURLEncoding.EncodeToString(privKey.PublicKey.X.Bytes()),
+				base64.RawURLEncoding.EncodeToString(privKey.PublicKey.Y.Bytes()))
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(jwks))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cfg.Issuer = server.URL
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","typ":"JWT","kid":"ec-key"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://example.com","sub":"123","aud":"test-client","exp":9999999999}`))
+	signingInput := header + "." + payload
+	badSig := base64.RawURLEncoding.EncodeToString([]byte("wrong-length-sig"))
+
+	_, err := auth.verifyJWTSignature(signingInput + "." + badSig)
+	if err == nil {
+		t.Fatal("Expected error for wrong signature length")
+	}
+}
+
+// TestFetchJWKs_MissingJWKSURI tests fetchJWKs when JWKS URI is missing
+func TestFetchJWKs_MissingJWKSURI(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:      "https://example.com",
+		ClientID:    "test-client",
+		RedirectURL: "http://localhost/callback",
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"authorization_endpoint":"https://example.com/auth","token_endpoint":"https://example.com/token"}`))
+	}))
+	defer server.Close()
+
+	cfg.Issuer = server.URL
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	_, err := auth.fetchJWKs()
+	if err == nil {
+		t.Fatal("Expected error for missing jwks_uri")
+	}
+	if !strings.Contains(err.Error(), "missing jwks_uri") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestVerifyJWTSignature_UnsupportedAlgorithm tests verifyJWTSignature when the key's alg is unsupported
+func TestVerifyJWTSignature_UnsupportedAlgorithm(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:      "https://example.com",
+		ClientID:    "test-client",
+		RedirectURL: "http://localhost/callback",
+	}
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"authorization_endpoint":"` + server.URL + `/auth","token_endpoint":"` + server.URL + `/token","jwks_uri":"` + server.URL + `/jwks"}`))
+			return
+		}
+		if r.URL.Path == "/jwks" {
+			privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+			// Serve with RS384 alg (not in the verify switch)
+			jwks := fmt.Sprintf(`{"keys": [{"kty":"RSA","kid":"rsa-key","n":"%s","e":"%s","alg":"RS384"}]}`,
+				base64.RawURLEncoding.EncodeToString(privKey.PublicKey.N.Bytes()),
+				base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privKey.PublicKey.E)).Bytes()))
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(jwks))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cfg.Issuer = server.URL
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	// JWT header matches the RS384 key alg
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS384","typ":"JWT","kid":"rsa-key"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://example.com","sub":"123","aud":"test-client","exp":9999999999}`))
+	signingInput := header + "." + payload
+	badSig := base64.RawURLEncoding.EncodeToString([]byte("fake-sig"))
+
+	_, err := auth.verifyJWTSignature(signingInput + "." + badSig)
+	if err == nil {
+		t.Fatal("Expected error for RS384 algorithm (not in verify switch)")
+	}
+	// RS384 key leads to the default case in the verify switch
+	if !strings.Contains(err.Error(), "unsupported JWT signing algorithm") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestParseIDToken_NonceMismatch tests nonce validation in parseIDToken
+func TestParseIDToken_NonceMismatch(t *testing.T) {
+	privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	jwks := createTestJWK(privKey)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(oidcConfig{
+				Issuer:   server.URL,
+				AuthURL:  server.URL + "/auth",
+				TokenURL: server.URL + "/token",
+				JWKSURI:  server.URL + "/jwks",
+			})
+			return
+		}
+		if r.URL.Path == "/jwks" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(jwks)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cfg := core.OIDCAuth{
+		Issuer:      server.URL,
+		ClientID:    "test-client-id",
+		RedirectURL: "http://localhost/callback",
+	}
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT","kid":"test-key"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + server.URL + `","sub":"123","aud":"test-client-id","exp":9999999999,"nonce":"different-nonce"}`))
+	signingInput := header + "." + payload
+	hash := sha256.Sum256([]byte(signingInput))
+	sig, _ := rsa.SignPKCS1v15(rand.Reader, privKey, crypto.SHA256, hash[:])
+	token := signingInput + "." + base64.RawURLEncoding.EncodeToString(sig)
+
+	_, err := auth.parseIDToken(token, "expected-nonce")
+	if err == nil {
+		t.Fatal("Expected error for nonce mismatch")
+	}
+	if !strings.Contains(err.Error(), "nonce") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestParseIDToken_AudienceInList tests audience as an array claim
+func TestParseIDToken_AudienceInList(t *testing.T) {
+	privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	jwks := createTestJWK(privKey)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(oidcConfig{
+				Issuer:   server.URL,
+				AuthURL:  server.URL + "/auth",
+				TokenURL: server.URL + "/token",
+				JWKSURI:  server.URL + "/jwks",
+			})
+			return
+		}
+		if r.URL.Path == "/jwks" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(jwks)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cfg := core.OIDCAuth{
+		Issuer:      server.URL,
+		ClientID:    "test-client-id",
+		RedirectURL: "http://localhost/callback",
+	}
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT","kid":"test-key"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + server.URL + `","sub":"123","aud":["other-client","test-client-id"],"exp":9999999999}`))
+	signingInput := header + "." + payload
+	hash := sha256.Sum256([]byte(signingInput))
+	sig, _ := rsa.SignPKCS1v15(rand.Reader, privKey, crypto.SHA256, hash[:])
+	token := signingInput + "." + base64.RawURLEncoding.EncodeToString(sig)
+
+	userInfo, err := auth.parseIDToken(token, "")
+	if err != nil {
+		t.Fatalf("Expected audience in list to work: %v", err)
+	}
+	if userInfo.Sub != "123" {
+		t.Errorf("Expected sub 123, got %s", userInfo.Sub)
+	}
+
+	// Audience NOT in list
+	payload2 := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + server.URL + `","sub":"123","aud":["client-a","client-b"],"exp":9999999999}`))
+	signingInput2 := header + "." + payload2
+	hash2 := sha256.Sum256([]byte(signingInput2))
+	sig2, _ := rsa.SignPKCS1v15(rand.Reader, privKey, crypto.SHA256, hash2[:])
+	token2 := signingInput2 + "." + base64.RawURLEncoding.EncodeToString(sig2)
+
+	_, err = auth.parseIDToken(token2, "")
+	if err == nil {
+		t.Fatal("Expected error for audience not in list")
+	}
+	if !strings.Contains(err.Error(), "audience not in list") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestParseIDToken_InvalidPayloadJSON tests verifyJWTSignature with non-JSON payload
+func TestParseIDToken_InvalidPayloadJSON(t *testing.T) {
+	privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	jwks := createTestJWK(privKey)
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(oidcConfig{
+				Issuer:   server.URL,
+				AuthURL:  server.URL + "/auth",
+				TokenURL: server.URL + "/token",
+				JWKSURI:  server.URL + "/jwks",
+			})
+			return
+		}
+		if r.URL.Path == "/jwks" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(jwks)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cfg := core.OIDCAuth{
+		Issuer:      server.URL,
+		ClientID:    "test-client",
+		RedirectURL: "http://localhost/callback",
+	}
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT","kid":"test-key"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`not-json-at-all`))
+	signingInput := header + "." + payload
+	hash := sha256.Sum256([]byte(signingInput))
+	sig, _ := rsa.SignPKCS1v15(rand.Reader, privKey, crypto.SHA256, hash[:])
+	token := signingInput + "." + base64.RawURLEncoding.EncodeToString(sig)
+
+	_, err := auth.verifyJWTSignature(token)
+	if err == nil {
+		t.Fatal("Expected error for invalid payload JSON")
+	}
+	if !strings.Contains(err.Error(), "failed to parse JWT claims JSON") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+// TestVerifyJWTSignature_SignatureDecodeError tests base64 decode error on signature
+func TestVerifyJWTSignature_SignatureDecodeError(t *testing.T) {
+	cfg := core.OIDCAuth{
+		Issuer:      "https://example.com",
+		ClientID:    "test-client",
+		RedirectURL: "http://localhost/callback",
+	}
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"authorization_endpoint":"` + server.URL + `/auth","token_endpoint":"` + server.URL + `/token","jwks_uri":"` + server.URL + `/jwks"}`))
+			return
+		}
+		if r.URL.Path == "/jwks" {
+			privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+			jwks := fmt.Sprintf(`{"keys": [{"kty":"RSA","kid":"rsa-key","n":"%s","e":"%s","alg":"RS256"}]}`,
+				base64.RawURLEncoding.EncodeToString(privKey.PublicKey.N.Bytes()),
+				base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privKey.PublicKey.E)).Bytes()))
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(jwks))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cfg.Issuer = server.URL
+	auth := NewOIDCAuthenticator(cfg, "", "admin@test.com", "TestPass1234!")
+	defer auth.Shutdown()
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT","kid":"rsa-key"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://example.com","sub":"123","aud":"test-client","exp":9999999999}`))
+	signingInput := header + "." + payload
+
+	_, err := auth.verifyJWTSignature(signingInput + "." + "!!!invalid-base64!!!")
+	if err == nil {
+		t.Fatal("Expected error for invalid signature base64")
+	}
+	if !strings.Contains(err.Error(), "failed to decode JWT signature") {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }

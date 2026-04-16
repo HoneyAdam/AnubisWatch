@@ -816,6 +816,8 @@ func TestShowJudgments_EmptySouls(t *testing.T) {
 
 func TestVerdictTest_ConnectionError(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Setenv("ANUBIS_HOST", "127.0.0.1")
+		os.Setenv("ANUBIS_PORT", "65535")
 		os.Setenv("ANUBIS_API_TOKEN", "test-token")
 		os.Args = []string{"anubis", "verdict", "test", "slack"}
 		verdictTest()
@@ -833,6 +835,8 @@ func TestVerdictTest_ConnectionError(t *testing.T) {
 
 func TestVerdictHistory_ConnectionError(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Setenv("ANUBIS_HOST", "127.0.0.1")
+		os.Setenv("ANUBIS_PORT", "65535")
 		os.Setenv("ANUBIS_API_TOKEN", "test-token")
 		os.Args = []string{"anubis", "verdict", "history"}
 		verdictHistory()
@@ -876,6 +880,8 @@ func TestVerdictHistory_ParseError(t *testing.T) {
 
 func TestVerdictAck_ConnectionError(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Setenv("ANUBIS_HOST", "127.0.0.1")
+		os.Setenv("ANUBIS_PORT", "65535")
 		os.Setenv("ANUBIS_API_TOKEN", "test-token")
 		os.Args = []string{"anubis", "verdict", "ack", "inc-123"}
 		verdictAck()
@@ -893,6 +899,8 @@ func TestVerdictAck_ConnectionError(t *testing.T) {
 
 func TestJudgeSingle_ConnectionError(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		os.Setenv("ANUBIS_HOST", "127.0.0.1")
+		os.Setenv("ANUBIS_PORT", "65535")
 		os.Setenv("ANUBIS_API_TOKEN", "test-token")
 		judgeSingle("some-soul")
 		return

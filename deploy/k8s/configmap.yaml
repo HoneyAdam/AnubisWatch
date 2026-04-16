@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: anubiswatch-config
+  namespace: anubiswatch
+data:
+  anubis.yaml: |
+    server:
+      port: 8080
+      tls: false
+      dashboard_enabled: true
+      cors_origins: ["*"]
+
+    auth:
+      type: local
+      admin_email: admin@anubiswatch.local
+      session_ttl: 24h
+
+    storage:
+      data_dir: /data
+      encryption_enabled: false
+
+    probe:
+      max_concurrent: 100
+      queue_size: 1000
+      timeout_multiplier: 1.5
+      default_interval: 60s
+
+    raft:
+      enabled: false
+      bind_addr: "0.0.0.0:7946"
+      advertise_addr: ""
+      peers: []
+
+    alert:
+      default_channels: []
+      throttle_interval: 5m
+      max_retries: 3
+
+    logging:
+      level: info
+      format: json

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"html"
 	"net/http"
 	"time"
 
@@ -155,7 +156,7 @@ func (s *RESTServer) handleStatusPageHTML(ctx *Context) error {
 	// Get status data
 	souls, _ := s.store.ListSoulsNoCtx("default", 0, 10000)
 
-	html := `<!DOCTYPE html>
+	htmlOut := `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -261,7 +262,7 @@ func (s *RESTServer) handleStatusPageHTML(ctx *Context) error {
 		statusText = "Degraded Performance"
 	}
 
-	html += `<div class="status-badge ` + statusClass + `">` + statusText + `</div>
+	htmlOut += `<div class="status-badge ` + statusClass + `">` + statusText + `</div>
         </div>
         <div class="components">`
 
@@ -284,10 +285,10 @@ func (s *RESTServer) handleStatusPageHTML(ctx *Context) error {
 			}
 		}
 
-		html += `<div class="component">
+		htmlOut += `<div class="component">
             <div>
-                <div class="component-name">` + soul.Name + `</div>
-                <div class="component-target">` + soul.Target + `</div>
+                <div class="component-name">` + html.EscapeString(soul.Name) + `</div>
+                <div class="component-target">` + html.EscapeString(soul.Target) + `</div>
             </div>
             <div class="component-status">
                 <div class="status-dot ` + dotClass + `"></div>
@@ -296,7 +297,7 @@ func (s *RESTServer) handleStatusPageHTML(ctx *Context) error {
         </div>`
 	}
 
-	html += `</div>
+	htmlOut += `</div>
         <div class="footer">
             <p>Powered by AnubisWatch - The Judgment Never Sleeps</p>
             <p>Last updated: ` + time.Now().Format(time.RFC3339) + `</p>
@@ -306,6 +307,6 @@ func (s *RESTServer) handleStatusPageHTML(ctx *Context) error {
 </html>`
 
 	ctx.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
-	ctx.Response.Write([]byte(html))
+	ctx.Response.Write([]byte(htmlOut))
 	return nil
 }

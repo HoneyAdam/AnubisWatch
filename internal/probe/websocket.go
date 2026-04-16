@@ -106,6 +106,12 @@ func (c *WebSocketChecker) Judge(ctx context.Context, soul *core.Soul) (*core.Ju
 			InsecureSkipVerify: cfg.InsecureSkipVerify, // Default: false (secure)
 			ServerName:         u.Hostname(),
 		}
+		// Pre-resolve hostname and validate with SSRF validator before connecting.
+		// tls.DialWithDialer resolves internally, so we validate first to prevent
+		// DNS rebinding attacks.
+		if err := DefaultValidator.ValidateTarget(soul.Target); err != nil {
+			return failJudgment(soul, fmt.Errorf("SSRF validation failed: %v", err)), nil
+		}
 		conn, err = tls.DialWithDialer(dialer, "tcp", host, tlsConfig)
 	} else {
 		conn, err = dialCtx(context.Background(), "tcp", host)

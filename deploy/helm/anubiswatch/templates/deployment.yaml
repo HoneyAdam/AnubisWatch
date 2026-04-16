@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "anubiswatch.fullname" . }}
+  labels:
+    {{- include "anubiswatch.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "anubiswatch.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "anubiswatch.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "anubiswatch.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.httpPort }}
+              protocol: TCP
+            - name: grpc
+              containerPort: {{ .Values.service.grpcPort }}
+              protocol: TCP
+            {{- if .Values.config.raft.enabled }}
+            - name: raft
+              containerPort: {{ .Values.service.clusterPort }}
+              protocol: TCP
+            {{- end }}
+          env:
+            - name: ANUBIS_CONFIG
+              value: /etc/anubis/anubis.yaml
+            - name: ANUBIS_DATA_DIR
+              value: /data
+            - name: ANUBIS_LOG_LEVEL
+              value: {{ .Values.config.logging.level }}
+            - name: ANUBIS_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "anubiswatch.fullname" . }}-secrets
+                  key: admin-password
+            {{- if .Values.secrets.encryptionKey }}
+            - name: ANUBIS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "anubiswatch.fullname" . }}-secrets
+                  key: encryption-key
+            {{- end }}
+            {{- if .Values.secrets.clusterSecret }}
+            - name: ANUBIS_CLUSTER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "anubiswatch.fullname" . }}-secrets
+                  key: cluster-secret
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/anubis
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "anubiswatch.fullname" . }}-config
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "anubiswatch.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

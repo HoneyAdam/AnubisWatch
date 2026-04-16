@@ -1,56 +1,35 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "anubiswatch.configName" . }}
+  name: {{ include "anubiswatch.fullname" . }}-config
   labels:
     {{- include "anubiswatch.labels" . | nindent 4 }}
 data:
   anubis.yaml: |
-    data_dir: {{ .Values.config.dataDir }}
-    log_level: {{ .Values.config.logLevel }}
-
     server:
-      bind_addr: {{ .Values.config.server.bindAddr }}
-      {{- if .Values.config.server.tls.enabled }}
-      tls:
-        cert_file: {{ .Values.config.server.tls.certFile }}
-        key_file: {{ .Values.config.server.tls.keyFile }}
-      {{- end }}
+      port: {{ .Values.config.server.port }}
+      tls: {{ .Values.config.server.tls }}
+      dashboard_enabled: {{ .Values.config.server.dashboard_enabled }}
+      cors_origins: {{ .Values.config.server.cors_origins | toJson }}
 
-    {{- if .Values.config.raft.enabled }}
-    raft:
-      enabled: true
-      bind_addr: {{ .Values.config.raft.bindAddr }}
-      {{- if .Values.config.raft.advertiseAddr }}
-      advertise_addr: {{ .Values.config.raft.advertiseAddr }}
-      {{- end }}
-      election_timeout: {{ .Values.config.raft.electionTimeout }}
-      heartbeat_timeout: {{ .Values.config.raft.heartbeatTimeout }}
-    {{- end }}
+    auth:
+      type: {{ .Values.config.auth.type }}
+      admin_email: {{ .Values.config.auth.admin_email }}
+      session_ttl: {{ .Values.config.auth.session_ttl }}
 
     storage:
-      path: {{ .Values.config.storage.path }}
-      retention_days: {{ .Values.config.storage.retentionDays }}
+      data_dir: {{ .Values.config.storage.data_dir }}
+      encryption_enabled: {{ .Values.config.storage.encryption_enabled }}
 
-    {{- if .Values.config.alerts.enabled }}
-    alerts:
-      enabled: true
-      {{- if .Values.config.alerts.smtp.enabled }}
-      smtp:
-        host: {{ .Values.config.alerts.smtp.host }}
-        port: {{ .Values.config.alerts.smtp.port }}
-        username: {{ .Values.config.alerts.smtp.username }}
-        from: {{ .Values.config.alerts.smtp.from }}
-      {{- end }}
-      {{- if .Values.config.alerts.webhook.enabled }}
-      webhook:
-        url: {{ .Values.config.alerts.webhook.url }}
-      {{- end }}
-    {{- end }}
+    probe:
+      max_concurrent: {{ .Values.config.probe.max_concurrent }}
+      queue_size: {{ .Values.config.probe.queue_size }}
+      timeout_multiplier: {{ .Values.config.probe.timeout_multiplier }}
+      default_interval: {{ .Values.config.probe.default_interval }}
 
-    {{- if .Values.config.acme.enabled }}
-    acme:
-      enabled: true
-      email: {{ .Values.config.acme.email }}
-      provider: {{ .Values.config.acme.provider }}
-    {{- end }}
+    raft:
+      enabled: {{ .Values.config.raft.enabled }}
+
+    logging:
+      level: {{ .Values.config.logging.level }}
+      format: {{ .Values.config.logging.format }}
