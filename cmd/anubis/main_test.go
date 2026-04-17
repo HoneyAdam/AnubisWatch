@@ -26,6 +26,19 @@ import (
 	"github.com/AnubisWatch/anubiswatch/internal/storage"
 )
 
+// TestMain sets up the test environment for all tests in the package
+func TestMain(m *testing.M) {
+	// Set a default data dir for tests to avoid permission issues in CI
+	if os.Getenv("ANUBIS_DATA_DIR") == "" {
+		tmpDir, err := os.MkdirTemp("", "anubis-test-*")
+		if err == nil {
+			os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+			defer os.RemoveAll(tmpDir)
+		}
+	}
+	os.Exit(m.Run())
+}
+
 func TestPrintUsage(t *testing.T) {
 	// Capture stdout
 	oldStdout := os.Stdout
