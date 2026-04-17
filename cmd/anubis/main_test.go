@@ -33,7 +33,13 @@ func init() {
 		tmpDir, err := os.MkdirTemp("", "anubis-test-*")
 		if err == nil {
 			os.Setenv("ANUBIS_DATA_DIR", tmpDir)
+			// Debug: print to stderr so we can see it in test output
+			fmt.Fprintf(os.Stderr, "DEBUG: Set ANUBIS_DATA_DIR=%s\n", tmpDir)
+		} else {
+			fmt.Fprintf(os.Stderr, "DEBUG: Failed to create temp dir: %v\n", err)
 		}
+	} else {
+		fmt.Fprintf(os.Stderr, "DEBUG: ANUBIS_DATA_DIR already set: %s\n", os.Getenv("ANUBIS_DATA_DIR"))
 	}
 }
 
