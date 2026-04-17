@@ -459,6 +459,10 @@ func TestInitConfig_Success(t *testing.T) {
 	os.Chdir(tmpDir)
 	defer os.Chdir(oldDir)
 
+	// Set temporary data dir to avoid permission issues
+	os.Setenv("ANUBIS_DATA_DIR", filepath.Join(tmpDir, "data"))
+	defer os.Unsetenv("ANUBIS_DATA_DIR")
+
 	// Remove any existing config
 	configPath := filepath.Join(tmpDir, "test_config.json")
 
