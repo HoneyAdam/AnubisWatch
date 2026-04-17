@@ -664,6 +664,11 @@ func (n *Node) transitionToFinalConfig(change core.MembershipChange, jointIndex 
 
 // replicateLog triggers log replication to all peers
 func (n *Node) replicateLog() {
+	// Guard against nil transport in test scenarios
+	if n.transport == nil {
+		return
+	}
+
 	n.peerMu.RLock()
 	peers := make([]*Peer, 0, len(n.peers))
 	for _, p := range n.peers {
@@ -876,6 +881,13 @@ func (n *Node) requestPreVotes(term, lastLogIndex, lastLogTerm uint64, peers []*
 	var preVotesGranted atomic.Int32
 	preVotesGranted.Add(1) // Vote for self
 
+	// Skip peer RPCs if transport is nil (test scenarios)
+	if n.transport == nil {
+		// With no transport, just count self-vote
+		needed := len(peers)/2 + 1
+		return int(preVotesGranted.Load()) >= needed
+	}
+
 	var wg sync.WaitGroup
 	for _, peer := range peers {
 		wg.Add(1)
@@ -943,6 +955,11 @@ func (n *Node) requestPreVotes(term, lastLogIndex, lastLogTerm uint64, peers []*
 func (n *Node) requestVotes(term, lastLogIndex, lastLogTerm uint64, peers []*Peer) int32 {
 	var votesGranted atomic.Int32
 	votesGranted.Add(1) // Vote for self
+
+	// Skip peer RPCs if transport is nil (test scenarios)
+	if n.transport == nil {
+		return votesGranted.Load() // Return just self-vote
+	}
 
 	var wg sync.WaitGroup
 	for _, peer := range peers {
@@ -1044,6 +1061,11 @@ func (n *Node) becomeFollower(term uint64) {
 
 // sendHeartbeats sends heartbeats to all peers
 func (n *Node) sendHeartbeats() {
+	// Guard against nil transport in test scenarios
+	if n.transport == nil {
+		return
+	}
+
 	n.peerMu.RLock()
 	peers := make([]*Peer, 0, len(n.peers))
 	for _, p := range n.peers {
