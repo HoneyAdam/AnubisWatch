@@ -42,6 +42,11 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Create test directories
+        run: |
+          mkdir -p /tmp/anubis-data
+          chmod 700 /tmp/anubis-data
+
       - name: Run tests with coverage
         run: go test -coverprofile=coverage.out -covermode=atomic ./...
         env:
@@ -138,8 +143,11 @@ jobs:
 
       - name: Test binary
         run: |
+          mkdir -p /tmp/anubis-data
           ./anubis version
-          ./anubis init
+          ANUBIS_DATA_DIR=/tmp/anubis-data ./anubis init
+        env:
+          ANUBIS_DATA_DIR: /tmp/anubis-data
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -246,9 +254,13 @@ jobs:
 
       - name: Start server
         run: |
+          mkdir -p /tmp/anubis-data
           ./anubis init
           ./anubis serve --single &
           sleep 5
+        env:
+          ANUBIS_DATA_DIR: /tmp/anubis-data
+          ANUBIS_CONFIG: /tmp/anubis-test.json
 
       - name: Run integration tests
         run: go test -v -tags=integration ./internal/api/... ./internal/probe/...
