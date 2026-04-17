@@ -17,6 +17,9 @@ import (
 
 var startTime = time.Now()
 
+// testDataDir is set by init() in main_test.go to provide a default test directory
+var testDataDir string
+
 // openLocalStorage opens storage directly for CLI operations
 func openLocalStorage() (*storage.CobaltDB, error) {
 	dataDir := getDataDir()
@@ -33,8 +36,13 @@ func openLocalStorage() (*storage.CobaltDB, error) {
 }
 
 func getDataDir() string {
+	// Check environment variable first
 	if dir := os.Getenv("ANUBIS_DATA_DIR"); dir != "" {
 		return dir
+	}
+	// Check test default (set by main_test.go init)
+	if testDataDir != "" {
+		return testDataDir
 	}
 	switch runtime.GOOS {
 	case "windows":

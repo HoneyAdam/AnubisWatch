@@ -28,18 +28,17 @@ import (
 
 // init sets up the test environment before any tests run
 func init() {
-	// Set a default data dir for tests to avoid permission issues in CI
-	if os.Getenv("ANUBIS_DATA_DIR") == "" {
-		tmpDir, err := os.MkdirTemp("", "anubis-test-*")
-		if err == nil {
+	// Create a default temp dir for tests to avoid permission issues in CI
+	tmpDir, err := os.MkdirTemp("", "anubis-test-*")
+	if err == nil {
+		testDataDir = tmpDir
+		// Also set the environment variable for tests that check it
+		if os.Getenv("ANUBIS_DATA_DIR") == "" {
 			os.Setenv("ANUBIS_DATA_DIR", tmpDir)
-			// Debug: print to stderr so we can see it in test output
-			fmt.Fprintf(os.Stderr, "DEBUG: Set ANUBIS_DATA_DIR=%s\n", tmpDir)
-		} else {
-			fmt.Fprintf(os.Stderr, "DEBUG: Failed to create temp dir: %v\n", err)
 		}
+		fmt.Fprintf(os.Stderr, "DEBUG: Set testDataDir=%s\n", tmpDir)
 	} else {
-		fmt.Fprintf(os.Stderr, "DEBUG: ANUBIS_DATA_DIR already set: %s\n", os.Getenv("ANUBIS_DATA_DIR"))
+		fmt.Fprintf(os.Stderr, "DEBUG: Failed to create temp dir: %v\n", err)
 	}
 }
 
