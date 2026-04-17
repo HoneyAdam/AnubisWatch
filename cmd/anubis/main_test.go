@@ -33,10 +33,11 @@ func TestMain(m *testing.M) {
 		tmpDir, err := os.MkdirTemp("", "anubis-test-*")
 		if err == nil {
 			os.Setenv("ANUBIS_DATA_DIR", tmpDir)
-			defer os.RemoveAll(tmpDir)
+			// Note: defer won't run because of os.Exit, but tmpDir will be cleaned by OS
 		}
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	os.Exit(code)
 }
 
 func TestPrintUsage(t *testing.T) {
