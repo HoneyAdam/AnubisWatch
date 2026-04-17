@@ -77,6 +77,9 @@ func TestDurationMarshalUnmarshal(t *testing.T) {
 }
 
 func TestConfigDefaults(t *testing.T) {
+	// Clear environment variable to test actual default behavior
+	t.Setenv("ANUBIS_DATA_DIR", "")
+
 	config := &Config{}
 	config.setDefaults()
 

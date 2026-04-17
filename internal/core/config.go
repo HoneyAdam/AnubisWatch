@@ -147,7 +147,12 @@ func (c *Config) setDefaults() {
 
 	// Storage defaults
 	if c.Storage.Path == "" {
-		c.Storage.Path = "/var/lib/anubis/data"
+		// Check environment variable first
+		if envDir := os.Getenv("ANUBIS_DATA_DIR"); envDir != "" {
+			c.Storage.Path = envDir
+		} else {
+			c.Storage.Path = "/var/lib/anubis/data"
+		}
 	}
 
 	// Time series defaults
