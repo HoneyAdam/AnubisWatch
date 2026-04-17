@@ -407,6 +407,11 @@ func isPortInUse(port int) bool {
 }
 
 func getDefaultDataDir() string {
+	// Check environment variable override first
+	if dir := os.Getenv("ANUBIS_DATA_DIR"); dir != "" {
+		return dir
+	}
+
 	switch runtime.GOOS {
 	case "windows":
 		appData := os.Getenv("APPDATA")
