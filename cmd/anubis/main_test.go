@@ -4056,6 +4056,10 @@ func TestInitSimpleWithPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := tmpDir + "/test-config.json"
 
+	// Set temporary data dir to avoid permission issues
+	os.Setenv("ANUBIS_DATA_DIR", filepath.Join(tmpDir, "data"))
+	defer os.Unsetenv("ANUBIS_DATA_DIR")
+
 	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
