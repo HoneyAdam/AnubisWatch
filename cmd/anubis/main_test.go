@@ -26,18 +26,15 @@ import (
 	"github.com/AnubisWatch/anubiswatch/internal/storage"
 )
 
-// TestMain sets up the test environment for all tests in the package
-func TestMain(m *testing.M) {
+// init sets up the test environment before any tests run
+func init() {
 	// Set a default data dir for tests to avoid permission issues in CI
 	if os.Getenv("ANUBIS_DATA_DIR") == "" {
 		tmpDir, err := os.MkdirTemp("", "anubis-test-*")
 		if err == nil {
 			os.Setenv("ANUBIS_DATA_DIR", tmpDir)
-			// Note: defer won't run because of os.Exit, but tmpDir will be cleaned by OS
 		}
 	}
-	code := m.Run()
-	os.Exit(code)
 }
 
 func TestPrintUsage(t *testing.T) {
