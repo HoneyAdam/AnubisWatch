@@ -323,13 +323,10 @@ jobs:
         with:
           sarif_file: gosec.sarif
 
-      - name: Create go.list for Nancy
-        run: go list -json -m all > go.list
-
-      - name: Run Nancy vulnerability scan
-        uses: sonatype-nexus-community/nancy-github-action@main
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@v1
         with:
-          nancyVersion: "v1.0.46"
+          go-version-input: ${{ env.GO_VERSION }}
 
   # Docker Security Scan
   docker-security:
