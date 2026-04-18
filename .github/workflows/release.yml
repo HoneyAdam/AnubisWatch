@@ -127,7 +127,7 @@ jobs:
           body: |
             ⚖️ **AnubisWatch — The Judgment Never Sleeps**
 
-            ${{ steps.changelog.outputs.CHANGELLOG }}
+            ${{ steps.changelog.outputs.CHANGELOG }}
 
             ## Installation
 
